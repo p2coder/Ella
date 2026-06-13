@@ -9,6 +9,7 @@ class SkillDefinition:
     description: str
     when_to_use: str
     path: Path
+    allowed_roles: tuple[str, ...] = ("main_agent",)
     content: str | None = None
 
     def summary(self) -> dict[str, str]:

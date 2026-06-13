@@ -39,8 +39,16 @@ class SkillLoader:
             description=metadata["description"],
             when_to_use=metadata["when_to_use"],
             path=skill_path,
+            allowed_roles=self._parse_allowed_roles(metadata.get("allowed_roles")),
             content=raw_content if include_content else None,
         )
+
+    @staticmethod
+    def _parse_allowed_roles(value: str | None) -> tuple[str, ...]:
+        if value is None:
+            return ("main_agent",)
+        roles = tuple(role.strip() for role in value.split(",") if role.strip())
+        return roles or ("main_agent",)
 
     def _parse_front_matter(self, content: str) -> dict[str, str]:
         lines = content.splitlines()
