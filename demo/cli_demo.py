@@ -9,10 +9,17 @@ from runtime.task_runtime import TaskRuntime
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
-from tools import MockChecklistTool, MockVisionSummaryTool, MockWeatherTool, ToolManager
+from tools import (
+    MockChecklistTool,
+    MockVisionSummaryTool,
+    MockWeatherTool,
+    ToolManager,
+    ToolResult,
+)
+from tools.camera_scene import CameraSceneTool
 
 
-DEFAULT_INPUT = "Ella，我要出门了"
+DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
 DEFAULT_MEMORY_PATH = Path("/tmp/ella-runtime-mvp-memory.md")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_DEMO_STEPS = 20
@@ -35,6 +42,7 @@ class DemoRuntime:
         skill_manager.refresh()
 
         tool_manager = ToolManager()
+        tool_manager.register(CameraSceneTool())
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
@@ -43,6 +51,7 @@ class DemoRuntime:
         task_runtime = TaskRuntime(
             session_manager=TaskSessionManager(
                 allowed_tools=(
+                    "camera_scene",
                     "mock_vision_summary",
                     "mock_weather",
                     "mock_checklist",
@@ -97,6 +106,7 @@ class DemoRuntime:
         return _render_output(
             task_result.completion.user_visible_output,
             task_result.memory_result.memory_path,
+            task_result.completion.tool_results,
         )
 
 
@@ -109,8 +119,18 @@ def run_demo(
     return active_runtime.run(input_text)
 
 
-def _render_output(output: UserVisibleAgentOutput, memory_path: Path) -> str:
-    process_lines = "\n".join(str(value) for value in output.process.values())
+def _render_output(
+    output: UserVisibleAgentOutput,
+    memory_path: Path,
+    tool_results: tuple[ToolResult, ...] = (),
+) -> str:
+    process_values = [str(value) for value in output.process.values()]
+    process_values.extend(
+        f"Visual context: {result.payload['summary']}"
+        for result in tool_results
+        if result.tool_name == "camera_scene" and "summary" in result.payload
+    )
+    process_lines = "\n".join(process_values)
     return (
         "[Ella Process]\n"
         f"{process_lines}\n\n"

@@ -24,6 +24,7 @@ class ToolResult:
 
 class Tool(Protocol):
     name: str
+    allowed_roles: tuple[str, ...]
 
     def run(self, context: AgentExecutionContext) -> ToolResult:
         ...

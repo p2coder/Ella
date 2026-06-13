@@ -18,6 +18,7 @@ class CameraSceneTool:
     max_duration_seconds: int | None = 3
     store_raw_media: bool = False
     name: str = "camera_scene"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
 
     def __post_init__(self) -> None:
         if self.max_frames is None and self.max_duration_seconds is None:

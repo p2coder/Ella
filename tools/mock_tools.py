@@ -8,6 +8,7 @@ from .base import ToolResult
 @dataclass(frozen=True, slots=True)
 class MockWeatherTool:
     name: str = "mock_weather"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
 
     def run(self, context: AgentExecutionContext) -> ToolResult:
         return ToolResult(
@@ -25,6 +26,7 @@ class MockWeatherTool:
 @dataclass(frozen=True, slots=True)
 class MockVisionSummaryTool:
     name: str = "mock_vision_summary"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
 
     def run(self, context: AgentExecutionContext) -> ToolResult:
         return ToolResult(
@@ -42,6 +44,7 @@ class MockVisionSummaryTool:
 @dataclass(frozen=True, slots=True)
 class MockChecklistTool:
     name: str = "mock_checklist"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
 
     def run(self, context: AgentExecutionContext) -> ToolResult:
         return ToolResult(

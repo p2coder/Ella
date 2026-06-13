@@ -1,10 +1,54 @@
 import os
-from dataclasses import dataclass
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from . import config as user_config
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
+QWEN_API_KEY_ENV_NAMES = (
+    "ELLA_QWEN_API_KEY",
+    "DASHSCOPE_API_KEY",
+    "QWEN_API_KEY",
+)
+
+CONFIG_NAMES = {
+    "ELLA_MODEL_PROVIDER": "MODEL_PROVIDER",
+    "ELLA_QWEN_API_KEY": "QWEN_API_KEY",
+    "ELLA_QWEN_LLM_MODEL": "QWEN_LLM_MODEL",
+    "ELLA_QWEN_MULTIMODAL_MODEL": "QWEN_MULTIMODAL_MODEL",
+    "ELLA_QWEN_SPEECH_MODEL": "QWEN_SPEECH_MODEL",
+    "ELLA_MIC_ENABLED": "MIC_ENABLED",
+    "ELLA_MIC_DEVICE": "MIC_DEVICE",
+    "ELLA_MIC_ALWAYS_LISTENING": "MIC_ALWAYS_LISTENING",
+    "ELLA_CAMERA_ENABLED": "CAMERA_ENABLED",
+    "ELLA_CAMERA_DEVICE": "CAMERA_DEVICE",
+    "ELLA_CAMERA_BACKGROUND_INTERVAL_SECONDS": (
+        "CAMERA_BACKGROUND_INTERVAL_SECONDS"
+    ),
+    "ELLA_CAMERA_TASK_FPS": "CAMERA_TASK_FPS",
+    "ELLA_USE_REAL_PROVIDERS": "USE_REAL_PROVIDERS",
+    "ELLA_DEBUG_STORE_RAW_MEDIA": "DEBUG_STORE_RAW_MEDIA",
+}
+
+SAFE_DEFAULTS = {
+    "ELLA_MODEL_PROVIDER": "qwen",
+    "ELLA_QWEN_API_KEY": None,
+    "ELLA_QWEN_LLM_MODEL": None,
+    "ELLA_QWEN_MULTIMODAL_MODEL": None,
+    "ELLA_QWEN_SPEECH_MODEL": None,
+    "ELLA_MIC_ENABLED": False,
+    "ELLA_MIC_DEVICE": "default",
+    "ELLA_MIC_ALWAYS_LISTENING": True,
+    "ELLA_CAMERA_ENABLED": False,
+    "ELLA_CAMERA_DEVICE": "default",
+    "ELLA_CAMERA_BACKGROUND_INTERVAL_SECONDS": 5,
+    "ELLA_CAMERA_TASK_FPS": 1,
+    "ELLA_USE_REAL_PROVIDERS": False,
+    "ELLA_DEBUG_STORE_RAW_MEDIA": False,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +69,18 @@ class EllaSettings:
     debug_store_raw_media: bool
 
 
-def load_settings(env: Mapping[str, str] | None = None) -> EllaSettings:
-    values = os.environ if env is None else env
+def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
+    values = _config_values()
+    if overrides is not None:
+        values.update(overrides)
+
+    api_key = _optional_string(values, "ELLA_QWEN_API_KEY")
+    if overrides is None:
+        api_key = _first_environment_value(QWEN_API_KEY_ENV_NAMES) or api_key
+
     return EllaSettings(
         model_provider=_string(values, "ELLA_MODEL_PROVIDER", "qwen"),
-        qwen_api_key=_optional_string(values, "ELLA_QWEN_API_KEY"),
+        qwen_api_key=api_key,
         qwen_llm_model=_optional_string(values, "ELLA_QWEN_LLM_MODEL"),
         qwen_multimodal_model=_optional_string(
             values,
@@ -60,33 +111,54 @@ def load_settings(env: Mapping[str, str] | None = None) -> EllaSettings:
     )
 
 
+def _config_values() -> dict[str, Any]:
+    return {
+        setting_name: getattr(
+            user_config,
+            config_name,
+            SAFE_DEFAULTS[setting_name],
+        )
+        for setting_name, config_name in CONFIG_NAMES.items()
+    }
+
+
+def _first_environment_value(names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
 def _string(
-    env: Mapping[str, str],
+    env: Mapping[str, Any],
     name: str,
     default: str,
 ) -> str:
     value = env.get(name)
     if value is None or value == "":
         return default
-    return value
+    return str(value)
 
 
-def _optional_string(env: Mapping[str, str], name: str) -> str | None:
+def _optional_string(env: Mapping[str, Any], name: str) -> str | None:
     value = env.get(name)
     if value is None or value == "":
         return None
-    return value
+    return str(value)
 
 
 def _boolean(
-    env: Mapping[str, str],
+    env: Mapping[str, Any],
     name: str,
     default: bool,
 ) -> bool:
     value = env.get(name)
     if value is None or value == "":
         return default
-    normalized = value.strip().lower()
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
     if normalized in TRUE_VALUES:
         return True
     if normalized in FALSE_VALUES:
@@ -95,13 +167,15 @@ def _boolean(
 
 
 def _integer(
-    env: Mapping[str, str],
+    env: Mapping[str, Any],
     name: str,
     default: int,
 ) -> int:
     value = env.get(name)
     if value is None or value == "":
         return default
+    if isinstance(value, bool):
+        raise ValueError(f"invalid integer value for {name}: {value}")
     try:
         return int(value)
     except ValueError as error:

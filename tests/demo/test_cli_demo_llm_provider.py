@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import config.config as user_config
 import demo.cli_demo as cli_demo
 from providers.mock import MockLLMProvider
 
@@ -37,13 +38,15 @@ def test_default_demo_uses_mock_llm_provider(tmp_path: Path):
     )
 
 
-def test_demo_runs_safely_when_real_provider_mode_has_no_api_key(
+def test_demo_runs_safely_when_config_enables_real_provider_without_api_key(
     monkeypatch,
     tmp_path: Path,
 ):
-    monkeypatch.setenv("ELLA_USE_REAL_PROVIDERS", "true")
+    monkeypatch.setattr(user_config, "USE_REAL_PROVIDERS", True)
+    monkeypatch.setattr(user_config, "QWEN_API_KEY", None)
     monkeypatch.delenv("ELLA_QWEN_API_KEY", raising=False)
-    monkeypatch.delenv("ELLA_QWEN_LLM_MODEL", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.delenv("QWEN_API_KEY", raising=False)
 
     output = cli_demo.run_demo(memory_path=tmp_path / "memory.md")
 
