@@ -30,8 +30,14 @@ class SkillRegistry:
         for skill in skills:
             self.register(skill)
 
+    def unregister(self, skill_name: str) -> None:
+        self._skills.pop(skill_name, None)
+
     def get(self, skill_name: str) -> SkillDefinition | None:
         return self._skills.get(skill_name)
 
     def list_summaries(self) -> tuple[dict[str, str], ...]:
         return tuple(skill.summary() for skill in self._skills.values())
+
+    def list_definitions(self) -> tuple[SkillDefinition, ...]:
+        return tuple(self._skills.values())

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
-from skill.registry import SkillRegistry
+from skill.manager import SkillManager
 
 from .session import TaskSession
 from .strategy import StrategyDecision
@@ -10,7 +10,7 @@ from .strategy import StrategyDecision
 
 @dataclass(frozen=True, slots=True)
 class SubAgent:
-    skill_registry: SkillRegistry
+    skill_manager: SkillManager
 
     def select_strategy(
         self,
@@ -41,8 +41,22 @@ class SubAgent:
             trace_id=context.trace_id,
         )
 
+    def replan_if_unavailable(
+        self,
+        decision: StrategyDecision,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+        task_session: TaskSession,
+    ) -> StrategyDecision:
+        if (
+            decision.skill_name is not None
+            and self.skill_manager.get_summary(decision.skill_name) is None
+        ):
+            return self.select_strategy(handoff, context, task_session)
+        return decision
+
     def _can_use_going_out_skill(self, handoff: HandoffRequest) -> bool:
-        skill = self.skill_registry.get("going_out")
+        skill = self.skill_manager.get_summary("going_out")
         if skill is None:
             return False
 
