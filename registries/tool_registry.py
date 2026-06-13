@@ -1,4 +1,4 @@
-from tools import Tool
+from tools.base import Tool
 
 
 class ToolRegistry:
@@ -7,6 +7,9 @@ class ToolRegistry:
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
+
+    def unregister(self, tool_name: str) -> None:
+        self._tools.pop(tool_name, None)
 
     def get(self, tool_name: str) -> Tool | None:
         return self._tools.get(tool_name)

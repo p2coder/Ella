@@ -16,8 +16,8 @@ from runtime.presence_runtime import PresenceRuntime
 from sessions import SubAgent, TaskSessionManager
 from sessions.completion import TaskCompletionPackage
 from sessions.output import UserVisibleAgentOutput
-from skill import SkillLoader, SkillRegistry
-from tools import MockChecklistTool, MockWeatherTool
+from skill import SkillLoader, SkillManager
+from tools import MockChecklistTool, MockWeatherTool, ToolManager
 
 
 FIXED_TIME = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
@@ -59,10 +59,9 @@ def test_going_out_event_reaches_memory_through_runtime_boundaries(tmp_path: Pat
         task_id_factory=lambda: "task-contract",
     ).create_session(handoff)
 
-    skill_loader = SkillLoader()
-    skill_registry = SkillRegistry()
-    skill_registry.register_all(skill_loader.discover_summaries())
-    strategy = SubAgent(skill_registry).select_strategy(
+    skill_manager = SkillManager(loader=SkillLoader())
+    skill_manager.refresh()
+    strategy = SubAgent(skill_manager).select_strategy(
         handoff=handoff,
         context=creation.context,
         task_session=creation.session,
@@ -70,13 +69,13 @@ def test_going_out_event_reaches_memory_through_runtime_boundaries(tmp_path: Pat
 
     assert strategy.mode == "skill"
     assert strategy.skill_name == "going_out"
-    assert skill_loader.load_full("going_out").content is not None
+    assert skill_manager.load_full("going_out").content is not None
 
-    tool_registry = ToolRegistry()
-    tool_registry.register(MockWeatherTool())
-    tool_registry.register(MockChecklistTool())
+    tool_manager = ToolManager()
+    tool_manager.register(MockWeatherTool())
+    tool_manager.register(MockChecklistTool())
     tool_results = tuple(
-        tool_registry.get(name).run(creation.context)
+        tool_manager.execute(name, creation.context)
         for name in creation.context.allowed_tools
     )
     output = UserVisibleAgentOutput(

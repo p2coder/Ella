@@ -6,7 +6,7 @@ from events import StandardizedEvent
 from sessions import TaskSessionManager
 from sessions.strategy import StrategyDecision
 from sessions.subagent import SubAgent
-from skill.registry import SkillDefinition, SkillRegistry
+from skill import SkillDefinition, SkillManager
 
 
 FIXED_TIME = datetime(2026, 6, 13, 14, 0, tzinfo=timezone.utc)
@@ -32,9 +32,9 @@ def make_handoff(task_goal: str) -> HandoffRequest:
     )
 
 
-def make_registry() -> SkillRegistry:
-    registry = SkillRegistry()
-    registry.register(
+def make_manager() -> SkillManager:
+    manager = SkillManager()
+    manager.register(
         SkillDefinition(
             name="going_out",
             description="Mock skill for preparing a short reminder when the user is leaving.",
@@ -42,7 +42,7 @@ def make_registry() -> SkillRegistry:
             path=Path("skill/skills/going_out/SKILL.md"),
         )
     )
-    return registry
+    return manager
 
 
 def make_session_creation(task_goal: str):
@@ -56,7 +56,7 @@ def test_subagent_selects_going_out_skill_for_leaving_goal():
     creation = make_session_creation(
         "Give the user a short, necessary reminder before leaving."
     )
-    subagent = SubAgent(skill_registry=make_registry())
+    subagent = SubAgent(skill_manager=make_manager())
 
     decision = subagent.select_strategy(
         handoff=creation.session.handoff,
@@ -81,7 +81,7 @@ def test_subagent_accepts_execution_context_and_task_session():
         "Give the user a short, necessary reminder before leaving."
     )
 
-    decision = SubAgent(skill_registry=make_registry()).select_strategy(
+    decision = SubAgent(skill_manager=make_manager()).select_strategy(
         handoff=creation.session.handoff,
         context=creation.context,
         task_session=creation.session,
@@ -94,7 +94,7 @@ def test_subagent_accepts_execution_context_and_task_session():
 
 def test_strategy_selection_falls_back_without_skill_execution():
     creation = make_session_creation("Clarify and prepare a concise response.")
-    subagent = SubAgent(skill_registry=make_registry())
+    subagent = SubAgent(skill_manager=make_manager())
 
     decision = subagent.select_strategy(
         handoff=creation.session.handoff,
@@ -111,7 +111,7 @@ def test_subagent_does_not_call_tools_or_generate_outputs():
     creation = make_session_creation(
         "Give the user a short, necessary reminder before leaving."
     )
-    subagent = SubAgent(skill_registry=make_registry())
+    subagent = SubAgent(skill_manager=make_manager())
 
     decision = subagent.select_strategy(
         handoff=creation.session.handoff,

@@ -6,7 +6,7 @@ from memory import MemoryManagementRequest
 from sessions import SubAgent, TaskSessionManager
 from sessions.completion import TaskCompletionPackage
 from sessions.output import UserVisibleAgentOutput
-from skill import SkillLoader, SkillRegistry
+from skill import SkillLoader, SkillManager
 from tools import MockChecklistTool, MockWeatherTool
 
 
@@ -35,9 +35,9 @@ def make_execution_boundary():
 
 def test_context_ids_propagate_through_strategy_tools_completion_and_memory():
     handoff, creation = make_execution_boundary()
-    registry = SkillRegistry()
-    registry.register_all(SkillLoader().discover_summaries())
-    strategy = SubAgent(registry).select_strategy(
+    skill_manager = SkillManager(loader=SkillLoader())
+    skill_manager.refresh()
+    strategy = SubAgent(skill_manager).select_strategy(
         handoff=handoff,
         context=creation.context,
         task_session=creation.session,
