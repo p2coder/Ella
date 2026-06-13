@@ -153,16 +153,16 @@ def test_run_until_blocked_stops_on_existing_terminal_state(
     assert executor.execute_count == 0
 
 
-def test_run_until_blocked_stops_when_no_executable_action_remains():
+def test_run_until_blocked_stops_when_task_completes():
     runtime, handle, subagent, executor = make_runtime(COMPLETE)
 
     result = runtime.run_until_blocked(handle.task_id, max_steps=10)
 
-    assert result.session.state is TaskState.RUNNING
-    assert result.session.task_local_state["completion_ready"] is True
+    assert result.session.state is TaskState.COMPLETED
+    assert result.completion is not None
     assert result.steps == 3
-    assert result.stop_reason == "no_executable_action"
-    assert result.blocked is True
+    assert result.stop_reason == "completed"
+    assert result.blocked is False
 
 
 def test_run_until_blocked_stops_at_max_steps_without_looping_forever():

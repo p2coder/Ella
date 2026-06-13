@@ -222,17 +222,16 @@ def test_wait_decision_moves_task_to_waiting_without_tool_result():
     assert executor.execute_count == 1
 
 
-def test_complete_decision_only_records_completion_readiness():
+def test_complete_decision_finalizes_task():
     decision = make_decision(action=COMPLETE, tool_name=None)
     runtime, handle, subagent, executor = make_runtime(decision)
     advance_to_running(runtime, handle.task_id)
 
     result = runtime.step(handle.task_id)
 
-    assert result.session.state is TaskState.RUNNING
-    assert result.session.task_local_state["completion_ready"] is True
-    assert result.session.task_local_state["completion_decision"] == decision
-    assert result.session.completion is None
+    assert result.session.state is TaskState.COMPLETED
+    assert result.session.completion is result.completion
+    assert result.completion is not None
 
 
 @pytest.mark.parametrize(

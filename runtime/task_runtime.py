@@ -2,12 +2,15 @@ from dataclasses import dataclass, field
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
+from sessions.completion import TaskCompletionPackage
 from sessions.decision import COMPLETE, WAIT
 from sessions.executor import CapabilityExecutor
+from sessions.output import UserVisibleAgentOutput
 from sessions.session import TaskSession, TaskState
 from sessions.session_manager import TaskSessionCreation, TaskSessionManager
 from sessions.strategy import StrategyDecision
 from sessions.subagent import SubAgent
+from tools import ToolResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +25,7 @@ class TaskRuntimeResult:
     handle: TaskHandle
     session: TaskSession
     context: AgentExecutionContext
+    completion: TaskCompletionPackage | None = None
     steps: int = 0
     stop_reason: str | None = None
     blocked: bool = False
@@ -131,8 +135,12 @@ class TaskRuntime:
         elif decision.action == WAIT:
             session.transition_to(TaskState.WAITING)
         elif decision.action == COMPLETE:
-            session.set_task_state("completion_ready", True)
-            session.set_task_state("completion_decision", decision)
+            session.completion = self._build_completion(creation)
+            session.transition_to(TaskState.COMPLETED)
+            return self._result(
+                creation,
+                stop_reason="completed",
+            )
 
         return self._result(creation)
 
@@ -188,13 +196,50 @@ class TaskRuntime:
             return "failed"
         if session.state is TaskState.CANCELLED:
             return "cancelled"
-        if session.task_local_state.get("completion_ready") is True:
-            return "no_executable_action"
         return None
 
     @staticmethod
     def _is_blocked_reason(stop_reason: str) -> bool:
-        return stop_reason in {"waiting", "no_executable_action", "max_steps"}
+        return stop_reason in {"waiting", "max_steps"}
+
+    @staticmethod
+    def _build_completion(
+        creation: TaskSessionCreation,
+    ) -> TaskCompletionPackage:
+        session = creation.session
+        tool_results = tuple(
+            ToolResult(
+                tool_name=entry["tool_name"],
+                task_id=entry["task_id"],
+                session_id=entry["session_id"],
+                trace_id=entry["trace_id"],
+                payload=entry["payload"],
+            )
+            for entry in session.tool_trace
+        )
+        output = UserVisibleAgentOutput(
+            process={
+                "task_goal": session.handoff.task_goal,
+                "strategy": getattr(
+                    session.current_strategy,
+                    "skill_name",
+                    None,
+                ),
+                "tool_results": tuple(
+                    result.tool_name for result in tool_results
+                ),
+            },
+            final_response=(
+                "Task completed: "
+                f"{session.handoff.task_goal}"
+            ),
+        )
+        return TaskCompletionPackage(
+            context=creation.context,
+            summary=f"Completed task: {session.handoff.task_goal}",
+            user_visible_output=output,
+            tool_results=tool_results,
+        )
 
     @staticmethod
     def _result(
@@ -211,6 +256,7 @@ class TaskRuntime:
             ),
             session=creation.session,
             context=creation.context,
+            completion=creation.session.completion,
             steps=steps,
             stop_reason=stop_reason,
             blocked=blocked,
