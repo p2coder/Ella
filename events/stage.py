@@ -31,3 +31,24 @@ DEFAULT_EVENT_STAGES = (
     EVENT_CANDIDATE_STAGE,
     STANDARDIZED_EVENT_STAGE,
 )
+
+
+class EventStageRegistry:
+    """Mutable catalog of event stage keys used to configure pipelines."""
+
+    def __init__(self, stages: tuple[EventStage, ...] = DEFAULT_EVENT_STAGES) -> None:
+        self._stages: dict[str, EventStage] = {}
+        for stage in stages:
+            self.register(stage)
+
+    def register(self, stage: EventStage) -> None:
+        self._stages[stage.name] = stage
+
+    def unregister(self, stage_name: str) -> None:
+        self._stages.pop(stage_name, None)
+
+    def get(self, stage_name: str) -> EventStage | None:
+        return self._stages.get(stage_name)
+
+    def list_stages(self) -> tuple[EventStage, ...]:
+        return tuple(self._stages.values())
