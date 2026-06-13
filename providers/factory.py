@@ -22,27 +22,79 @@ class ProviderFactory:
         if self.settings is None:
             object.__setattr__(self, "settings", load_settings())
 
-    def llm(self) -> MockLLMProvider | "UnavailableLLMProvider":
+    def llm(self) -> MockLLMProvider | "UnavailableLLMProvider" | object:
         if not self.settings.use_real_providers:
             return MockLLMProvider()
+        if self.settings.model_provider == "qwen" and self._qwen_llm_configured():
+            from .qwen import QwenLLMProvider
+
+            return QwenLLMProvider(
+                api_key=self.settings.qwen_api_key,
+                model_name=self.settings.qwen_llm_model or "qwen-plus",
+            )
         return UnavailableLLMProvider.from_settings(self.settings)
 
-    def speech(self) -> MockSpeechProvider | "UnavailableSpeechProvider":
+    def speech(self) -> MockSpeechProvider | "UnavailableSpeechProvider" | object:
         if not self.settings.use_real_providers:
             return MockSpeechProvider()
+        if self.settings.model_provider == "qwen" and self._qwen_speech_configured():
+            from .qwen import QwenSpeechProvider
+
+            return QwenSpeechProvider(
+                api_key=self.settings.qwen_api_key,
+                model_name=self.settings.qwen_speech_model or "qwen-audio",
+            )
         return UnavailableSpeechProvider.from_settings(self.settings)
 
-    def vision(self) -> MockVisionProvider | "UnavailableVisionProvider":
+    def vision(self) -> MockVisionProvider | "UnavailableVisionProvider" | object:
         if not self.settings.use_real_providers:
             return MockVisionProvider()
+        if (
+            self.settings.model_provider == "qwen"
+            and self._qwen_multimodal_configured()
+        ):
+            from .qwen import QwenMultimodalProvider
+
+            return QwenMultimodalProvider(
+                api_key=self.settings.qwen_api_key,
+                model_name=self.settings.qwen_multimodal_model or "qwen-vl-plus",
+            )
         return UnavailableVisionProvider.from_settings(self.settings)
 
     def multimodal(
         self,
-    ) -> MockMultimodalProvider | "UnavailableMultimodalProvider":
+    ) -> MockMultimodalProvider | "UnavailableMultimodalProvider" | object:
         if not self.settings.use_real_providers:
             return MockMultimodalProvider()
+        if (
+            self.settings.model_provider == "qwen"
+            and self._qwen_multimodal_configured()
+        ):
+            from .qwen import QwenMultimodalProvider
+
+            return QwenMultimodalProvider(
+                api_key=self.settings.qwen_api_key,
+                model_name=self.settings.qwen_multimodal_model or "qwen-vl-plus",
+            )
         return UnavailableMultimodalProvider.from_settings(self.settings)
+
+    def _qwen_llm_configured(self) -> bool:
+        return (
+            self.settings.qwen_api_key is not None
+            and self.settings.qwen_llm_model is not None
+        )
+
+    def _qwen_speech_configured(self) -> bool:
+        return (
+            self.settings.qwen_api_key is not None
+            and self.settings.qwen_speech_model is not None
+        )
+
+    def _qwen_multimodal_configured(self) -> bool:
+        return (
+            self.settings.qwen_api_key is not None
+            and self.settings.qwen_multimodal_model is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
