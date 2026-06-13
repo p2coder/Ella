@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
+from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from sessions.completion import TaskCompletionPackage
 from sessions.decision import COMPLETE, WAIT
 from sessions.executor import CapabilityExecutor
@@ -29,13 +30,16 @@ class TaskRuntimeResult:
     steps: int = 0
     stop_reason: str | None = None
     blocked: bool = False
+    memory_result: MemoryWriteResult | None = None
+    failure_reason: str | None = None
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class TaskRuntime:
     session_manager: TaskSessionManager = field(default_factory=TaskSessionManager)
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
+    _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
         init=False,
@@ -46,6 +50,26 @@ class TaskRuntime:
         init=False,
         repr=False,
     )
+    _memory_results: dict[str, MemoryWriteResult] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
+    def __init__(
+        self,
+        session_manager: TaskSessionManager | None = None,
+        subagent: SubAgent | None = None,
+        executor: CapabilityExecutor | None = None,
+        memory_manager: MemoryManager | None = None,
+    ) -> None:
+        self.session_manager = session_manager or TaskSessionManager()
+        self.subagent = subagent
+        self.executor = executor
+        self._memory_manager = memory_manager or MemoryManager()
+        self._tasks = {}
+        self._sessions = {}
+        self._memory_results = {}
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         creation = self.session_manager.create_session(handoff)
@@ -179,6 +203,41 @@ class TaskRuntime:
             blocked=True,
         )
 
+    def run_until_complete(
+        self,
+        task_id: str,
+        max_steps: int,
+    ) -> TaskRuntimeResult:
+        runtime_result = self.run_until_blocked(task_id, max_steps)
+        completion = runtime_result.completion
+        if (
+            runtime_result.session.state is not TaskState.COMPLETED
+            or completion is None
+        ):
+            return runtime_result
+
+        memory_result = self._memory_results.get(task_id)
+        if memory_result is None:
+            request = MemoryManagementRequest.from_completion(completion)
+            try:
+                memory_result = self._memory_manager.handle(request)
+            except Exception as error:
+                return self._result(
+                    self._tasks[task_id],
+                    steps=runtime_result.steps,
+                    stop_reason="memory_failed",
+                    blocked=True,
+                    failure_reason=f"memory write failed: {error}",
+                )
+            self._memory_results[task_id] = memory_result
+
+        return self._result(
+            self._tasks[task_id],
+            steps=runtime_result.steps,
+            stop_reason="completed",
+            memory_result=memory_result,
+        )
+
     def _execution_components(self) -> tuple[SubAgent, CapabilityExecutor]:
         if self.subagent is None or self.executor is None:
             raise RuntimeError(
@@ -247,6 +306,8 @@ class TaskRuntime:
         steps: int = 0,
         stop_reason: str | None = None,
         blocked: bool = False,
+        memory_result: MemoryWriteResult | None = None,
+        failure_reason: str | None = None,
     ) -> TaskRuntimeResult:
         return TaskRuntimeResult(
             handle=TaskHandle(
@@ -260,4 +321,6 @@ class TaskRuntime:
             steps=steps,
             stop_reason=stop_reason,
             blocked=blocked,
+            memory_result=memory_result,
+            failure_reason=failure_reason,
         )
