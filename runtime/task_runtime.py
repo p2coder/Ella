@@ -22,6 +22,9 @@ class TaskRuntimeResult:
     handle: TaskHandle
     session: TaskSession
     context: AgentExecutionContext
+    steps: int = 0
+    stop_reason: str | None = None
+    blocked: bool = False
 
 
 @dataclass(slots=True)
@@ -133,6 +136,41 @@ class TaskRuntime:
 
         return self._result(creation)
 
+    def run_until_blocked(
+        self,
+        task_id: str,
+        max_steps: int,
+    ) -> TaskRuntimeResult:
+        if max_steps < 0:
+            raise ValueError("max_steps must be non-negative")
+
+        creation = self._tasks[task_id]
+        stop_reason = self._stop_reason(creation.session)
+        if stop_reason is not None:
+            return self._result(
+                creation,
+                stop_reason=stop_reason,
+                blocked=self._is_blocked_reason(stop_reason),
+            )
+
+        for steps in range(1, max_steps + 1):
+            self.step(task_id)
+            stop_reason = self._stop_reason(creation.session)
+            if stop_reason is not None:
+                return self._result(
+                    creation,
+                    steps=steps,
+                    stop_reason=stop_reason,
+                    blocked=self._is_blocked_reason(stop_reason),
+                )
+
+        return self._result(
+            creation,
+            steps=max_steps,
+            stop_reason="max_steps",
+            blocked=True,
+        )
+
     def _execution_components(self) -> tuple[SubAgent, CapabilityExecutor]:
         if self.subagent is None or self.executor is None:
             raise RuntimeError(
@@ -141,7 +179,30 @@ class TaskRuntime:
         return self.subagent, self.executor
 
     @staticmethod
-    def _result(creation: TaskSessionCreation) -> TaskRuntimeResult:
+    def _stop_reason(session: TaskSession) -> str | None:
+        if session.state is TaskState.WAITING:
+            return "waiting"
+        if session.state is TaskState.COMPLETED:
+            return "completed"
+        if session.state is TaskState.FAILED:
+            return "failed"
+        if session.state is TaskState.CANCELLED:
+            return "cancelled"
+        if session.task_local_state.get("completion_ready") is True:
+            return "no_executable_action"
+        return None
+
+    @staticmethod
+    def _is_blocked_reason(stop_reason: str) -> bool:
+        return stop_reason in {"waiting", "no_executable_action", "max_steps"}
+
+    @staticmethod
+    def _result(
+        creation: TaskSessionCreation,
+        steps: int = 0,
+        stop_reason: str | None = None,
+        blocked: bool = False,
+    ) -> TaskRuntimeResult:
         return TaskRuntimeResult(
             handle=TaskHandle(
                 task_id=creation.session.task_id,
@@ -150,4 +211,7 @@ class TaskRuntime:
             ),
             session=creation.session,
             context=creation.context,
+            steps=steps,
+            stop_reason=stop_reason,
+            blocked=blocked,
         )
