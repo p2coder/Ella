@@ -3,6 +3,7 @@ from pathlib import Path
 
 from events.source import CLITextSignalSource
 from memory import MemoryManager
+from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.task_runtime import TaskRuntime
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
@@ -27,6 +28,7 @@ class DemoRuntime:
         cls,
         memory_path: Path = DEFAULT_MEMORY_PATH,
     ) -> "DemoRuntime":
+        llm_provider = ProviderFactory().llm()
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
         )
@@ -56,10 +58,14 @@ class DemoRuntime:
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
+            llm_provider=llm_provider,
             user_preference_summary=(
                 "The user prefers short, practical reminders."
             ),
-            environment_summary="Mock environment context is available.",
+            environment_summary=(
+                "Mock environment context is available. "
+                "Give the user a short, necessary reminder before leaving."
+            ),
         )
         return cls(
             event_runtime=event_runtime,

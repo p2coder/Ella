@@ -6,6 +6,7 @@ from events.trigger_pipeline import (
     CliTextToStandardizedEventStage,
     EventTriggerPipeline,
 )
+from providers.llm import LLMProvider
 
 from .event_queue import PresenceQueue
 from .event_router import (
@@ -33,6 +34,7 @@ class EventRuntime:
     presence_queue: PresenceQueue
     presence_runtime: PresenceRuntime
     main_agent: MainAgent
+    llm_provider: LLMProvider | None
     task_runtime: TaskRuntime
     user_preference_summary: str
     environment_summary: str
@@ -44,6 +46,7 @@ class EventRuntime:
         presence_queue: PresenceQueue | None = None,
         presence_runtime: PresenceRuntime | None = None,
         main_agent: MainAgent | None = None,
+        llm_provider: LLMProvider | None = None,
         task_runtime: TaskRuntime | None = None,
         user_preference_summary: str = "No user preference summary provided.",
         environment_summary: str = "No environment summary provided.",
@@ -65,7 +68,19 @@ class EventRuntime:
         self.event_router = event_router or SessionAwareEventRouter()
         self.presence_queue = queue
         self.presence_runtime = runtime
-        self.main_agent = main_agent or MainAgent()
+        if main_agent is None:
+            active_agent = MainAgent(llm_provider=llm_provider)
+        else:
+            active_agent = main_agent
+            if (
+                llm_provider is not None
+                and active_agent.llm_provider is not llm_provider
+            ):
+                raise ValueError(
+                    "llm_provider must match the explicitly supplied main_agent"
+                )
+        self.main_agent = active_agent
+        self.llm_provider = active_agent.llm_provider
         self.task_runtime = task_runtime or TaskRuntime()
         self.user_preference_summary = user_preference_summary
         self.environment_summary = environment_summary
