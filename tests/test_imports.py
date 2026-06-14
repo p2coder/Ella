@@ -18,8 +18,18 @@ def load_main_module():
     return module
 
 
-def test_main_module_exposes_minimal_entrypoint():
+def test_main_module_exposes_web_entrypoint(monkeypatch):
     module = load_main_module()
+    runtime = object()
+    calls = []
+
+    monkeypatch.setattr(
+        module.AppRuntime,
+        "create_default",
+        classmethod(lambda cls: runtime),
+    )
+    monkeypatch.setattr(module, "run_web_app", calls.append)
 
     assert callable(module.main)
     assert module.main() == 0
+    assert calls == [runtime]

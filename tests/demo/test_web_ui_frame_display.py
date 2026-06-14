@@ -106,7 +106,7 @@ def test_frame_related_text_is_html_escaped():
         )
     )
 
-    assert "<script>" not in html
+    assert "<script>alert('scene')</script>" not in html
     assert "&lt;script&gt;alert(&#x27;scene&#x27;)&lt;/script&gt;" in html
     assert "&lt;phone&gt;" in html
 

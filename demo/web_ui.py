@@ -7,7 +7,7 @@ import re
 from typing import Any, Mapping
 from urllib.parse import parse_qs
 
-from demo.app_runtime import AppRuntime
+from app_runtime import AppRuntime
 from demo.display_snapshot import RunDisplaySnapshot
 
 
@@ -40,7 +40,15 @@ class LocalWebUI:
                 ),
             )
 
-        result = self._app_runtime.run_text_with_display(normalized_text)
+        try:
+            result = self._app_runtime.run_text_with_display(normalized_text)
+        except Exception as error:
+            return WebUIResponse(
+                status=500,
+                body=render_web_ui_shell(
+                    form_error=f"Ella could not complete the task: {error}",
+                ),
+            )
         return WebUIResponse(
             status=200,
             body=render_web_ui_shell(result.snapshot),
@@ -99,14 +107,6 @@ def render_web_ui_shell(
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
         "task_goal": _value(data, "task_goal"),
-        "task_formulation_prompt_text": _value(
-            data,
-            "task_formulation_prompt_text",
-        ),
-        "final_response_prompt_text": _value(
-            data,
-            "final_response_prompt_text",
-        ),
         "tool_results_summary": _value(data, "tool_results_summary"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),

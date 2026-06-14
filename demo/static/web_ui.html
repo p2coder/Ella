@@ -249,39 +249,6 @@
       font-size: 11px;
     }
 
-    .prompt-stack {
-      display: grid;
-      gap: 10px;
-    }
-
-    details {
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--surface-muted);
-    }
-
-    summary {
-      cursor: pointer;
-      padding: 10px 12px;
-      color: var(--accent-strong);
-      font-size: 13px;
-      font-weight: 700;
-    }
-
-    pre {
-      max-height: 320px;
-      margin: 0;
-      padding: 14px;
-      overflow: auto;
-      border-top: 1px solid #38414b;
-      background: var(--code);
-      color: var(--code-ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-
     .answer {
       border-left: 4px solid var(--signal);
       font-size: 16px;
@@ -323,7 +290,7 @@
 
     <main>
       <div class="workspace">
-        <form class="composer" method="post" action="/submit">
+        <form id="message-form" class="composer" method="post" action="/submit" aria-busy="false">
           <div>
             <label for="user-input">Message Ella</label>
             <textarea
@@ -332,7 +299,7 @@
               placeholder="Type a message for Ella"
             >{{user_input}}</textarea>
           </div>
-          <button type="submit">
+          <button id="submit-button" type="submit">
             Submit
           </button>
           <p class="form-error" role="alert">{{form_error}}</p>
@@ -370,20 +337,6 @@
             </div>
           </section>
 
-          <section class="panel panel-wide">
-            <header class="panel-header"><h2>Prompt Sent to LLM</h2></header>
-            <div class="panel-body prompt-stack">
-              <details>
-                <summary>Task formulation prompt</summary>
-                <pre>{{task_formulation_prompt_text}}</pre>
-              </details>
-              <details>
-                <summary>Final response prompt</summary>
-                <pre>{{final_response_prompt_text}}</pre>
-              </details>
-            </div>
-          </section>
-
           <section class="panel">
             <header class="panel-header"><h2>Agent</h2></header>
             <div class="panel-body">
@@ -408,5 +361,40 @@
       </div>
     </main>
   </div>
+  <script>
+    const form = document.getElementById("message-form");
+    const submitButton = document.getElementById("submit-button");
+    const input = document.getElementById("user-input");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (form.getAttribute("aria-busy") === "true") {
+        return;
+      }
+      form.setAttribute("aria-busy", "true");
+      submitButton.disabled = true;
+      submitButton.textContent = "Running...";
+      input.readOnly = true;
+
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body: new URLSearchParams(new FormData(form)),
+        });
+        const responseHtml = await response.text();
+        document.open();
+        document.write(responseHtml);
+        document.close();
+      } catch (error) {
+        form.setAttribute("aria-busy", "false");
+        submitButton.disabled = false;
+        submitButton.textContent = "Submit";
+        input.readOnly = false;
+        form.querySelector(".form-error").textContent =
+          "Request failed. Please try again.";
+      }
+    });
+  </script>
 </body>
 </html>

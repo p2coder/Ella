@@ -65,7 +65,7 @@ def test_get_request_renders_empty_shell_without_running_task():
     response = LocalWebUI(runtime).handle_request(method="GET", path="/")
 
     assert response.status == 200
-    assert "Prompt Sent to LLM" in response.body
+    assert "Prompt Sent to LLM" not in response.body
     assert runtime.inputs == []
 
 
@@ -81,6 +81,18 @@ def test_submission_requires_non_empty_text():
     assert response.status == 400
     assert "Please enter a message." in response.body
     assert runtime.inputs == []
+
+
+def test_runtime_failure_returns_rendered_error_page():
+    class FailingAppRuntime:
+        def run_text_with_display(self, input_text: str):
+            raise RuntimeError("task execution failed")
+
+    response = LocalWebUI(FailingAppRuntime()).submit_text("hello")
+
+    assert response.status == 500
+    assert "task execution failed" in response.body
+    assert 'aria-busy="false"' in response.body
 
 
 def test_default_server_binding_is_localhost_only(monkeypatch):
@@ -109,12 +121,12 @@ def test_user_and_model_generated_output_is_html_escaped():
         content_type="application/x-www-form-urlencoded",
     )
 
-    assert "<script>" not in response.body
+    assert "<script>alert('input')</script>" not in response.body
     assert "&lt;script&gt;alert(&#x27;input&#x27;)&lt;/script&gt;" in response.body
     assert "&lt;b&gt;Phone is visible.&lt;/b&gt;" in response.body
     assert "&lt;phone&gt;" in response.body
-    assert "&lt;task-prompt&gt;" in response.body
-    assert "&lt;final-prompt&gt;" in response.body
+    assert "&lt;task-prompt&gt;" not in response.body
+    assert "&lt;final-prompt&gt;" not in response.body
     assert "&lt;tool-summary&gt;" in response.body
     assert "&lt;answer&gt;Take your keys.&lt;/answer&gt;" in response.body
 
@@ -122,7 +134,7 @@ def test_user_and_model_generated_output_is_html_escaped():
 def test_web_ui_only_depends_on_app_runtime_boundary():
     source = inspect.getsource(web_ui_module)
 
-    assert "from demo.app_runtime import AppRuntime" in source
+    assert "from app_runtime import AppRuntime" in source
     assert "EventRuntime" not in source
     assert "TaskRuntime" not in source
     assert "TaskSession" not in source
@@ -141,4 +153,9 @@ def test_html_form_posts_text_to_submit_endpoint():
     assert 'method="post"' in html
     assert 'action="/submit"' in html
     assert 'name="user_input"' in html
-    assert '<button type="submit">' in html
+    assert '<button id="submit-button" type="submit">' in html
+    assert "submitButton.disabled = true" in html
+    assert 'submitButton.textContent = "Running..."' in html
+    assert "await fetch(form.action" in html
+    assert "submitButton.disabled = false" in html
+    assert 'submitButton.textContent = "Submit"' in html
