@@ -30,8 +30,15 @@ FINAL_RESPONSE_TEMPLATE = PromptTemplate(
     ),
     instruction=(
         "Use the provided context to answer: 应该如何回应用户？ Produce a "
-        "short user-facing response that reflects task goal, tool results, "
-        "scene summary, and any uncertainty."
+        "short user-facing response that reflects the task goal, tool "
+        "results, scene summary, and uncertainty. Treat visual scene "
+        "descriptions and visible_items as evidence, even when they are "
+        "embedded in natural language or JSON-like text. Compare any "
+        "checklist or requested items with what is visibly confirmed. Do not "
+        "remind the user to check an item that is clearly visible or already "
+        "confirmed; mention only missing, uncertain, or still-relevant items. "
+        "If visual evidence is ambiguous, say it is uncertain instead of "
+        "claiming it is absent."
     ),
 )
 
