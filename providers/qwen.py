@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .base import ProviderError, ProviderResult
+from .llm import serialize_tool_definition
 
 
 QwenClient = Callable[[dict[str, Any]], Any]
@@ -104,10 +105,14 @@ class DashScopeOpenAITransport:
             )
         else:
             content = self._multimodal_content(input_payload)
-        return {
+        body: dict[str, Any] = {
             "model": payload["model_name"],
             "messages": [{"role": "user", "content": content}],
         }
+        if "tools" in input_payload:
+            body["tools"] = input_payload["tools"]
+            body["tool_choice"] = "auto"
+        return body
 
     def _speech_request_body(
         self,
@@ -378,9 +383,113 @@ class _QwenProviderBase:
         )
 
 
+def qwen_tools_from_definitions(
+    definitions: tuple[Any, ...],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(_qwen_tool_from_definition(definition) for definition in definitions)
+
+
+def qwen_tool_call_to_decision(
+    response: Any,
+    *,
+    known_tool_names: tuple[str, ...],
+) -> dict[str, Any]:
+    tool_call = _first_tool_call(response)
+    if tool_call is None:
+        return _tool_decision_error(
+            code="missing_tool_call",
+            message="Qwen response did not include a tool call.",
+        )
+
+    function = tool_call.get("function")
+    if not isinstance(function, dict):
+        return _tool_decision_error(
+            code="malformed_tool_call",
+            message="Qwen tool call did not include a function object.",
+        )
+
+    tool_name = function.get("name")
+    arguments_text = function.get("arguments")
+    if not isinstance(tool_name, str) or not tool_name:
+        return _tool_decision_error(
+            code="malformed_tool_call",
+            message="Qwen tool call did not include a function name.",
+        )
+    if tool_name not in known_tool_names:
+        return _tool_decision_error(
+            code="unknown_tool",
+            message=f"Qwen requested unknown tool: {tool_name}",
+        )
+    if not isinstance(arguments_text, str):
+        return _tool_decision_error(
+            code="malformed_tool_call",
+            message="Qwen tool call did not include JSON arguments.",
+        )
+
+    try:
+        arguments = json.loads(arguments_text)
+    except json.JSONDecodeError:
+        return _tool_decision_error(
+            code="malformed_tool_call",
+            message="Qwen tool call arguments were not valid JSON.",
+        )
+    if not isinstance(arguments, dict):
+        return _tool_decision_error(
+            code="malformed_tool_call",
+            message="Qwen tool call arguments must decode to an object.",
+        )
+
+    return {
+        "action": "CALL_TOOL",
+        "tool_name": tool_name,
+        "arguments": arguments,
+        "reason": f"Qwen requested tool {tool_name}.",
+    }
+
+
+def _qwen_tool_from_definition(definition: Any) -> dict[str, Any]:
+    if isinstance(definition, dict):
+        serialized = definition
+    else:
+        serialized = serialize_tool_definition(definition)
+    return {
+        "type": "function",
+        "function": {
+            "name": serialized["name"],
+            "description": serialized["description"],
+            "parameters": serialized["input_schema"],
+        },
+    }
+
+
+def _first_tool_call(response: Any) -> dict[str, Any] | None:
+    try:
+        tool_calls = response["choices"][0]["message"]["tool_calls"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not isinstance(tool_calls, list) or not tool_calls:
+        return None
+    first = tool_calls[0]
+    if not isinstance(first, dict):
+        return None
+    return first
+
+
+def _tool_decision_error(*, code: str, message: str) -> dict[str, Any]:
+    return {
+        "action": "REPLAN",
+        "reason": message,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class QwenLLMProvider(_QwenProviderBase):
     provider_name: str = "qwen_llm"
+    supports_native_tool_calling: bool = True
 
     def generate(
         self,
@@ -393,6 +502,98 @@ class QwenLLMProvider(_QwenProviderBase):
             {"prompt": prompt},
             trace_id=trace_id,
             metadata=metadata,
+        )
+
+    def generate_with_tools(
+        self,
+        prompt: str,
+        *,
+        tool_definitions: tuple[Any, ...],
+        trace_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ProviderResult:
+        qwen_tools = qwen_tools_from_definitions(tool_definitions)
+        known_tool_names = tuple(
+            tool["function"]["name"]
+            for tool in qwen_tools
+            if isinstance(tool.get("function"), dict)
+            and isinstance(tool["function"].get("name"), str)
+        )
+        return self._call_tool_decision(
+            {
+                "prompt": prompt,
+                "tools": qwen_tools,
+            },
+            known_tool_names=known_tool_names,
+            trace_id=trace_id,
+            metadata=metadata,
+        )
+
+    def _call_tool_decision(
+        self,
+        input_payload: dict[str, Any],
+        *,
+        known_tool_names: tuple[str, ...],
+        trace_id: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> ProviderResult:
+        result_metadata = {
+            **dict(metadata or {}),
+            "real_provider_requested": True,
+            "native_tool_calling": True,
+        }
+        if self.api_key is None:
+            return self._error_result(
+                trace_id=trace_id,
+                message="Qwen API key is missing",
+                code="provider_unavailable",
+                metadata={"missing": "ELLA_QWEN_API_KEY"},
+            )
+        if self.client is None:
+            return self._error_result(
+                trace_id=trace_id,
+                message="Qwen client is not configured",
+                code="provider_unavailable",
+                metadata={"reason": "client_missing"},
+            )
+
+        try:
+            raw_output = self.client(
+                {
+                    "api_key": self.api_key,
+                    "model_name": self.model_name,
+                    "input": input_payload,
+                    "metadata": dict(metadata or {}),
+                }
+            )
+            output = qwen_tool_call_to_decision(
+                raw_output,
+                known_tool_names=known_tool_names,
+            )
+        except QwenTransportError as error:
+            error_metadata: dict[str, Any] = {}
+            if error.status_code is not None:
+                error_metadata["status_code"] = error.status_code
+            return self._error_result(
+                trace_id=trace_id,
+                message=str(error),
+                code=error.code,
+                metadata=error_metadata,
+            )
+        except Exception:
+            return self._error_result(
+                trace_id=trace_id,
+                message="Qwen client transport failed",
+                code="transport_error",
+                metadata={},
+            )
+
+        return ProviderResult(
+            provider_name=self.provider_name,
+            model_name=self.model_name,
+            trace_id=trace_id,
+            output=output,
+            metadata=result_metadata,
         )
 
     def _is_normalized(self, output: dict[str, Any]) -> bool:
