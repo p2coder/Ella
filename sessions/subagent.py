@@ -157,9 +157,20 @@ class SubAgent:
         if skill is None:
             return False
 
-        goal = handoff.task_goal.lower()
+        task_text = " ".join(
+            (
+                handoff.task_goal,
+                handoff.context_summary,
+                str(handoff.trigger_event.payload.get("text", "")),
+            )
+        ).lower()
         summary_text = f"{skill.description} {skill.when_to_use}".lower()
         return (
-            ("leaving" in goal or "before leaving" in goal)
+            (
+                "leaving" in task_text
+                or "before leaving" in task_text
+                or "heading out" in task_text
+                or "出门" in task_text
+            )
             and ("leaving" in summary_text or "heading out" in summary_text)
         )

@@ -65,6 +65,7 @@ class MicrophoneSource:
             )
 
         text = speech_result.output["text"]
+        print(text)
         return MicrophoneSourceResult(
             raw_signal=RawSignal(
                 trace_id=trace_id,

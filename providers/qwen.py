@@ -54,7 +54,7 @@ class DashScopeOpenAITransport:
             method="POST",
         )
         try:
-            with self.opener(request, self.timeout_seconds) as response:
+            with self.opener(request, timeout=self.timeout_seconds) as response:
                 body = response.read()
         except HTTPError as error:
             raise self._http_error(error.code) from None

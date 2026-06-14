@@ -78,6 +78,36 @@ def test_qwen_speech_encodes_microphone_audio_and_normalizes_transcript():
     assert timeout == 30.0
 
 
+def test_qwen_transport_passes_timeout_as_keyword_for_real_urlopen_signature():
+    calls = []
+
+    def opener(request, *, timeout):
+        calls.append(timeout)
+        return FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Ella，我要出门了。",
+                            "annotations": [{"language": "zh"}],
+                        }
+                    }
+                ]
+            }
+        )
+
+    provider = QwenSpeechProvider(
+        api_key="sk-test",
+        model_name="qwen3-asr-flash",
+        client=DashScopeOpenAITransport(opener=opener),
+    )
+
+    result = provider.transcribe(microphone_audio())
+
+    assert result.succeeded
+    assert calls == [30.0]
+
+
 def test_qwen_speech_preserves_normalized_injected_transport_output():
     provider = QwenSpeechProvider(
         api_key="sk-test",
@@ -177,4 +207,3 @@ def test_qwen_speech_malformed_response_is_structured():
 
     assert result.failed
     assert result.error.code == "malformed_response"
-

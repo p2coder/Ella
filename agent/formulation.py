@@ -68,6 +68,7 @@ class TaskFormulator:
                 trace_id=trigger_event.trace_id,
                 metadata={"boundary": "task_formulation"},
             )
+            # print(provider_result.output)
         except Exception as error:
             return self._fallback(
                 deterministic,

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from devices.factory import DeviceFactory
+from events.microphone_source import MicrophoneSource
 from events.source import CLITextSignalSource
 from memory import MemoryManager
 from providers.factory import ProviderFactory
@@ -120,6 +122,63 @@ class DemoRuntime:
             task_result.memory_result.memory_path,
             task_result.completion.tool_results,
         )
+
+    def run_input(
+        self,
+        *,
+        mode: str,
+        input_text: str = DEFAULT_INPUT,
+        microphone_source: MicrophoneSource | None = None,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> str:
+        normalized_mode = mode.strip().lower()
+        if normalized_mode == "text":
+            return self.run(input_text)
+        if normalized_mode != "microphone":
+            raise ValueError("mode must be 'text' or 'microphone'")
+
+        statuses: list[str] = []
+
+        def report(message: str) -> None:
+            statuses.append(message)
+            if status_callback is not None:
+                status_callback(message)
+
+        report("Listening...")
+        active_source = microphone_source or MicrophoneSource.from_factories()
+        source_result = active_source.capture_transcript(
+            trace_id="trace-cli-microphone"
+        )
+        if source_result.error is not None or source_result.raw_signal is None:
+            reason = source_result.error or "microphone input was unavailable"
+            message = f"Microphone input failed: {reason}"
+            report(message)
+            return "\n".join((*statuses, "Text input remains available."))
+
+        report("Transcription complete.")
+        event_result = self.event_runtime.publish(source_result.raw_signal)
+        if not event_result.submitted or event_result.task_handle is None:
+            raise RuntimeError(event_result.reason)
+
+        task_result = self.task_runtime.run_until_complete(
+            event_result.task_handle.task_id,
+            max_steps=MAX_DEMO_STEPS,
+        )
+        if task_result.failure_reason is not None:
+            raise RuntimeError(task_result.failure_reason)
+        if task_result.completion is None:
+            raise RuntimeError(
+                f"demo task did not complete: {task_result.stop_reason}"
+            )
+        if task_result.memory_result is None:
+            raise RuntimeError("demo task completed without a memory result")
+
+        rendered = _render_output(
+            task_result.completion.user_visible_output,
+            task_result.memory_result.memory_path,
+            task_result.completion.tool_results,
+        )
+        return "[Input]\n" + "\n".join(statuses) + "\n\n" + rendered
 
 
 def run_demo(
