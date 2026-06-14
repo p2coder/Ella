@@ -50,12 +50,9 @@ class DemoRuntime:
         subagent = SubAgent(skill_manager)
         task_runtime = TaskRuntime(
             session_manager=TaskSessionManager(
-                allowed_tools=(
-                    "camera_scene",
-                    "mock_vision_summary",
-                    "mock_weather",
-                    "mock_checklist",
-                ),
+                allowed_tools=tool_manager.list_names_for_role("main_agent"),
+                skill_manager=skill_manager,
+                tool_manager=tool_manager,
             ),
             subagent=subagent,
             executor=CapabilityExecutor(
