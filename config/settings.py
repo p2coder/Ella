@@ -8,6 +8,7 @@ from . import config as user_config
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
+MAX_MIC_CAPTURE_DURATION_SECONDS = 30
 QWEN_API_KEY_ENV_NAMES = (
     "ELLA_QWEN_API_KEY",
     "DASHSCOPE_API_KEY",
@@ -23,6 +24,9 @@ CONFIG_NAMES = {
     "ELLA_MIC_ENABLED": "MIC_ENABLED",
     "ELLA_MIC_DEVICE": "MIC_DEVICE",
     "ELLA_MIC_ALWAYS_LISTENING": "MIC_ALWAYS_LISTENING",
+    "ELLA_MIC_CAPTURE_DURATION_SECONDS": "MIC_CAPTURE_DURATION_SECONDS",
+    "ELLA_MIC_SAMPLE_RATE": "MIC_SAMPLE_RATE",
+    "ELLA_MIC_CHANNELS": "MIC_CHANNELS",
     "ELLA_CAMERA_ENABLED": "CAMERA_ENABLED",
     "ELLA_CAMERA_DEVICE": "CAMERA_DEVICE",
     "ELLA_CAMERA_BACKGROUND_INTERVAL_SECONDS": (
@@ -42,6 +46,9 @@ SAFE_DEFAULTS = {
     "ELLA_MIC_ENABLED": False,
     "ELLA_MIC_DEVICE": "default",
     "ELLA_MIC_ALWAYS_LISTENING": True,
+    "ELLA_MIC_CAPTURE_DURATION_SECONDS": 5,
+    "ELLA_MIC_SAMPLE_RATE": 16_000,
+    "ELLA_MIC_CHANNELS": 1,
     "ELLA_CAMERA_ENABLED": False,
     "ELLA_CAMERA_DEVICE": "default",
     "ELLA_CAMERA_BACKGROUND_INTERVAL_SECONDS": 5,
@@ -67,6 +74,9 @@ class EllaSettings:
     camera_task_fps: int
     use_real_providers: bool
     debug_store_raw_media: bool
+    mic_capture_duration_seconds: int = 5
+    mic_sample_rate: int = 16_000
+    mic_channels: int = 1
 
 
 def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
@@ -107,6 +117,22 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
             values,
             "ELLA_DEBUG_STORE_RAW_MEDIA",
             False,
+        ),
+        mic_capture_duration_seconds=_bounded_positive_integer(
+            values,
+            "ELLA_MIC_CAPTURE_DURATION_SECONDS",
+            5,
+            maximum=MAX_MIC_CAPTURE_DURATION_SECONDS,
+        ),
+        mic_sample_rate=_positive_integer(
+            values,
+            "ELLA_MIC_SAMPLE_RATE",
+            16_000,
+        ),
+        mic_channels=_positive_integer(
+            values,
+            "ELLA_MIC_CHANNELS",
+            1,
         ),
     )
 
@@ -180,3 +206,32 @@ def _integer(
         return int(value)
     except ValueError as error:
         raise ValueError(f"invalid integer value for {name}: {value}") from error
+
+
+def _positive_integer(
+    values: Mapping[str, Any],
+    name: str,
+    default: int,
+) -> int:
+    value = values.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"invalid positive integer value for {name}: {value}")
+    parsed = _integer(values, name, default)
+    if parsed <= 0:
+        raise ValueError(f"invalid positive integer value for {name}: {value}")
+    return parsed
+
+
+def _bounded_positive_integer(
+    values: Mapping[str, Any],
+    name: str,
+    default: int,
+    *,
+    maximum: int,
+) -> int:
+    parsed = _positive_integer(values, name, default)
+    if parsed > maximum:
+        raise ValueError(
+            f"{name} must be at most {maximum}, got {parsed}"
+        )
+    return parsed
