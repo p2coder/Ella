@@ -30,6 +30,7 @@ class FinalResponseGenerator:
         completion_criteria: Iterable[str] = (),
         user_preference_summary: str = "",
         environment_summary: str = "",
+        memory_context: str = "",
         **_: Any,
     ) -> FinalResponseResult:
         tool_results_tuple = tuple(tool_results)
@@ -48,6 +49,7 @@ class FinalResponseGenerator:
             "visible_items": self._visible_items(tool_results_tuple),
             "user_preference_summary": user_preference_summary,
             "environment_summary": environment_summary,
+            "memory_context": memory_context,
             "provider_or_tool_errors": self._tool_errors(tool_results_tuple),
         }
         prompt_result = self.prompt_engine.build(PromptType.FINAL_RESPONSE, context)
