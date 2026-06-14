@@ -97,12 +97,83 @@ class DashScopeOpenAITransport:
         input_payload = payload["input"]
         if "prompt" in input_payload:
             content: Any = input_payload["prompt"]
+        elif "audio" in input_payload:
+            return self._speech_request_body(
+                model_name=payload["model_name"],
+                audio=input_payload["audio"],
+            )
         else:
             content = self._multimodal_content(input_payload)
         return {
             "model": payload["model_name"],
             "messages": [{"role": "user", "content": content}],
         }
+
+    def _speech_request_body(
+        self,
+        *,
+        model_name: str,
+        audio: Any,
+    ) -> dict[str, Any]:
+        return {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": self._audio_data_url(audio)},
+                        }
+                    ],
+                }
+            ],
+            "stream": False,
+            "asr_options": {"enable_itn": False},
+        }
+
+    @staticmethod
+    def _audio_data_url(audio: Any) -> str:
+        if not isinstance(audio, dict):
+            raise QwenTransportError(
+                "invalid_audio_format",
+                "Qwen speech input must contain bounded audio metadata",
+            )
+
+        audio_bytes = audio.get("bytes")
+        mime_type = audio.get("mime_type")
+        sample_rate = audio.get("sample_rate")
+        channels = audio.get("channels")
+        supported_mime_types = {
+            "audio/L16": "audio/pcm",
+            "audio/pcm": "audio/pcm",
+            "audio/wav": "audio/wav",
+            "audio/x-wav": "audio/wav",
+            "audio/mpeg": "audio/mpeg",
+            "audio/mp4": "audio/mp4",
+            "audio/ogg": "audio/ogg",
+            "audio/flac": "audio/flac",
+            "audio/x-flac": "audio/flac",
+        }
+        is_valid_pcm_rate = mime_type != "audio/L16" or sample_rate == 16_000
+        if (
+            not isinstance(audio_bytes, bytes)
+            or not audio_bytes
+            or mime_type not in supported_mime_types
+            or not isinstance(sample_rate, int)
+            or sample_rate <= 0
+            or not isinstance(channels, int)
+            or channels <= 0
+            or not is_valid_pcm_rate
+        ):
+            raise QwenTransportError(
+                "invalid_audio_format",
+                "Qwen speech input has unsupported audio data or metadata",
+            )
+
+        encoded = base64.b64encode(audio_bytes).decode("ascii")
+        normalized_mime = supported_mime_types[mime_type]
+        return f"data:{normalized_mime};base64,{encoded}"
 
     def _multimodal_content(
         self,
@@ -351,8 +422,35 @@ class QwenSpeechProvider(_QwenProviderBase):
     def _is_normalized(self, output: dict[str, Any]) -> bool:
         return isinstance(output.get("text"), str)
 
+    def _normalize_output(self, output: Any) -> dict[str, Any]:
+        if isinstance(output, dict) and self._is_normalized(output):
+            return output
+        result = {"text": self._message_content(output)}
+        language = self._message_language(output)
+        if language is not None:
+            result["language"] = language
+        return result
+
     def _normalize_content(self, content: str) -> dict[str, Any]:
         return {"text": content}
+
+    @staticmethod
+    def _message_language(output: Any) -> str | None:
+        try:
+            message = output["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        language = message.get("language")
+        if isinstance(language, str) and language:
+            return language
+        annotations = message.get("annotations", ())
+        for annotation in annotations:
+            if not isinstance(annotation, dict):
+                continue
+            language = annotation.get("language")
+            if isinstance(language, str) and language:
+                return language
+        return None
 
 
 @dataclass(frozen=True, slots=True)

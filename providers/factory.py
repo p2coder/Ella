@@ -39,11 +39,12 @@ class ProviderFactory:
         if not self.settings.use_real_providers:
             return MockSpeechProvider()
         if self.settings.model_provider == "qwen" and self._qwen_speech_configured():
-            from .qwen import QwenSpeechProvider
+            from .qwen import DashScopeOpenAITransport, QwenSpeechProvider
 
             return QwenSpeechProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_speech_model or "qwen-audio",
+                client=DashScopeOpenAITransport(),
             )
         return UnavailableSpeechProvider.from_settings(self.settings)
 
