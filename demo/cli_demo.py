@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from agent.final_response import FinalResponseGenerator
 from devices.factory import DeviceFactory
 from demo.display_snapshot import (
     CAMERA_FRAME,
@@ -14,6 +15,7 @@ from demo.page_viewer import LocalPageViewer
 from events.microphone_source import MicrophoneSource
 from events.source import CLITextSignalSource
 from memory import MemoryManager
+from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.task_runtime import TaskRuntime
@@ -81,6 +83,10 @@ class DemoRuntime:
         tool_manager.register(MockChecklistTool())
 
         subagent = SubAgent(skill_manager)
+        final_response_generator = FinalResponseGenerator(
+            prompt_engine=PromptEngine(),
+            llm_provider=llm_provider,
+        )
         task_runtime = TaskRuntime(
             session_manager=TaskSessionManager(
                 allowed_tools=tool_manager.list_names_for_role("main_agent"),
@@ -94,6 +100,7 @@ class DemoRuntime:
                 tool_manager=tool_manager,
             ),
             memory_manager=MemoryManager(memory_path),
+            final_response_generator=final_response_generator,
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
