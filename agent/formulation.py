@@ -1,7 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from events import StandardizedEvent
+from prompts.engine import PromptEngine, PromptType
 from providers.llm import LLMProvider
 
 
@@ -20,6 +21,7 @@ class TaskFormulation:
 @dataclass(frozen=True, slots=True)
 class TaskFormulator:
     llm_provider: LLMProvider | None = None
+    prompt_engine: PromptEngine = field(default_factory=PromptEngine)
 
     def formulate(
         self,
@@ -59,16 +61,21 @@ class TaskFormulator:
             return deterministic
 
         try:
+            prompt_result = self.prompt_engine.build(
+                PromptType.TASK_FORMULATION,
+                {
+                    "user_input": text,
+                    "user_preference_summary": user_preference_summary,
+                    "environment_summary": environment_summary,
+                    "event_type": trigger_event.event_type,
+                    "trace_id": trigger_event.trace_id,
+                },
+            )
             provider_result = self.llm_provider.generate(
-                self._build_prompt(
-                    text=text,
-                    user_preference_summary=user_preference_summary,
-                    environment_summary=environment_summary,
-                ),
+                prompt_result.prompt,
                 trace_id=trigger_event.trace_id,
                 metadata={"boundary": "task_formulation"},
             )
-            # print(provider_result.output)
         except Exception as error:
             return self._fallback(
                 deterministic,
@@ -115,20 +122,6 @@ class TaskFormulator:
     def _is_going_out_input(self, text: str) -> bool:
         normalized = text.lower()
         return "出门" in normalized or "heading out" in normalized or "leaving" in normalized
-
-    def _build_prompt(
-        self,
-        *,
-        text: str,
-        user_preference_summary: str,
-        environment_summary: str,
-    ) -> str:
-        return (
-            "Formulate only what should be done. "
-            f"Input: {text}\n"
-            f"User preferences: {user_preference_summary}\n"
-            f"Environment: {environment_summary}"
-        )
 
     def _provider_value(self, output: Any, key: str) -> str | None:
         if not isinstance(output, dict):
