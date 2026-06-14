@@ -120,11 +120,23 @@ class RecordingFinalResponseGenerator:
 @dataclass
 class RecordingMemoryManager:
     memory_path: Path
+    memory_content: str = ""
     requests: tuple[MemoryManagementRequest, ...] = ()
 
     def handle(self, request: MemoryManagementRequest) -> MemoryWriteResult:
         self.requests += (request,)
         return MemoryWriteResult(action="recorded", memory_path=self.memory_path)
+
+    def query(self):
+        return type(
+            "MemoryQueryResult",
+            (),
+            {
+                "action": "loaded_all",
+                "memory_path": self.memory_path,
+                "content": self.memory_content,
+            },
+        )()
 
 
 def make_runtime(
@@ -244,6 +256,27 @@ def test_task_runtime_still_creates_completion_package_and_memory_flow(tmp_path)
     )
     assert len(memory_manager.requests) == 1
     assert memory_manager.requests[0].completion is result.completion
+
+
+def test_task_runtime_passes_existing_memory_to_final_response_generator(
+    tmp_path,
+):
+    generator = RecordingFinalResponseGenerator("Generated with memory.")
+    memory_manager = RecordingMemoryManager(
+        tmp_path / "memory.md",
+        memory_content="## Task previous\n- final_response: Bring a thermos.\n",
+    )
+    runtime, handle = make_runtime(
+        final_response_generator=generator,
+        memory_manager=memory_manager,
+    )
+    advance_to_running(runtime, handle.task_id)
+
+    runtime.step(handle.task_id)
+
+    assert generator.calls[0]["memory_context"] == (
+        "## Task previous\n- final_response: Bring a thermos.\n"
+    )
 
 
 def test_default_completion_fallback_is_compatible_without_old_template():

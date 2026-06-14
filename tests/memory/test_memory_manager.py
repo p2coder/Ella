@@ -75,3 +75,47 @@ def test_memory_manager_is_single_memory_update_entry_point(tmp_path: Path):
     assert hasattr(manager, "handle")
     assert not hasattr(make_package(), "write_memory")
     assert not hasattr(make_package(), "memory_manager")
+
+
+def test_memory_manager_stores_every_submitted_memory_record(tmp_path: Path):
+    memory_path = tmp_path / "memory.md"
+    manager = MemoryManager(memory_path=memory_path)
+    request = MemoryManagementRequest.from_completion(make_package())
+
+    first = manager.handle(request)
+    second = manager.handle(request)
+
+    assert first.action == "appended"
+    assert second.action == "appended"
+    memory_text = memory_path.read_text(encoding="utf-8")
+    assert memory_text.count("## Task task-memory") == 2
+    assert memory_text.count(
+        "- final_response: Take your keys and phone. Consider an umbrella."
+    ) == 2
+
+
+def test_memory_manager_query_returns_all_stored_memory(tmp_path: Path):
+    memory_path = tmp_path / "memory.md"
+    manager = MemoryManager(memory_path=memory_path)
+    request = MemoryManagementRequest.from_completion(make_package())
+    manager.handle(request)
+    manager.handle(request)
+
+    result = manager.query()
+
+    assert result.action == "loaded_all"
+    assert result.memory_path == memory_path
+    assert result.content == memory_path.read_text(encoding="utf-8")
+    assert result.content.count("## Task task-memory") == 2
+
+
+def test_memory_manager_query_missing_memory_returns_empty_content(
+    tmp_path: Path,
+):
+    memory_path = tmp_path / "missing-memory.md"
+
+    result = MemoryManager(memory_path=memory_path).query()
+
+    assert result.action == "loaded_all"
+    assert result.memory_path == memory_path
+    assert result.content == ""

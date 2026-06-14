@@ -35,6 +35,13 @@ class MemoryWriteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryQueryResult:
+    action: str
+    memory_path: Path
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryManager:
     memory_path: Path = Path("memory/memory.md")
 
@@ -43,6 +50,17 @@ class MemoryManager:
         with self.memory_path.open("a", encoding="utf-8") as memory_file:
             memory_file.write(self._format_record(request))
         return MemoryWriteResult(action="appended", memory_path=self.memory_path)
+
+    def query(self) -> MemoryQueryResult:
+        if not self.memory_path.exists():
+            content = ""
+        else:
+            content = self.memory_path.read_text(encoding="utf-8")
+        return MemoryQueryResult(
+            action="loaded_all",
+            memory_path=self.memory_path,
+            content=content,
+        )
 
     def _format_record(self, request: MemoryManagementRequest) -> str:
         completion = request.completion

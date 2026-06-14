@@ -49,6 +49,7 @@ def test_final_response_generator_builds_prompt_through_prompt_engine():
                 "visible_items": ("phone", "keys"),
                 "user_preference_summary": "Prefers concise reminders.",
                 "environment_summary": "Desk scene available.",
+                "memory_context": "",
                 "provider_or_tool_errors": (),
             },
         )
@@ -132,6 +133,26 @@ def test_provider_failure_returns_deterministic_fallback_not_old_template():
         "code": "provider_unavailable",
         "message": "llm unavailable",
     }
+
+
+def test_memory_context_is_passed_into_final_response_prompt():
+    prompt_engine = RecordingPromptEngine(prompt="prompt with memory")
+    llm_provider = RecordingLLMProvider(output={"text": "Use remembered context."})
+
+    FinalResponseGenerator(
+        prompt_engine=prompt_engine,
+        llm_provider=llm_provider,
+    ).generate(
+        trace_id="trace-memory-prompt",
+        user_input="继续",
+        task_goal="Answer using prior context.",
+        tool_results=[],
+        memory_context="## Task old\n- final_response: User prefers tea.\n",
+    )
+
+    assert prompt_engine.calls[0][1]["memory_context"] == (
+        "## Task old\n- final_response: User prefers tea.\n"
+    )
 
 
 def test_unavailable_visual_context_is_reflected_in_context_and_fallback():

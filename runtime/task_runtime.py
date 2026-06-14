@@ -329,8 +329,22 @@ class TaskRuntime:
             tool_results=tool_results,
             user_preference_summary=handoff.user_preference_summary,
             environment_summary=handoff.environment_summary,
+            memory_context=self._memory_context(),
         )
         return result.final_response
+
+    def _memory_context(self) -> str:
+        query = getattr(self._memory_manager, "query", None)
+        if query is None:
+            return ""
+        try:
+            result = query()
+        except Exception:
+            return ""
+        content = getattr(result, "content", "")
+        if not isinstance(content, str):
+            return str(content)
+        return content
 
     @staticmethod
     def _default_final_response(
