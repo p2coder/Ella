@@ -221,7 +221,7 @@ def test_non_going_out_tasks_are_not_forced_into_going_out_behavior() -> None:
         strategy,
     )
 
-    assert decision.action == REPLAN
+    assert decision.action == COMPLETE
     assert decision.tool_name is None
 
 

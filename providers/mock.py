@@ -158,8 +158,7 @@ class MockMultimodalProvider:
                     "Mock scene contains " + ", ".join(self.visible_items) + "."
                 ),
                 "visible_items": self.visible_items,
-                "umbrella_visible": "umbrella" in self.visible_items,
-                "observation_type": "going_out_visual_context",
+                "observation_type": "visual_scene_summary",
             },
             metadata=_metadata(metadata),
         )

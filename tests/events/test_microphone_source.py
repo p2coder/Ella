@@ -37,6 +37,20 @@ def test_microphone_source_payload_has_text_type_and_transcript_text():
     assert result.raw_signal.payload["text"] == "hello ella"
 
 
+def test_microphone_source_does_not_print_transcript(capsys):
+    source = MicrophoneSource(
+        microphone_provider=MockMicrophoneProvider(transcript="quiet transcript"),
+        speech_provider=MockSpeechProvider(),
+    )
+
+    result = source.capture_transcript(trace_id="trace-print")
+
+    assert result.raw_signal is not None
+    assert result.raw_signal.payload["text"] == "quiet transcript"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
 def test_transcription_failure_returns_non_submitted_error_result():
     source = MicrophoneSource(
         microphone_provider=MockMicrophoneProvider(),

@@ -8,7 +8,7 @@ from . import config as user_config
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
-MAX_MIC_CAPTURE_DURATION_SECONDS = 30
+MAX_MIC_CAPTURE_DURATION_SECONDS = 5
 QWEN_API_KEY_ENV_NAMES = (
     "ELLA_QWEN_API_KEY",
     "DASHSCOPE_API_KEY",

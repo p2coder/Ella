@@ -52,7 +52,6 @@ class SuccessfulMultimodalProvider:
             output={
                 "scene_summary": "Phone and keys are visible.",
                 "visible_items": ("phone", "keys"),
-                "umbrella_visible": False,
             },
         )
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 from uuid import uuid4
 
 from agent.final_response import FinalResponseGenerator
@@ -13,6 +14,7 @@ from demo.display_snapshot import (
     RunDisplaySnapshot,
 )
 from demo.page_viewer import LocalPageViewer
+from events.microphone_source import MicrophoneSource
 from events.source import CLITextSignalSource
 from memory import MemoryManager
 from prompts.engine import PromptEngine
@@ -49,6 +51,7 @@ class AppRuntime:
     _event_runtime: EventRuntime
     _task_runtime: TaskRuntime
     _page_viewer: LocalPageViewer = field(default_factory=LocalPageViewer)
+    microphone_source: MicrophoneSource | None = None
 
     @classmethod
     def create_default(
@@ -105,13 +108,73 @@ class AppRuntime:
             task_runtime=task_runtime,
             llm_provider=llm_provider,
         )
-        return cls(event_runtime, task_runtime)
+        microphone_source = MicrophoneSource.from_factories(
+            device_factory=device_factory,
+            provider_factory=provider_factory,
+        )
+        return cls(
+            event_runtime,
+            task_runtime,
+            microphone_source=microphone_source,
+        )
 
     def run_text_with_display(self, input_text: str) -> AppDisplayResult:
         signal = CLITextSignalSource().create_signal(
             text=input_text,
             trace_id=f"trace-web-{uuid4().hex}",
         )
+        return self._run_signal_with_display(
+            signal,
+            user_input=input_text,
+        )
+
+    def run_microphone_with_display(
+        self,
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> AppDisplayResult:
+        report_status = status_callback or (lambda _status: None)
+        report_status("Listening...")
+        source = self.microphone_source or MicrophoneSource.from_factories()
+        try:
+            source_result = source.capture_transcript(
+                trace_id=f"trace-web-microphone-{uuid4().hex}",
+            )
+        except Exception:
+            return _microphone_failure_result(
+                "Microphone input failed. Text input remains available."
+            )
+        signal = source_result.raw_signal
+        if signal is None:
+            return _microphone_failure_result(
+                "Microphone input failed. Text input remains available."
+            )
+
+        transcript = signal.payload.get("text")
+        if not isinstance(transcript, str) or not transcript.strip():
+            return _microphone_failure_result(
+                "No speech was detected. Text input remains available."
+            )
+
+        normalized_transcript = transcript.strip()
+        report_status("Transcription complete.")
+        text_signal = CLITextSignalSource().create_signal(
+            text=normalized_transcript,
+            trace_id=f"trace-web-microphone-text-{uuid4().hex}",
+        )
+        return self._run_signal_with_display(
+            text_signal,
+            user_input=normalized_transcript,
+            transcript=normalized_transcript,
+        )
+
+    def _run_signal_with_display(
+        self,
+        signal,
+        *,
+        user_input: str,
+        transcript: str | None = None,
+    ) -> AppDisplayResult:
         task_result = self._run_signal_to_completion(signal)
         completion = task_result.completion
         memory_result = task_result.memory_result
@@ -122,7 +185,11 @@ class AppRuntime:
         )
         return AppDisplayResult(
             output=output,
-            snapshot=_build_display_snapshot(input_text, task_result),
+            snapshot=_build_display_snapshot(
+                user_input,
+                task_result,
+                transcript=transcript,
+            ),
         )
 
     def _run_signal_to_completion(self, signal) -> TaskRuntimeResult:
@@ -169,6 +236,8 @@ def _render_output(
 def _build_display_snapshot(
     user_input: str,
     task_result: TaskRuntimeResult,
+    *,
+    transcript: str | None = None,
 ) -> RunDisplaySnapshot:
     completion = task_result.completion
     output = completion.user_visible_output
@@ -177,7 +246,7 @@ def _build_display_snapshot(
     process = output.process
     return RunDisplaySnapshot(
         user_input=user_input,
-        transcript=None,
+        transcript=transcript,
         captured_frame_reference=_captured_frame_reference(camera_result),
         image_status=_image_status(tool_results, camera_result),
         scene_summary=_scene_summary(camera_result),
@@ -192,6 +261,26 @@ def _build_display_snapshot(
         tool_results_summary=_tool_results_summary(tool_results),
         final_response=output.final_response,
         memory_status=getattr(task_result.memory_result, "action", "unknown"),
+    )
+
+
+def _microphone_failure_result(message: str) -> AppDisplayResult:
+    return AppDisplayResult(
+        output=message,
+        snapshot=RunDisplaySnapshot(
+            user_input="",
+            transcript=None,
+            captured_frame_reference=None,
+            image_status=TEXT_ONLY,
+            scene_summary="",
+            visible_items=(),
+            task_goal="",
+            task_formulation_prompt_text="",
+            final_response_prompt_text="",
+            tool_results_summary="",
+            final_response=message,
+            memory_status="not recorded",
+        ),
     )
 
 

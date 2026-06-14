@@ -185,8 +185,9 @@ class DashScopeOpenAITransport:
         input_payload: dict[str, Any],
     ) -> list[dict[str, Any]]:
         prompt = (
-            "Describe the scene for the task. Return JSON with scene_summary, "
-            "visible_items, and umbrella_visible."
+            "Describe the visible scene for the task. Return JSON with "
+            "scene_summary and visible_items. Do not infer task-specific "
+            "checklist fields unless they are directly visible scene facts."
         )
         if input_payload.get("handoff_goal"):
             prompt += f" Task goal: {input_payload['handoff_goal']}"
@@ -689,8 +690,6 @@ class QwenMultimodalProvider(_QwenProviderBase):
         result = {"scene_summary": parsed["scene_summary"]}
         if "visible_items" in parsed:
             result["visible_items"] = tuple(parsed["visible_items"])
-        if "umbrella_visible" in parsed:
-            result["umbrella_visible"] = bool(parsed["umbrella_visible"])
         return result
 
 

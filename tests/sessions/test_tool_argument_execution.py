@@ -307,6 +307,5 @@ class SceneProvider:
             output={
                 "scene_summary": "A bounded test scene.",
                 "visible_items": (),
-                "umbrella_visible": False,
             },
         )

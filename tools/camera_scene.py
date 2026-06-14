@@ -100,7 +100,6 @@ class CameraSceneTool:
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    "umbrella_visible": {"type": "boolean"},
                     "frames_captured": {"type": "number"},
                     "providers": {"type": "object"},
                     "captured_frame_reference": {"type": "string"},
@@ -178,7 +177,6 @@ class CameraSceneTool:
             "status": "available",
             "summary": output["scene_summary"],
             "visible_items": output.get("visible_items", ()),
-            "umbrella_visible": output.get("umbrella_visible"),
             "frames_captured": len(frames),
             "providers": {
                 "camera": self.camera_provider.device_name,

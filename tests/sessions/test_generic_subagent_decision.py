@@ -282,7 +282,7 @@ def test_selected_skill_content_tools_and_observations_enter_decision_prompt(
     assert "Observed fact." in provider.last_prompt
 
 
-def test_generic_mock_safe_fallback_waits_without_skill_or_observation() -> None:
+def test_generic_mock_safe_fallback_completes_without_skill_or_observation() -> None:
     creation = make_creation(
         make_handoff(goal="Handle an unmatched request."),
         allowed_tools=("fact_lookup",),
@@ -295,7 +295,7 @@ def test_generic_mock_safe_fallback_waits_without_skill_or_observation() -> None
         make_strategy(creation),
     )
 
-    assert decision.action == WAIT
+    assert decision.action == COMPLETE
     assert decision.tool_name is None
 
 

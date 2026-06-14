@@ -98,6 +98,7 @@ class FinalResponseGenerator:
             )
 
         final_response = self._provider_text(provider_result.output)
+        print(final_response)
         if final_response is None:
             return self._fallback_result(
                 trace_id=trace_id,

@@ -81,7 +81,6 @@ def test_multimodal_transport_accepts_encoded_frames_and_normalizes_scene():
                                 {
                                     "scene_summary": "桌面上有钥匙和雨伞。",
                                     "visible_items": ["keys", "umbrella"],
-                                    "umbrella_visible": True,
                                 }
                             )
                         }
@@ -110,7 +109,6 @@ def test_multimodal_transport_accepts_encoded_frames_and_normalizes_scene():
     assert result.output == {
         "scene_summary": "桌面上有钥匙和雨伞。",
         "visible_items": ("keys", "umbrella"),
-        "umbrella_visible": True,
     }
     body = json.loads(requests[0].data)
     content = body["messages"][0]["content"]

@@ -136,9 +136,8 @@ class StaticMultimodalProvider:
             model_name=self.model_name,
             trace_id=trace_id,
             output={
-                "scene_summary": "```json {\"umbrella_visible\": false} ```",
+                "scene_summary": "```json {\"scene\":\"desk with keys\"} ```",
                 "visible_items": ("phone", "keys"),
-                "umbrella_visible": False,
             },
             metadata=dict(metadata or {}),
         )

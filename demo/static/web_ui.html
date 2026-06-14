@@ -93,7 +93,7 @@
 
     .composer {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 12px;
       align-items: end;
       margin-bottom: 20px;
@@ -106,6 +106,15 @@
       min-height: 21px;
       margin: 0;
       color: #b42318;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .pending-status {
+      grid-column: 1 / -1;
+      min-height: 21px;
+      margin: -8px 0 0;
+      color: var(--muted);
       font-size: 13px;
       font-weight: 700;
     }
@@ -302,7 +311,11 @@
           <button id="submit-button" type="submit">
             Submit
           </button>
+          <button id="microphone-button" type="button">
+            Microphone
+          </button>
           <p class="form-error" role="alert">{{form_error}}</p>
+          <p id="pending-status" class="pending-status" role="status"></p>
         </form>
 
         <div class="grid">
@@ -313,10 +326,7 @@
                 <span class="field-label">User input</span>
                 <p class="field-value">{{user_input}}</p>
               </div>
-              <div class="field">
-                <span class="field-label">Transcript</span>
-                <p class="field-value">{{transcript}}</p>
-              </div>
+              {{transcript_markup}}
             </div>
           </section>
 
@@ -362,39 +372,98 @@
     </main>
   </div>
   <script>
-    const form = document.getElementById("message-form");
-    const submitButton = document.getElementById("submit-button");
-    const input = document.getElementById("user-input");
+    function currentControls() {
+      return {
+        form: document.getElementById("message-form"),
+        submitButton: document.getElementById("submit-button"),
+        microphoneButton: document.getElementById("microphone-button"),
+        pendingStatus: document.getElementById("pending-status"),
+        input: document.getElementById("user-input"),
+      };
+    }
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (form.getAttribute("aria-busy") === "true") {
-        return;
-      }
+    function beginRequest(status) {
+      const {form, submitButton, microphoneButton, pendingStatus, input} =
+        currentControls();
       form.setAttribute("aria-busy", "true");
       submitButton.disabled = true;
-      submitButton.textContent = "Running...";
+      microphoneButton.disabled = true;
       input.readOnly = true;
+      pendingStatus.textContent = status;
+    }
 
-      try {
-        const response = await fetch(form.action, {
-          method: "POST",
-          headers: {"Content-Type": "application/x-www-form-urlencoded"},
-          body: new URLSearchParams(new FormData(form)),
-        });
-        const responseHtml = await response.text();
-        document.open();
-        document.write(responseHtml);
-        document.close();
-      } catch (error) {
-        form.setAttribute("aria-busy", "false");
-        submitButton.disabled = false;
-        submitButton.textContent = "Submit";
-        input.readOnly = false;
-        form.querySelector(".form-error").textContent =
-          "Request failed. Please try again.";
+    function recoverRequest() {
+      const {form, submitButton, microphoneButton, pendingStatus, input} =
+        currentControls();
+      form.setAttribute("aria-busy", "false");
+      submitButton.disabled = false;
+      microphoneButton.disabled = false;
+      submitButton.textContent = "Submit";
+      input.readOnly = false;
+      pendingStatus.textContent = "";
+    }
+
+    async function replacePage(response) {
+      const responseHtml = await response.text();
+      const nextDocument = new DOMParser().parseFromString(
+        responseHtml,
+        "text/html",
+      );
+      document.body.replaceWith(nextDocument.body);
+      bindWebUIInteractions();
+    }
+
+    function bindWebUIInteractions() {
+      const {form, submitButton, microphoneButton} = currentControls();
+      if (!form || !submitButton || !microphoneButton || form.dataset.bound) {
+        return;
       }
-    });
+      form.dataset.bound = "true";
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const controls = currentControls();
+        if (controls.form.getAttribute("aria-busy") === "true") {
+          return;
+        }
+        beginRequest("Running...");
+        controls.submitButton.textContent = "Running...";
+
+        try {
+          const form = controls.form;
+          const response = await fetch(form.action, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: new URLSearchParams(new FormData(form)),
+          });
+          await replacePage(response);
+        } catch (error) {
+          recoverRequest();
+          currentControls().form.querySelector(".form-error").textContent =
+            "Request failed. Please try again.";
+        }
+      });
+
+      microphoneButton.addEventListener("click", async () => {
+        const controls = currentControls();
+        if (controls.form.getAttribute("aria-busy") === "true") {
+          return;
+        }
+        beginRequest("Listening...");
+        controls.pendingStatus.textContent = "Listening...";
+
+        try {
+          const response = await fetch("/microphone", {method: "POST"});
+          await replacePage(response);
+        } catch (error) {
+          recoverRequest();
+          currentControls().form.querySelector(".form-error").textContent =
+            "Microphone request failed. Text input remains available.";
+        }
+      });
+    }
+
+    bindWebUIInteractions();
   </script>
 </body>
 </html>

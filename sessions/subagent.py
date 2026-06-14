@@ -349,11 +349,13 @@ class SubAgent:
                     is_complete=True,
                 )
             return ExecutionDecision(
-                action=WAIT,
+                action=COMPLETE,
                 tool_name=None,
                 tool_input=None,
-                reason="No reliable deterministic action is available.",
-                is_complete=False,
+                reason=(
+                    "No skill or tool is required; complete from the user input."
+                ),
+                is_complete=True,
             )
 
         visible_names = self._visible_tool_names(context, definitions)

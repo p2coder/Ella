@@ -86,7 +86,7 @@ def test_tool_result_contains_scene_summary():
     assert result.payload["status"] == "available"
     assert result.payload["summary"] == "Mock scene contains phone, keys, umbrella."
     assert result.payload["visible_items"] == ("phone", "keys", "umbrella")
-    assert result.payload["umbrella_visible"] is True
+    assert "umbrella_visible" not in result.payload
 
 
 def test_camera_unavailable_returns_safe_tool_result():
@@ -203,7 +203,6 @@ class RecordingMultimodalProvider:
             output={
                 "scene_summary": "Recorded frames summarized.",
                 "visible_items": ("phone",),
-                "umbrella_visible": False,
             },
         )
 

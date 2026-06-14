@@ -54,6 +54,24 @@ class LocalWebUI:
             body=render_web_ui_shell(result.snapshot),
         )
 
+    def submit_microphone(self) -> WebUIResponse:
+        try:
+            result = self._app_runtime.run_microphone_with_display()
+        except Exception as error:
+            return WebUIResponse(
+                status=500,
+                body=render_web_ui_shell(
+                    form_error=(
+                        "Ella could not complete the microphone task: "
+                        f"{error}"
+                    ),
+                ),
+            )
+        return WebUIResponse(
+            status=200,
+            body=render_web_ui_shell(result.snapshot),
+        )
+
     def handle_request(
         self,
         *,
@@ -65,6 +83,8 @@ class LocalWebUI:
         normalized_method = method.upper()
         if normalized_method == "GET" and path == "/":
             return WebUIResponse(status=200, body=render_web_ui_shell())
+        if normalized_method == "POST" and path == "/microphone":
+            return self.submit_microphone()
         if normalized_method == "POST" and path == "/submit":
             if content_type.split(";", 1)[0] != "application/x-www-form-urlencoded":
                 return WebUIResponse(
@@ -97,7 +117,7 @@ def render_web_ui_shell(
     data = _snapshot_data(snapshot)
     values = {
         "user_input": _value(data, "user_input"),
-        "transcript": _value(data, "transcript"),
+        "transcript_markup": _transcript_markup(data),
         "captured_frame_reference": _value(
             data,
             "captured_frame_reference",
@@ -183,6 +203,19 @@ def _join_items(value: Any) -> str:
         return escape(", ".join(str(item) for item in value))
     except TypeError:
         return escape(str(value))
+
+
+def _transcript_markup(data: Mapping[str, Any]) -> str:
+    transcript = data.get("transcript")
+    user_input = data.get("user_input")
+    if transcript is None or transcript == user_input:
+        return ""
+    return (
+        '<div class="field">'
+        '<span class="field-label">Transcript</span>'
+        f'<p class="field-value">{escape(str(transcript))}</p>'
+        "</div>"
+    )
 
 
 def _frame_markup(data: Mapping[str, Any]) -> str:
