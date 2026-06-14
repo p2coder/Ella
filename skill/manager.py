@@ -33,8 +33,28 @@ class SkillManager:
     def get_summary(self, skill_name: str) -> SkillDefinition | None:
         return self.registry.get(skill_name)
 
+    def get_summary_for_role(
+        self,
+        skill_name: str,
+        agent_role: str,
+    ) -> SkillDefinition | None:
+        skill = self.registry.get(skill_name)
+        if skill is None or agent_role not in skill.allowed_roles:
+            return None
+        return skill
+
     def list_summaries(self) -> tuple[dict[str, str], ...]:
         return self.registry.list_summaries()
+
+    def list_summaries_for_role(
+        self,
+        agent_role: str,
+    ) -> tuple[dict[str, str], ...]:
+        return tuple(
+            skill.summary()
+            for skill in self.registry.list_definitions()
+            if agent_role in skill.allowed_roles
+        )
 
     def load_full(self, skill_name: str) -> SkillDefinition:
         if self.registry.get(skill_name) is None:

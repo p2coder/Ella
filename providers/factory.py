@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from config.settings import EllaSettings, load_settings
@@ -16,7 +16,7 @@ from .mock import (
 
 @dataclass(frozen=True, slots=True)
 class ProviderFactory:
-    settings: EllaSettings | None = None
+    settings: EllaSettings | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.settings is None:
@@ -26,11 +26,12 @@ class ProviderFactory:
         if not self.settings.use_real_providers:
             return MockLLMProvider()
         if self.settings.model_provider == "qwen" and self._qwen_llm_configured():
-            from .qwen import QwenLLMProvider
+            from .qwen import DashScopeOpenAITransport, QwenLLMProvider
 
             return QwenLLMProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_llm_model or "qwen-plus",
+                client=DashScopeOpenAITransport(),
             )
         return UnavailableLLMProvider.from_settings(self.settings)
 
@@ -38,11 +39,12 @@ class ProviderFactory:
         if not self.settings.use_real_providers:
             return MockSpeechProvider()
         if self.settings.model_provider == "qwen" and self._qwen_speech_configured():
-            from .qwen import QwenSpeechProvider
+            from .qwen import DashScopeOpenAITransport, QwenSpeechProvider
 
             return QwenSpeechProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_speech_model or "qwen-audio",
+                client=DashScopeOpenAITransport(),
             )
         return UnavailableSpeechProvider.from_settings(self.settings)
 
@@ -53,11 +55,12 @@ class ProviderFactory:
             self.settings.model_provider == "qwen"
             and self._qwen_multimodal_configured()
         ):
-            from .qwen import QwenMultimodalProvider
+            from .qwen import DashScopeOpenAITransport, QwenMultimodalProvider
 
             return QwenMultimodalProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_multimodal_model or "qwen-vl-plus",
+                client=DashScopeOpenAITransport(),
             )
         return UnavailableVisionProvider.from_settings(self.settings)
 
@@ -70,11 +73,12 @@ class ProviderFactory:
             self.settings.model_provider == "qwen"
             and self._qwen_multimodal_configured()
         ):
-            from .qwen import QwenMultimodalProvider
+            from .qwen import DashScopeOpenAITransport, QwenMultimodalProvider
 
             return QwenMultimodalProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_multimodal_model or "qwen-vl-plus",
+                client=DashScopeOpenAITransport(),
             )
         return UnavailableMultimodalProvider.from_settings(self.settings)
 

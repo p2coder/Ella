@@ -12,12 +12,15 @@ from skill import SkillDefinition, SkillManager
 FIXED_TIME = datetime(2026, 6, 13, 14, 0, tzinfo=timezone.utc)
 
 
-def make_handoff(task_goal: str) -> HandoffRequest:
+def make_handoff(
+    task_goal: str,
+    trigger_text: str = "Ella，我要出门了",
+) -> HandoffRequest:
     event = StandardizedEvent(
         trace_id="trace-subagent",
         source="cli_input",
         timestamp=FIXED_TIME,
-        payload={"text": "Ella，我要出门了"},
+        payload={"text": trigger_text},
         event_type="USER_UTTERANCE",
         metadata={"trigger_kind": "user_initiated"},
     )
@@ -45,11 +48,14 @@ def make_manager() -> SkillManager:
     return manager
 
 
-def make_session_creation(task_goal: str):
+def make_session_creation(
+    task_goal: str,
+    trigger_text: str = "Ella，我要出门了",
+):
     return TaskSessionManager(
         session_id_factory=lambda: "session-subagent",
         task_id_factory=lambda: "task-subagent",
-    ).create_session(make_handoff(task_goal))
+    ).create_session(make_handoff(task_goal, trigger_text))
 
 
 def test_subagent_selects_going_out_skill_for_leaving_goal():
@@ -76,6 +82,20 @@ def test_subagent_selects_going_out_skill_for_leaving_goal():
     )
 
 
+def test_subagent_keeps_going_out_intent_when_llm_goal_is_chinese():
+    creation = make_session_creation("在用户出门前给出简短且必要的提醒。")
+    subagent = SubAgent(skill_manager=make_manager())
+
+    decision = subagent.select_strategy(
+        handoff=creation.session.handoff,
+        context=creation.context,
+        task_session=creation.session,
+    )
+
+    assert decision.mode == "skill"
+    assert decision.skill_name == "going_out"
+
+
 def test_subagent_accepts_execution_context_and_task_session():
     creation = make_session_creation(
         "Give the user a short, necessary reminder before leaving."
@@ -93,7 +113,10 @@ def test_subagent_accepts_execution_context_and_task_session():
 
 
 def test_strategy_selection_falls_back_without_skill_execution():
-    creation = make_session_creation("Clarify and prepare a concise response.")
+    creation = make_session_creation(
+        "Clarify and prepare a concise response.",
+        trigger_text="Ella，帮我整理一下今天的计划。",
+    )
     subagent = SubAgent(skill_manager=make_manager())
 
     decision = subagent.select_strategy(

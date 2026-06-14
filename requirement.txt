@@ -1,0 +1,6 @@
+# Runtime dependencies
+opencv-python>=4.12,<5
+sounddevice>=0.5,<1
+
+# Test dependency
+pytest>=9,<10

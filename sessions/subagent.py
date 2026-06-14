@@ -15,6 +15,26 @@ GOING_OUT_TOOL_SEQUENCE = (
     "mock_checklist",
 )
 
+GOING_OUT_VISUAL_TOOL_SEQUENCE = (
+    "camera_scene",
+    "mock_weather",
+    "mock_checklist",
+)
+
+VISUAL_REQUEST_MARKERS = (
+    "camera",
+    "current view",
+    "current scene",
+    "visual context",
+    "look at",
+    "see whether",
+    "画面",
+    "看看",
+    "看到",
+    "视觉",
+    "摄像头",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SubAgent:
@@ -87,7 +107,8 @@ class SubAgent:
             for entry in task_session.tool_trace
             if isinstance(entry, dict)
         }
-        for tool_name in GOING_OUT_TOOL_SEQUENCE:
+        tool_sequence = self._going_out_tool_sequence(handoff, context)
+        for tool_name in tool_sequence:
             if tool_name not in completed_tools:
                 return ExecutionDecision(
                     action=CALL_TOOL,
@@ -108,14 +129,48 @@ class SubAgent:
             is_complete=True,
         )
 
+    def _going_out_tool_sequence(
+        self,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+    ) -> tuple[str, ...]:
+        if (
+            "camera_scene" in context.allowed_tools
+            and self._needs_visual_context(handoff)
+        ):
+            return GOING_OUT_VISUAL_TOOL_SEQUENCE
+        return GOING_OUT_TOOL_SEQUENCE
+
+    def _needs_visual_context(self, handoff: HandoffRequest) -> bool:
+        request_text = " ".join(
+            (
+                handoff.task_goal,
+                handoff.context_summary,
+                handoff.environment_summary,
+                str(handoff.trigger_event.payload.get("text", "")),
+            )
+        ).lower()
+        return any(marker in request_text for marker in VISUAL_REQUEST_MARKERS)
+
     def _can_use_going_out_skill(self, handoff: HandoffRequest) -> bool:
         skill = self.skill_manager.get_summary("going_out")
         if skill is None:
             return False
 
-        goal = handoff.task_goal.lower()
+        task_text = " ".join(
+            (
+                handoff.task_goal,
+                handoff.context_summary,
+                str(handoff.trigger_event.payload.get("text", "")),
+            )
+        ).lower()
         summary_text = f"{skill.description} {skill.when_to_use}".lower()
         return (
-            ("leaving" in goal or "before leaving" in goal)
+            (
+                "leaving" in task_text
+                or "before leaving" in task_text
+                or "heading out" in task_text
+                or "出门" in task_text
+            )
             and ("leaving" in summary_text or "heading out" in summary_text)
         )

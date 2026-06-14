@@ -1,5 +1,6 @@
 import importlib
 
+import config.config as user_config
 from config.settings import EllaSettings, load_settings
 
 
@@ -59,7 +60,7 @@ def test_missing_qwen_api_key_does_not_crash_settings_loading():
     assert settings.qwen_api_key is None
 
 
-def test_environment_overrides_are_applied():
+def test_programmatic_overrides_are_applied():
     settings = load_settings(
         {
             "ELLA_MODEL_PROVIDER": "mock",
@@ -90,8 +91,53 @@ def test_environment_overrides_are_applied():
     )
 
 
-def test_importing_config_package_has_no_environment_side_effect(monkeypatch):
+def test_settings_load_user_config_when_no_overrides(monkeypatch):
+    monkeypatch.setattr(user_config, "MODEL_PROVIDER", "mock")
+    monkeypatch.setattr(user_config, "CAMERA_TASK_FPS", 3)
+
+    settings = load_settings()
+
+    assert settings.model_provider == "mock"
+    assert settings.camera_task_fps == 3
+
+
+def test_missing_user_config_value_uses_safe_default(monkeypatch):
+    monkeypatch.delattr(user_config, "CAMERA_TASK_FPS")
+
+    settings = load_settings()
+
+    assert settings.camera_task_fps == 1
+
+
+def test_non_secret_environment_variables_are_ignored(monkeypatch):
     monkeypatch.setenv("ELLA_USE_REAL_PROVIDERS", "true")
+    monkeypatch.setattr(user_config, "USE_REAL_PROVIDERS", False)
+
+    settings = load_settings()
+
+    assert settings.use_real_providers is False
+
+
+def test_qwen_api_key_supports_provider_environment_name(monkeypatch):
+    monkeypatch.delenv("ELLA_QWEN_API_KEY", raising=False)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-secret")
+    monkeypatch.setattr(user_config, "QWEN_API_KEY", None)
+
+    settings = load_settings()
+
+    assert settings.qwen_api_key == "dashscope-secret"
+
+
+def test_project_api_key_environment_name_has_priority(monkeypatch):
+    monkeypatch.setenv("ELLA_QWEN_API_KEY", "ella-secret")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-secret")
+
+    settings = load_settings()
+
+    assert settings.qwen_api_key == "ella-secret"
+
+
+def test_importing_config_package_has_no_runtime_side_effect():
 
     config = importlib.import_module("config")
 

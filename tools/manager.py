@@ -30,6 +30,19 @@ class ToolManager:
     def list_names(self) -> tuple[str, ...]:
         return self.registry.list_names()
 
+    def list_names_for_role(self, agent_role: str) -> tuple[str, ...]:
+        return tuple(
+            tool_name
+            for tool_name in self.registry.list_names()
+            if self.get_for_role(tool_name, agent_role) is not None
+        )
+
+    def get_for_role(self, tool_name: str, agent_role: str) -> Tool | None:
+        tool = self.registry.get(tool_name)
+        if tool is None or agent_role not in self._allowed_roles(tool):
+            return None
+        return tool
+
     def execute(
         self,
         tool_name: str,
@@ -41,4 +54,13 @@ class ToolManager:
         tool = self.registry.get(tool_name)
         if tool is None:
             raise CapabilityUnavailableError(tool_name, "not registered")
+        if context.agent_role not in self._allowed_roles(tool):
+            raise CapabilityUnavailableError(
+                tool_name,
+                f"not visible to agent role {context.agent_role}",
+            )
         return tool.run(context)
+
+    @staticmethod
+    def _allowed_roles(tool: Tool) -> tuple[str, ...]:
+        return getattr(tool, "allowed_roles", ("main_agent",))
