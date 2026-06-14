@@ -18,3 +18,6 @@ tools. The resulting memory record is written through `MemoryManager` to
 ## Documents
 
 - [Ella Agent Runtime MVP PRD](docs/prd.md)
+
+## Demo
+https://www.bilibili.com/video/BV1ckJK6qEuz/?spm_id_from=333.1387.homepage.video_card.click&vd_source=25ce35f62a8ee42f11eb3fc1bb6190cc
