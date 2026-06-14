@@ -7,7 +7,7 @@ from devices.camera import CameraProvider, MockCameraProvider
 from providers.mock import MockMultimodalProvider
 from providers.vision import MultimodalProvider
 
-from .base import ToolResult
+from .base import ToolDefinition, ToolResult
 
 
 SUPPORTED_DISPLAY_MIME_TYPES = {
@@ -39,6 +39,56 @@ class CameraSceneTool:
     store_raw_media: bool = False
     name: str = "camera_scene"
     allowed_roles: tuple[str, ...] = ("main_agent",)
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Use to capture a bounded visual scene summary when the current "
+                "task needs fresh visual context. Do not use for continuous "
+                "surveillance, unbounded capture, identity recognition, or when "
+                "the task can be answered without visual context."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "max_frames": {
+                        "type": "number",
+                        "description": "Maximum bounded frames to capture.",
+                    },
+                    "max_duration_seconds": {
+                        "type": "number",
+                        "description": "Maximum bounded capture duration.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            input_examples=(
+                {"max_frames": 3, "max_duration_seconds": 3},
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["available", "unavailable"],
+                    },
+                    "summary": {"type": "string"},
+                    "visible_items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "umbrella_visible": {"type": "boolean"},
+                    "frames_captured": {"type": "number"},
+                    "providers": {"type": "object"},
+                    "captured_frame_reference": {"type": "string"},
+                    "error": {"type": "object"},
+                },
+                "required": ["status", "summary", "frames_captured"],
+            },
+        )
 
     def __post_init__(self) -> None:
         if self.max_frames is None and self.max_duration_seconds is None:
