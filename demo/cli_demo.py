@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from devices.factory import DeviceFactory
 from events.source import CLITextSignalSource
 from memory import MemoryManager
 from providers.factory import ProviderFactory
@@ -35,14 +36,28 @@ class DemoRuntime:
         cls,
         memory_path: Path = DEFAULT_MEMORY_PATH,
     ) -> "DemoRuntime":
-        llm_provider = ProviderFactory().llm()
+        provider_factory = ProviderFactory()
+        device_factory = DeviceFactory()
+        llm_provider = provider_factory.llm()
+        multimodal_factory = getattr(provider_factory, "multimodal", None)
+        multimodal_provider = (
+            multimodal_factory()
+            if multimodal_factory is not None
+            else CameraSceneTool().multimodal_provider
+        )
+        camera_provider = device_factory.camera()
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
         )
         skill_manager.refresh()
 
         tool_manager = ToolManager()
-        tool_manager.register(CameraSceneTool())
+        tool_manager.register(
+            CameraSceneTool(
+                camera_provider=camera_provider,
+                multimodal_provider=multimodal_provider,
+            )
+        )
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
