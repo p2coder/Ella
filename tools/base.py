@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import inspect
 from typing import Any, Protocol, Sequence
+import warnings
 
 from agent.context import AgentExecutionContext
 
@@ -64,5 +66,33 @@ class Tool(Protocol):
     name: str
     allowed_roles: tuple[str, ...]
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
         ...
+
+
+def invoke_tool(
+    tool: Tool,
+    context: AgentExecutionContext,
+    arguments: dict[str, object],
+) -> ToolResult:
+    parameters = inspect.signature(tool.run).parameters.values()
+    supports_arguments = any(
+        parameter.name == "arguments"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if supports_arguments:
+        return tool.run(context=context, arguments=arguments)
+
+    if arguments:
+        warnings.warn(
+            f"tool {tool.name} uses deprecated run(context) and cannot consume "
+            "validated arguments",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return tool.run(context)

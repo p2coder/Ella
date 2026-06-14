@@ -5,6 +5,18 @@ from agent.context import AgentExecutionContext
 from .base import ToolDefinition, ToolResult
 
 
+TASK_CONTEXT_INPUT_PROPERTIES = {
+    "task_goal": {
+        "type": "string",
+        "description": "Current task goal supplied by the execution boundary.",
+    },
+    "session_id": {
+        "type": "string",
+        "description": "Current task session identifier.",
+    },
+}
+
+
 @dataclass(frozen=True, slots=True)
 class MockWeatherTool:
     name: str = "mock_weather"
@@ -23,6 +35,7 @@ class MockWeatherTool:
             input_schema={
                 "type": "object",
                 "properties": {
+                    **TASK_CONTEXT_INPUT_PROPERTIES,
                     "location": {
                         "type": "string",
                         "description": "Optional local area to describe.",
@@ -45,7 +58,11 @@ class MockWeatherTool:
             },
         )
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
@@ -75,7 +92,7 @@ class MockVisionSummaryTool:
             schema_version="1.0",
             input_schema={
                 "type": "object",
-                "properties": {},
+                "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),
                 "additionalProperties": False,
             },
             input_examples=({},),
@@ -92,7 +109,11 @@ class MockVisionSummaryTool:
             },
         )
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
@@ -122,7 +143,7 @@ class MockChecklistTool:
             schema_version="1.0",
             input_schema={
                 "type": "object",
-                "properties": {},
+                "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),
                 "additionalProperties": False,
             },
             input_examples=({},),
@@ -138,7 +159,11 @@ class MockChecklistTool:
             },
         )
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,

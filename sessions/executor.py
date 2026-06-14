@@ -5,6 +5,7 @@ from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
 from skill import SkillManager
 from tools import ToolManager, ToolResult
+from tools.base import invoke_tool
 
 from .decision import CALL_TOOL, REPLAN, ExecutionDecision
 from .session import TaskSession
@@ -122,14 +123,6 @@ class CapabilityExecutor:
             input_schema,
             path="arguments",
         )
-        if input_error is not None and arguments:
-            empty_arguments_error = _validate_schema(
-                {},
-                input_schema,
-                path="arguments",
-            )
-            if empty_arguments_error is None:
-                input_error = None
         if input_error is not None:
             return self._failure(
                 decision=decision,
@@ -138,7 +131,7 @@ class CapabilityExecutor:
                 unavailable_tool=tool_name,
             )
 
-        tool_result = tool.run(context)
+        tool_result = invoke_tool(tool, context, arguments)
         output_schema = _tool_schema(tool, "output_schema")
         output_error = _validate_schema(
             tool_result.payload,
@@ -314,6 +307,13 @@ def _validate_schema(value: Any, schema: dict[str, Any], *, path: str) -> str | 
         not isinstance(value, (int, float)) or isinstance(value, bool)
     ):
         return f"{path} must be a number"
+    if schema_type == "number":
+        minimum = schema.get("minimum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            return f"{path} must be at least {minimum}"
+        maximum = schema.get("maximum")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            return f"{path} must be at most {maximum}"
     if schema_type == "boolean" and not isinstance(value, bool):
         return f"{path} must be a boolean"
     return None

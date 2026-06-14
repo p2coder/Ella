@@ -54,13 +54,33 @@ class CameraSceneTool:
             input_schema={
                 "type": "object",
                 "properties": {
+                    "task_goal": {
+                        "type": "string",
+                        "description": "Current task goal supplied by execution.",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Current task session identifier.",
+                    },
                     "max_frames": {
                         "type": "number",
                         "description": "Maximum bounded frames to capture.",
+                        "minimum": 1,
+                        **(
+                            {"maximum": self.max_frames}
+                            if self.max_frames is not None
+                            else {}
+                        ),
                     },
                     "max_duration_seconds": {
                         "type": "number",
                         "description": "Maximum bounded capture duration.",
+                        "minimum": 1,
+                        **(
+                            {"maximum": self.max_duration_seconds}
+                            if self.max_duration_seconds is not None
+                            else {}
+                        ),
                     },
                 },
                 "additionalProperties": False,
@@ -101,12 +121,27 @@ class CameraSceneTool:
         ):
             raise ValueError("max_duration_seconds must be at least 1")
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
+        arguments = arguments or {}
+        frame_limit = self._runtime_limit(
+            arguments,
+            "max_frames",
+            self.max_frames,
+        )
+        duration_limit = self._runtime_limit(
+            arguments,
+            "max_duration_seconds",
+            self.max_duration_seconds,
+        )
         frames = []
-        frame_limit = self.max_frames or 1
-        for _ in range(frame_limit):
+        for _ in range(frame_limit or 1):
             camera_result = self.camera_provider.capture_frame(
-                trace_id=context.trace_id
+                trace_id=context.trace_id,
+                metadata={"max_duration_seconds": duration_limit},
             )
             if camera_result.failed:
                 return self._unavailable_result(
@@ -162,6 +197,25 @@ class CameraSceneTool:
             trace_id=context.trace_id,
             payload=payload,
         )
+
+    @staticmethod
+    def _runtime_limit(
+        arguments: dict[str, object],
+        name: str,
+        configured_limit: int | None,
+    ) -> int | None:
+        requested = arguments.get(name, configured_limit)
+        if requested is None:
+            return None
+        if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+            raise ValueError(f"{name} must be a number")
+        if requested < 1:
+            raise ValueError(f"{name} must be at least 1")
+        if configured_limit is not None and requested > configured_limit:
+            raise ValueError(
+                f"{name} must not exceed configured limit {configured_limit}"
+            )
+        return int(requested)
 
     @staticmethod
     def _display_frame_reference(frame: Any) -> str | None:

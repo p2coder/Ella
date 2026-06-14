@@ -8,6 +8,8 @@ from prompts.templates import TEMPLATES_BY_TYPE, PromptTemplate
 class PromptType:
     TASK_FORMULATION = "TASK_FORMULATION"
     FINAL_RESPONSE = "FINAL_RESPONSE"
+    STRATEGY_SELECTION = "STRATEGY_SELECTION"
+    EXECUTION_DECISION = "EXECUTION_DECISION"
 
 
 @dataclass(frozen=True, slots=True)
