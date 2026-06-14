@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from devices.factory import DeviceFactory
 from devices.microphone import MicrophoneProvider, MockMicrophoneProvider
 from events.signal import RawSignal
+from providers.factory import ProviderFactory
 from providers.mock import MockSpeechProvider
 from providers.speech import SpeechProvider
 
@@ -21,6 +23,20 @@ class MicrophoneSource:
         default_factory=MockMicrophoneProvider
     )
     speech_provider: SpeechProvider = field(default_factory=MockSpeechProvider)
+
+    @classmethod
+    def from_factories(
+        cls,
+        *,
+        device_factory: DeviceFactory | None = None,
+        provider_factory: ProviderFactory | None = None,
+    ) -> "MicrophoneSource":
+        configured_devices = device_factory or DeviceFactory()
+        configured_providers = provider_factory or ProviderFactory()
+        return cls(
+            microphone_provider=configured_devices.microphone(),
+            speech_provider=configured_providers.speech(),
+        )
 
     def capture_transcript(self, *, trace_id: str) -> MicrophoneSourceResult:
         microphone_result = self.microphone_provider.capture(trace_id=trace_id)
