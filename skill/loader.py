@@ -40,6 +40,8 @@ class SkillLoader:
             when_to_use=metadata["when_to_use"],
             path=skill_path,
             allowed_roles=self._parse_allowed_roles(metadata.get("allowed_roles")),
+            required_tools=self._parse_tool_names(metadata.get("required_tools")),
+            optional_tools=self._parse_tool_names(metadata.get("optional_tools")),
             content=raw_content if include_content else None,
         )
 
@@ -49,6 +51,16 @@ class SkillLoader:
             return ("main_agent",)
         roles = tuple(role.strip() for role in value.split(",") if role.strip())
         return roles or ("main_agent",)
+
+    @staticmethod
+    def _parse_tool_names(value: str | None) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        return tuple(
+            tool_name.strip()
+            for tool_name in value.split(",")
+            if tool_name.strip()
+        )
 
     def _parse_front_matter(self, content: str) -> dict[str, str]:
         lines = content.splitlines()

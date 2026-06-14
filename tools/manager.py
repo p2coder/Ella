@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from agent.context import AgentExecutionContext
 from registries.tool_registry import ToolRegistry
 
-from .base import Tool, ToolResult
+from .base import Tool, ToolDefinition, ToolResult, invoke_tool
 
 
 class CapabilityUnavailableError(RuntimeError):
@@ -30,6 +30,20 @@ class ToolManager:
     def list_names(self) -> tuple[str, ...]:
         return self.registry.list_names()
 
+    def get_tool(self, tool_name: str) -> Tool | None:
+        return self.registry.get(tool_name)
+
+    def list_definitions(
+        self, context: AgentExecutionContext
+    ) -> tuple[ToolDefinition, ...]:
+        return tuple(
+            tool.definition
+            for tool_name in self.registry.list_names()
+            if tool_name in context.allowed_tools
+            for tool in (self.get_for_role(tool_name, context.agent_role),)
+            if tool is not None
+        )
+
     def list_names_for_role(self, agent_role: str) -> tuple[str, ...]:
         return tuple(
             tool_name
@@ -47,6 +61,7 @@ class ToolManager:
         self,
         tool_name: str,
         context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
     ) -> ToolResult:
         if tool_name not in context.allowed_tools:
             raise CapabilityUnavailableError(tool_name, "not allowed")
@@ -59,7 +74,7 @@ class ToolManager:
                 tool_name,
                 f"not visible to agent role {context.agent_role}",
             )
-        return tool.run(context)
+        return invoke_tool(tool, context, arguments or {})
 
     @staticmethod
     def _allowed_roles(tool: Tool) -> tuple[str, ...]:

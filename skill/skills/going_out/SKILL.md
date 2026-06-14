@@ -3,6 +3,8 @@ name: going_out
 description: Prepare a short reminder when the user is leaving, optionally using current visual context.
 when_to_use: Use when the user is heading out; request camera_scene only when the task explicitly needs the current view.
 allowed_roles: main_agent
+required_tools: mock_weather, mock_checklist
+optional_tools: camera_scene, mock_vision_summary
 ---
 
 # going_out

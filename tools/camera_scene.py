@@ -1,11 +1,31 @@
+import base64
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent.context import AgentExecutionContext
 from devices.camera import CameraProvider, MockCameraProvider
 from providers.mock import MockMultimodalProvider
 from providers.vision import MultimodalProvider
 
-from .base import ToolResult
+from .base import ToolDefinition, ToolResult
+
+
+SUPPORTED_DISPLAY_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+}
+
+
+class _DisplayFrameReference(str):
+    """Keep display data readable while redacting generic text summaries."""
+
+    def __str__(self) -> str:
+        return "[display frame omitted]"
+
+    def __repr__(self) -> str:
+        return "'[display frame omitted]'"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +40,75 @@ class CameraSceneTool:
     name: str = "camera_scene"
     allowed_roles: tuple[str, ...] = ("main_agent",)
 
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Use to capture a bounded visual scene summary when the current "
+                "task needs fresh visual context. Do not use for continuous "
+                "surveillance, unbounded capture, identity recognition, or when "
+                "the task can be answered without visual context."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "task_goal": {
+                        "type": "string",
+                        "description": "Current task goal supplied by execution.",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Current task session identifier.",
+                    },
+                    "max_frames": {
+                        "type": "number",
+                        "description": "Maximum bounded frames to capture.",
+                        "minimum": 1,
+                        **(
+                            {"maximum": self.max_frames}
+                            if self.max_frames is not None
+                            else {}
+                        ),
+                    },
+                    "max_duration_seconds": {
+                        "type": "number",
+                        "description": "Maximum bounded capture duration.",
+                        "minimum": 1,
+                        **(
+                            {"maximum": self.max_duration_seconds}
+                            if self.max_duration_seconds is not None
+                            else {}
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+            input_examples=(
+                {"max_frames": 3, "max_duration_seconds": 3},
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["available", "unavailable"],
+                    },
+                    "summary": {"type": "string"},
+                    "visible_items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "frames_captured": {"type": "number"},
+                    "providers": {"type": "object"},
+                    "captured_frame_reference": {"type": "string"},
+                    "error": {"type": "object"},
+                },
+                "required": ["status", "summary", "frames_captured"],
+            },
+        )
+
     def __post_init__(self) -> None:
         if self.max_frames is None and self.max_duration_seconds is None:
             raise ValueError("camera scene capture must be bounded")
@@ -31,12 +120,27 @@ class CameraSceneTool:
         ):
             raise ValueError("max_duration_seconds must be at least 1")
 
-    def run(self, context: AgentExecutionContext) -> ToolResult:
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
+        arguments = arguments or {}
+        frame_limit = self._runtime_limit(
+            arguments,
+            "max_frames",
+            self.max_frames,
+        )
+        duration_limit = self._runtime_limit(
+            arguments,
+            "max_duration_seconds",
+            self.max_duration_seconds,
+        )
         frames = []
-        frame_limit = self.max_frames or 1
-        for _ in range(frame_limit):
+        for _ in range(frame_limit or 1):
             camera_result = self.camera_provider.capture_frame(
-                trace_id=context.trace_id
+                trace_id=context.trace_id,
+                metadata={"max_duration_seconds": duration_limit},
             )
             if camera_result.failed:
                 return self._unavailable_result(
@@ -73,7 +177,6 @@ class CameraSceneTool:
             "status": "available",
             "summary": output["scene_summary"],
             "visible_items": output.get("visible_items", ()),
-            "umbrella_visible": output.get("umbrella_visible"),
             "frames_captured": len(frames),
             "providers": {
                 "camera": self.camera_provider.device_name,
@@ -82,7 +185,9 @@ class CameraSceneTool:
             "raw_media_stored": self.store_raw_media,
         }
         if self.store_raw_media:
-            payload["frames"] = tuple(frames)
+            display_reference = self._display_frame_reference(frames[0])
+            if display_reference is not None:
+                payload["captured_frame_reference"] = display_reference
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
@@ -90,6 +195,38 @@ class CameraSceneTool:
             trace_id=context.trace_id,
             payload=payload,
         )
+
+    @staticmethod
+    def _runtime_limit(
+        arguments: dict[str, object],
+        name: str,
+        configured_limit: int | None,
+    ) -> int | None:
+        requested = arguments.get(name, configured_limit)
+        if requested is None:
+            return None
+        if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+            raise ValueError(f"{name} must be a number")
+        if requested < 1:
+            raise ValueError(f"{name} must be at least 1")
+        if configured_limit is not None and requested > configured_limit:
+            raise ValueError(
+                f"{name} must not exceed configured limit {configured_limit}"
+            )
+        return int(requested)
+
+    @staticmethod
+    def _display_frame_reference(frame: Any) -> str | None:
+        if not isinstance(frame, dict):
+            return None
+        mime_type = frame.get("mime_type")
+        encoded_bytes = frame.get("bytes")
+        if mime_type not in SUPPORTED_DISPLAY_MIME_TYPES:
+            return None
+        if not isinstance(encoded_bytes, (bytes, bytearray, memoryview)):
+            return None
+        encoded = base64.b64encode(bytes(encoded_bytes)).decode("ascii")
+        return _DisplayFrameReference(f"data:{mime_type};base64,{encoded}")
 
     def _unavailable_result(
         self,

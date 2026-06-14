@@ -78,7 +78,7 @@ def test_mock_vision_returns_deterministic_scene_summary():
     )
 
 
-def test_mock_multimodal_returns_going_out_visual_observation():
+def test_mock_multimodal_returns_general_visual_observation():
     provider = MockMultimodalProvider(
         visible_items=("phone", "keys", "wallet", "umbrella"),
     )
@@ -94,18 +94,17 @@ def test_mock_multimodal_returns_going_out_visual_observation():
     assert result.output == {
         "scene_summary": "Mock scene contains phone, keys, wallet, umbrella.",
         "visible_items": ("phone", "keys", "wallet", "umbrella"),
-        "umbrella_visible": True,
-        "observation_type": "going_out_visual_context",
+        "observation_type": "visual_scene_summary",
     }
     assert result.metadata == {"mock": True}
 
 
-def test_mock_multimodal_reports_missing_umbrella_deterministically():
+def test_mock_multimodal_does_not_add_task_specific_visibility_fields():
     provider = MockMultimodalProvider(visible_items=("phone", "keys", "wallet"))
 
     result = provider.describe({"text": "umbrella?", "image": "frame"})
 
-    assert result.output["umbrella_visible"] is False
+    assert "umbrella_visible" not in result.output
     assert result.output["visible_items"] == ("phone", "keys", "wallet")
 
 

@@ -10,14 +10,21 @@ class SkillDefinition:
     when_to_use: str
     path: Path
     allowed_roles: tuple[str, ...] = ("main_agent",)
+    required_tools: tuple[str, ...] = ()
+    optional_tools: tuple[str, ...] = ()
     content: str | None = None
 
-    def summary(self) -> dict[str, str]:
-        return {
+    def summary(self) -> dict[str, object]:
+        summary = {
             "name": self.name,
             "description": self.description,
             "when_to_use": self.when_to_use,
         }
+        if self.required_tools:
+            summary["required_tools"] = self.required_tools
+        if self.optional_tools:
+            summary["optional_tools"] = self.optional_tools
+        return summary
 
 
 class SkillRegistry:
