@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
 from skill import SkillManager
-from tools import CapabilityUnavailableError, ToolManager, ToolResult
+from tools import ToolManager, ToolResult
 
 from .decision import CALL_TOOL, REPLAN, ExecutionDecision
 from .session import TaskSession
@@ -98,13 +99,57 @@ class CapabilityExecutor:
                 unavailable_tool=tool_name,
             )
 
-        try:
-            tool_result = self.tool_manager.execute(tool_name, context)
-        except CapabilityUnavailableError as error:
+        tool = self.tool_manager.get_tool(tool_name)
+        if tool is None:
             return self._failure(
                 decision=decision,
                 strategy=strategy,
-                reason=str(error),
+                reason=f"tool {tool_name} is not registered",
+                unavailable_tool=tool_name,
+            )
+        if context.agent_role not in self.tool_manager._allowed_roles(tool):
+            return self._failure(
+                decision=decision,
+                strategy=strategy,
+                reason=f"tool {tool_name} is not visible to agent role {context.agent_role}",
+                unavailable_tool=tool_name,
+            )
+
+        arguments = decision.tool_input or {}
+        input_schema = _tool_schema(tool, "input_schema")
+        input_error = _validate_schema(
+            arguments,
+            input_schema,
+            path="arguments",
+        )
+        if input_error is not None and arguments:
+            empty_arguments_error = _validate_schema(
+                {},
+                input_schema,
+                path="arguments",
+            )
+            if empty_arguments_error is None:
+                input_error = None
+        if input_error is not None:
+            return self._failure(
+                decision=decision,
+                strategy=strategy,
+                reason=f"invalid_tool_input: {input_error}",
+                unavailable_tool=tool_name,
+            )
+
+        tool_result = tool.run(context)
+        output_schema = _tool_schema(tool, "output_schema")
+        output_error = _validate_schema(
+            tool_result.payload,
+            output_schema,
+            path="payload",
+        )
+        if output_error is not None:
+            return self._failure(
+                decision=decision,
+                strategy=strategy,
+                reason=f"invalid_tool_output: {output_error}",
                 unavailable_tool=tool_name,
             )
 
@@ -203,3 +248,72 @@ class CapabilityExecutor:
             failure_reason=reason,
             unavailable_tool=unavailable_tool,
         )
+
+
+def _tool_schema(tool: Any, schema_name: str) -> dict[str, Any]:
+    definition = getattr(tool, "definition", None)
+    if definition is None:
+        return {"type": "object"}
+    schema = getattr(definition, schema_name, None)
+    if not isinstance(schema, dict):
+        return {"type": "object"}
+    return schema
+
+
+def _validate_schema(value: Any, schema: dict[str, Any], *, path: str) -> str | None:
+    if "enum" in schema and value not in schema["enum"]:
+        return f"{path} must be one of {tuple(schema['enum'])}"
+
+    schema_type = schema.get("type")
+    if schema_type is None:
+        return None
+    if schema_type == "object":
+        if not isinstance(value, dict):
+            return f"{path} must be an object"
+        required = schema.get("required", ())
+        if isinstance(required, (list, tuple)):
+            for key in required:
+                if key not in value:
+                    return f"{path}.{key} is required"
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return None
+        if schema.get("additionalProperties") is False:
+            extra_keys = tuple(key for key in value if key not in properties)
+            if extra_keys:
+                return f"{path} has unsupported property {extra_keys[0]}"
+        required_keys = set(required) if isinstance(required, (list, tuple)) else set()
+        for key, nested_schema in properties.items():
+            if key not in value:
+                continue
+            if value[key] is None and key not in required_keys:
+                continue
+            if not isinstance(nested_schema, dict):
+                continue
+            error = _validate_schema(
+                value[key],
+                nested_schema,
+                path=f"{path}.{key}",
+            )
+            if error is not None:
+                return error
+        return None
+    if schema_type == "array":
+        if not isinstance(value, (list, tuple)):
+            return f"{path} must be an array"
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                error = _validate_schema(item, item_schema, path=f"{path}[{index}]")
+                if error is not None:
+                    return error
+        return None
+    if schema_type == "string" and not isinstance(value, str):
+        return f"{path} must be a string"
+    if schema_type == "number" and (
+        not isinstance(value, (int, float)) or isinstance(value, bool)
+    ):
+        return f"{path} must be a number"
+    if schema_type == "boolean" and not isinstance(value, bool):
+        return f"{path} must be a boolean"
+    return None
