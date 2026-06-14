@@ -2,7 +2,11 @@ from dataclasses import dataclass
 
 from config.settings import EllaSettings, load_settings
 
-from .camera import MockCameraProvider, UnavailableCameraProvider
+from .camera import (
+    MockCameraProvider,
+    RealCameraProvider,
+    UnavailableCameraProvider,
+)
 from .microphone import MockMicrophoneProvider, UnavailableMicrophoneProvider
 
 
@@ -26,7 +30,9 @@ class DeviceFactory:
             device_label=self.settings.mic_device,
         )
 
-    def camera(self) -> MockCameraProvider | UnavailableCameraProvider:
+    def camera(
+        self,
+    ) -> MockCameraProvider | RealCameraProvider | UnavailableCameraProvider:
         if not self.settings.use_real_providers:
             return MockCameraProvider()
         if not self.settings.camera_enabled:
@@ -34,6 +40,6 @@ class DeviceFactory:
                 reason="camera is disabled by settings",
                 enabled_flag="ELLA_CAMERA_ENABLED",
             )
-        return UnavailableCameraProvider(
-            device_label=self.settings.camera_device,
+        return RealCameraProvider(
+            camera_device=self.settings.camera_device,
         )

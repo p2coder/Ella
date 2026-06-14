@@ -3,6 +3,7 @@ name = "ella-runtime-mvp"
 version = "0.1.0"
 description = "Minimal root skeleton for the Ella Runtime MVP."
 requires-python = ">=3.11"
+dependencies = ["opencv-python>=4.12,<5"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
