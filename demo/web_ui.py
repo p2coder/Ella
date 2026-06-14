@@ -1,11 +1,71 @@
+from dataclasses import dataclass
 from html import escape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import parse_qs
 
+from demo.app_runtime import AppRuntime
 from demo.display_snapshot import RunDisplaySnapshot
 
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "static" / "web_ui.html"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+
+@dataclass(frozen=True, slots=True)
+class WebUIResponse:
+    status: int
+    body: str
+    content_type: str = "text/html; charset=utf-8"
+
+
+class LocalWebUI:
+    def __init__(self, app_runtime: AppRuntime) -> None:
+        self._app_runtime = app_runtime
+
+    def submit_text(self, input_text: str) -> WebUIResponse:
+        normalized_text = input_text.strip()
+        if not normalized_text:
+            return WebUIResponse(
+                status=400,
+                body=render_web_ui_shell(
+                    form_error="Please enter a message.",
+                ),
+            )
+
+        result = self._app_runtime.run_text_with_display(normalized_text)
+        return WebUIResponse(
+            status=200,
+            body=render_web_ui_shell(result.snapshot),
+        )
+
+    def handle_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        body: bytes = b"",
+        content_type: str = "",
+    ) -> WebUIResponse:
+        normalized_method = method.upper()
+        if normalized_method == "GET" and path == "/":
+            return WebUIResponse(status=200, body=render_web_ui_shell())
+        if normalized_method == "POST" and path == "/submit":
+            if content_type.split(";", 1)[0] != "application/x-www-form-urlencoded":
+                return WebUIResponse(
+                    status=415,
+                    body=render_web_ui_shell(
+                        form_error="Unsupported form content type.",
+                    ),
+                )
+            form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+            return self.submit_text(form.get("user_input", [""])[0])
+        return WebUIResponse(
+            status=404,
+            body=render_web_ui_shell(form_error="Page not found."),
+        )
 
 
 class LocalWebUIShell:
@@ -18,6 +78,8 @@ class LocalWebUIShell:
 
 def render_web_ui_shell(
     snapshot: RunDisplaySnapshot | Mapping[str, Any] | None = None,
+    *,
+    form_error: str = "",
 ) -> str:
     data = _snapshot_data(snapshot)
     values = {
@@ -42,11 +104,51 @@ def render_web_ui_shell(
         "tool_results_summary": _value(data, "tool_results_summary"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),
+        "form_error": escape(form_error),
     }
     html = TEMPLATE_PATH.read_text(encoding="utf-8")
     for key, value in values.items():
         html = html.replace("{{" + key + "}}", value)
     return html
+
+
+def create_server(
+    app_runtime: AppRuntime,
+    *,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+) -> ThreadingHTTPServer:
+    web_ui = LocalWebUI(app_runtime)
+
+    class RequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._write_response(
+                web_ui.handle_request(method="GET", path=self.path)
+            )
+
+        def do_POST(self) -> None:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            self._write_response(
+                web_ui.handle_request(
+                    method="POST",
+                    path=self.path,
+                    body=self.rfile.read(content_length),
+                    content_type=self.headers.get("Content-Type", ""),
+                )
+            )
+
+        def _write_response(self, response: WebUIResponse) -> None:
+            payload = response.body.encode("utf-8")
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+    return ThreadingHTTPServer((host, port), RequestHandler)
 
 
 def _snapshot_data(

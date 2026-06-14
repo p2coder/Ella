@@ -101,6 +101,15 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .form-error {
+      grid-column: 1 / -1;
+      min-height: 21px;
+      margin: 0;
+      color: #b42318;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
     .composer label {
       display: block;
       margin-bottom: 7px;
@@ -289,7 +298,7 @@
 
     <main>
       <div class="workspace">
-        <form class="composer">
+        <form class="composer" method="post" action="/submit">
           <div>
             <label for="user-input">Message Ella</label>
             <textarea
@@ -298,9 +307,10 @@
               placeholder="Type a message for Ella"
             >{{user_input}}</textarea>
           </div>
-          <button type="button" disabled title="Submission arrives in PR 4.3">
+          <button type="submit">
             Submit
           </button>
+          <p class="form-error" role="alert">{{form_error}}</p>
         </form>
 
         <div class="grid">
