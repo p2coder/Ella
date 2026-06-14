@@ -12,18 +12,6 @@ from .session import TaskSession
 from .strategy import StrategyDecision
 
 
-GOING_OUT_TOOL_SEQUENCE = (
-    "mock_vision_summary",
-    "mock_weather",
-    "mock_checklist",
-)
-
-GOING_OUT_VISUAL_TOOL_SEQUENCE = (
-    "camera_scene",
-    "mock_weather",
-    "mock_checklist",
-)
-
 VISUAL_REQUEST_MARKERS = (
     "camera",
     "current view",
@@ -95,9 +83,10 @@ class SubAgent:
         task_session: TaskSession,
         strategy: StrategyDecision,
     ) -> ExecutionDecision:
+        skill = self.skill_manager.get_summary("going_out")
         if (
             strategy.skill_name != "going_out"
-            or self.skill_manager.get_summary("going_out") is None
+            or skill is None
         ):
             return ExecutionDecision(
                 action=REPLAN,
@@ -121,8 +110,24 @@ class SubAgent:
             for entry in task_session.tool_trace
             if isinstance(entry, dict)
         }
-        tool_sequence = self._going_out_tool_sequence(handoff, context)
-        for tool_name in tool_sequence:
+        visible_tool_names = self._visible_tool_names(context)
+        tool_order = self._skill_guided_tool_order(
+            skill,
+            handoff,
+            visible_tool_names,
+        )
+        visible_names = set(visible_tool_names)
+        unavailable_tools = tuple(
+            tool_name
+            for tool_name in tool_order
+            if tool_name not in visible_names
+        )
+        if unavailable_tools:
+            return self._replan(
+                "Skill-referenced tools are no longer available: "
+                + ", ".join(unavailable_tools)
+            )
+        for tool_name in tool_order:
             if tool_name not in completed_tools:
                 return ExecutionDecision(
                     action=CALL_TOOL,
@@ -143,17 +148,105 @@ class SubAgent:
             is_complete=True,
         )
 
-    def _going_out_tool_sequence(
+    def _skill_guided_tool_order(
         self,
+        skill: Any,
         handoff: HandoffRequest,
+        visible_names: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        required_tools = tuple(getattr(skill, "required_tools", ()) or ())
+        optional_tools = tuple(getattr(skill, "optional_tools", ()) or ())
+        if not required_tools and not optional_tools:
+            if not visible_names:
+                return ()
+            return self._legacy_visible_tool_order(handoff, visible_names)
+
+        ordered = list(self._selected_optional_tools(optional_tools, handoff))
+
+        ordered.extend(
+            tool_name
+            for tool_name in required_tools
+            if tool_name not in ordered
+        )
+        return tuple(ordered)
+
+    def _selected_optional_tools(
+        self,
+        optional_tools: tuple[str, ...],
+        handoff: HandoffRequest,
+    ) -> tuple[str, ...]:
+        if self._needs_visual_context(handoff):
+            camera_tools = tuple(
+                tool_name
+                for tool_name in optional_tools
+                if self._tool_name_suggests_camera_capture(tool_name)
+            )
+            if camera_tools:
+                return (camera_tools[0],)
+            visual_tools = tuple(
+                tool_name
+                for tool_name in optional_tools
+                if self._tool_name_suggests_visual_context(tool_name)
+            )
+            return visual_tools[:1]
+
+        return tuple(
+            tool_name
+            for tool_name in optional_tools
+            if not self._tool_name_suggests_camera_capture(tool_name)
+        )
+
+    def _visible_tool_names(
+        self,
         context: AgentExecutionContext,
     ) -> tuple[str, ...]:
-        if (
-            "camera_scene" in context.allowed_tools
-            and self._needs_visual_context(handoff)
-        ):
-            return GOING_OUT_VISUAL_TOOL_SEQUENCE
-        return GOING_OUT_TOOL_SEQUENCE
+        if self.tool_directory is None:
+            return context.allowed_tools
+        definitions = self.tool_directory.list_definitions(context)
+        names = tuple(
+            definition.name
+            for definition in definitions
+            if isinstance(getattr(definition, "name", None), str)
+        )
+        return names
+
+    def _legacy_visible_tool_order(
+        self,
+        handoff: HandoffRequest,
+        visible_names: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if not self._needs_visual_context(handoff):
+            return tuple(
+                tool_name
+                for tool_name in visible_names
+                if not self._tool_name_suggests_camera_capture(tool_name)
+            )
+
+        visual_tools = tuple(
+            tool_name
+            for tool_name in visible_names
+            if self._tool_name_suggests_visual_context(tool_name)
+        )
+        non_visual_tools = tuple(
+            tool_name
+            for tool_name in visible_names
+            if not self._tool_name_suggests_visual_context(tool_name)
+        )
+        if not visual_tools:
+            return non_visual_tools
+        return (visual_tools[0], *non_visual_tools)
+
+    @staticmethod
+    def _tool_name_suggests_visual_context(tool_name: str) -> bool:
+        normalized = tool_name.lower()
+        return any(
+            marker in normalized
+            for marker in ("camera", "vision", "visual", "scene")
+        )
+
+    @staticmethod
+    def _tool_name_suggests_camera_capture(tool_name: str) -> bool:
+        return "camera" in tool_name.lower()
 
     def _needs_visual_context(self, handoff: HandoffRequest) -> bool:
         request_text = " ".join(
