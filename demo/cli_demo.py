@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 from agent.final_response import FinalResponseGenerator
+from config.settings import load_settings
 from devices.factory import DeviceFactory
 from demo.display_snapshot import (
     CAMERA_FRAME,
@@ -56,6 +57,7 @@ class DemoRuntime:
         cls,
         memory_path: Path = DEFAULT_MEMORY_PATH,
     ) -> "DemoRuntime":
+        settings = load_settings()
         provider_factory = ProviderFactory()
         device_factory = DeviceFactory()
         llm_provider = provider_factory.llm()
@@ -76,6 +78,7 @@ class DemoRuntime:
             CameraSceneTool(
                 camera_provider=camera_provider,
                 multimodal_provider=multimodal_provider,
+                store_raw_media=settings.debug_store_raw_media,
             )
         )
         tool_manager.register(MockVisionSummaryTool())

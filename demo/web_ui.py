@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from pathlib import PurePosixPath
+import re
 from typing import Any, Mapping
 from urllib.parse import parse_qs
 
@@ -12,6 +14,9 @@ from demo.display_snapshot import RunDisplaySnapshot
 TEMPLATE_PATH = Path(__file__).resolve().parent / "static" / "web_ui.html"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+DISPLAY_IMAGE_PATTERN = re.compile(
+    r"^data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +94,7 @@ def render_web_ui_shell(
             data,
             "captured_frame_reference",
         ),
+        "frame_markup": _frame_markup(data),
         "image_status": _value(data, "image_status"),
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
@@ -177,3 +183,39 @@ def _join_items(value: Any) -> str:
         return escape(", ".join(str(item) for item in value))
     except TypeError:
         return escape(str(value))
+
+
+def _frame_markup(data: Mapping[str, Any]) -> str:
+    reference = data.get("captured_frame_reference")
+    image_status = escape(str(data.get("image_status") or "text-only"))
+    if isinstance(reference, str) and _is_displayable_frame_reference(reference):
+        safe_reference = escape(reference, quote=True)
+        return (
+            '<img class="captured-frame" '
+            f'src="{safe_reference}" '
+            'alt="Captured camera frame">'
+        )
+
+    diagnostic = ""
+    if isinstance(reference, str) and reference.startswith("mock://"):
+        diagnostic = f'<span class="frame-reference">{escape(reference)}</span>'
+    return (
+        '<div class="frame-placeholder">'
+        f'<strong>{image_status}</strong>'
+        '<span>No captured frame is available.</span>'
+        f"{diagnostic}"
+        "</div>"
+    )
+
+
+def _is_displayable_frame_reference(reference: str) -> bool:
+    if DISPLAY_IMAGE_PATTERN.fullmatch(reference):
+        return True
+    if "://" in reference or reference.startswith(("/", "\\")):
+        return False
+    path = PurePosixPath(reference)
+    return (
+        len(path.parts) > 1
+        and path.parts[0] == "display"
+        and ".." not in path.parts
+    )

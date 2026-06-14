@@ -1,4 +1,6 @@
+import base64
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent.context import AgentExecutionContext
 from devices.camera import CameraProvider, MockCameraProvider
@@ -6,6 +8,24 @@ from providers.mock import MockMultimodalProvider
 from providers.vision import MultimodalProvider
 
 from .base import ToolResult
+
+
+SUPPORTED_DISPLAY_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+}
+
+
+class _DisplayFrameReference(str):
+    """Keep display data readable while redacting generic text summaries."""
+
+    def __str__(self) -> str:
+        return "[display frame omitted]"
+
+    def __repr__(self) -> str:
+        return "'[display frame omitted]'"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +102,9 @@ class CameraSceneTool:
             "raw_media_stored": self.store_raw_media,
         }
         if self.store_raw_media:
-            payload["frames"] = tuple(frames)
+            display_reference = self._display_frame_reference(frames[0])
+            if display_reference is not None:
+                payload["captured_frame_reference"] = display_reference
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
@@ -90,6 +112,19 @@ class CameraSceneTool:
             trace_id=context.trace_id,
             payload=payload,
         )
+
+    @staticmethod
+    def _display_frame_reference(frame: Any) -> str | None:
+        if not isinstance(frame, dict):
+            return None
+        mime_type = frame.get("mime_type")
+        encoded_bytes = frame.get("bytes")
+        if mime_type not in SUPPORTED_DISPLAY_MIME_TYPES:
+            return None
+        if not isinstance(encoded_bytes, (bytes, bytearray, memoryview)):
+            return None
+        encoded = base64.b64encode(bytes(encoded_bytes)).decode("ascii")
+        return _DisplayFrameReference(f"data:{mime_type};base64,{encoded}")
 
     def _unavailable_result(
         self,
