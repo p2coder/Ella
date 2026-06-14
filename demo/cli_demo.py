@@ -85,7 +85,10 @@ class DemoRuntime:
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
 
-        subagent = SubAgent(skill_manager)
+        subagent = SubAgent(
+            skill_manager,
+            tool_directory=tool_manager,
+        )
         final_response_generator = FinalResponseGenerator(
             prompt_engine=PromptEngine(),
             llm_provider=llm_provider,
