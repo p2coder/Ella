@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from agent.context import AgentExecutionContext
+from agent.final_response import FinalResponseGenerator
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from sessions.completion import TaskCompletionPackage
@@ -39,6 +40,7 @@ class TaskRuntime:
     session_manager: TaskSessionManager = field(default_factory=TaskSessionManager)
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
+    final_response_generator: FinalResponseGenerator | None = None
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
@@ -62,10 +64,12 @@ class TaskRuntime:
         subagent: SubAgent | None = None,
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
+        final_response_generator: FinalResponseGenerator | None = None,
     ) -> None:
         self.session_manager = session_manager or TaskSessionManager()
         self.subagent = subagent
         self.executor = executor
+        self.final_response_generator = final_response_generator
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._sessions = {}
@@ -261,8 +265,8 @@ class TaskRuntime:
     def _is_blocked_reason(stop_reason: str) -> bool:
         return stop_reason in {"waiting", "max_steps"}
 
-    @staticmethod
     def _build_completion(
+        self,
         creation: TaskSessionCreation,
     ) -> TaskCompletionPackage:
         session = creation.session
@@ -276,6 +280,7 @@ class TaskRuntime:
             )
             for entry in session.tool_trace
         )
+        final_response = self._generate_final_response(creation, tool_results)
         output = UserVisibleAgentOutput(
             process={
                 "task_goal": session.handoff.task_goal,
@@ -288,10 +293,7 @@ class TaskRuntime:
                     result.tool_name for result in tool_results
                 ),
             },
-            final_response=(
-                "Task completed: "
-                f"{session.handoff.task_goal}"
-            ),
+            final_response=final_response,
         )
         return TaskCompletionPackage(
             context=creation.context,
@@ -299,6 +301,58 @@ class TaskRuntime:
             user_visible_output=output,
             tool_results=tool_results,
         )
+
+    def _generate_final_response(
+        self,
+        creation: TaskSessionCreation,
+        tool_results: tuple[ToolResult, ...],
+    ) -> str:
+        session = creation.session
+        handoff = session.handoff
+        trigger_payload = handoff.trigger_event.payload
+        user_input = trigger_payload.get("text", "")
+        if not isinstance(user_input, str):
+            user_input = str(user_input)
+
+        if self.final_response_generator is None:
+            return self._default_final_response(
+                task_goal=handoff.task_goal,
+                tool_results=tool_results,
+            )
+
+        result = self.final_response_generator.generate(
+            trace_id=creation.context.trace_id,
+            user_input=user_input,
+            task_goal=handoff.task_goal,
+            task_constraints=handoff.constraints,
+            completion_criteria=handoff.completion_criteria,
+            tool_results=tool_results,
+            user_preference_summary=handoff.user_preference_summary,
+            environment_summary=handoff.environment_summary,
+        )
+        return result.final_response
+
+    @staticmethod
+    def _default_final_response(
+        *,
+        task_goal: str,
+        tool_results: tuple[ToolResult, ...],
+    ) -> str:
+        if tool_results:
+            summaries = []
+            for result in tool_results:
+                summary = result.payload.get("summary") or result.payload.get(
+                    "scene_summary"
+                )
+                if isinstance(summary, str) and summary.strip():
+                    summaries.append(f"{result.tool_name}: {summary.strip()}")
+                else:
+                    summaries.append(result.tool_name)
+            return (
+                "我已经根据当前信息完成了检查："
+                f"{'; '.join(summaries)}。任务目标是：{task_goal}"
+            )
+        return f"我已经根据当前信息完成了任务。任务目标是：{task_goal}"
 
     @staticmethod
     def _result(
