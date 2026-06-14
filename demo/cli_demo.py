@@ -333,8 +333,13 @@ def run_demo(
     memory_path: Path = DEFAULT_MEMORY_PATH,
     runtime: DemoRuntime | None = None,
 ) -> str:
-    active_runtime = runtime or DemoRuntime.create_default(memory_path)
-    return active_runtime.run(input_text)
+    if runtime is not None:
+        return runtime.run(input_text)
+
+    from demo.app_runtime import AppRuntime
+
+    result = AppRuntime.create_default(memory_path).run_text_with_display(input_text)
+    return result.output
 
 
 def _render_output(
