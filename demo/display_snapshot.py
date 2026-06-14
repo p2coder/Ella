@@ -1,4 +1,8 @@
+import base64
+import binascii
 from dataclasses import dataclass
+from pathlib import PurePosixPath, PureWindowsPath
+import re
 from typing import ClassVar
 
 from prompts.engine import redact_prompt_text
@@ -15,6 +19,18 @@ SUPPORTED_IMAGE_STATUSES = (
     CAMERA_UNAVAILABLE,
     TEXT_ONLY,
 )
+
+SAFE_IMAGE_MIME_TYPES = (
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+)
+DATA_IMAGE_PATTERN = re.compile(
+    r"^data:(image/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$"
+)
+MOCK_IMAGE_PATTERN = re.compile(r"^mock://[A-Za-z0-9._-]+$")
+DISPLAY_PATH_ROOT = "display"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +56,11 @@ class RunDisplaySnapshot:
     def __post_init__(self) -> None:
         if self.image_status not in SUPPORTED_IMAGE_STATUSES:
             raise ValueError(f"unsupported image_status: {self.image_status}")
+        if not _is_safe_frame_reference(self.captured_frame_reference):
+            raise ValueError(
+                "unsafe captured_frame_reference: expected an image data URI "
+                "or a controlled display-relative path"
+            )
         object.__setattr__(
             self,
             "task_formulation_prompt_text",
@@ -67,3 +88,30 @@ class RunDisplaySnapshot:
             "memory_status": self.memory_status,
             "prompt_display_fields": self.prompt_display_fields,
         }
+
+
+def _is_safe_frame_reference(reference: str | None) -> bool:
+    if reference is None:
+        return True
+    if not isinstance(reference, str) or not reference:
+        return False
+    if MOCK_IMAGE_PATTERN.fullmatch(reference):
+        return True
+
+    data_match = DATA_IMAGE_PATTERN.fullmatch(reference)
+    if data_match is not None:
+        mime_type, encoded = data_match.groups()
+        if mime_type not in SAFE_IMAGE_MIME_TYPES:
+            return False
+        try:
+            base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return False
+        return True
+
+    if "://" in reference or PureWindowsPath(reference).is_absolute():
+        return False
+    path = PurePosixPath(reference)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    return len(path.parts) > 1 and path.parts[0] == DISPLAY_PATH_ROOT
