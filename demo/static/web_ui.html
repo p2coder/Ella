@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ella Runtime</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f3f4f6;
+      --surface: #ffffff;
+      --surface-muted: #f8fafc;
+      --ink: #17202a;
+      --muted: #667085;
+      --line: #d8dee7;
+      --accent: #176b57;
+      --accent-strong: #105344;
+      --signal: #b45309;
+      --code: #20262e;
+      --code-ink: #e7edf3;
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      padding: 24px 20px;
+      border-right: 1px solid var(--line);
+      background: #18232d;
+      color: #f8fafc;
+    }
+
+    .brand {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand-copy {
+      margin: 4px 0 28px;
+      color: #b9c4ce;
+      font-size: 13px;
+    }
+
+    .status-label {
+      margin: 0 0 6px;
+      color: #91a2b1;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .status-value {
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    main {
+      min-width: 0;
+      padding: 24px;
+    }
+
+    .workspace {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .composer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .composer label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 84px;
+      resize: vertical;
+      padding: 12px;
+      border: 1px solid #abb5c2;
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    textarea:focus {
+      border-color: var(--accent);
+      outline: 3px solid rgba(23, 107, 87, 0.15);
+    }
+
+    button {
+      min-width: 104px;
+      height: 44px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      background: #9ba7b3;
+      color: #eef1f4;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .panel-wide {
+      grid-column: 1 / -1;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 48px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .panel-body {
+      padding: 14px;
+    }
+
+    .field {
+      margin: 0 0 14px;
+    }
+
+    .field:last-child {
+      margin-bottom: 0;
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .field-value {
+      min-height: 21px;
+      margin: 0;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .vision-frame {
+      display: grid;
+      place-items: center;
+      min-height: 160px;
+      margin-bottom: 14px;
+      border: 1px dashed #aeb8c4;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      text-align: center;
+    }
+
+    .prompt-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-muted);
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    pre {
+      max-height: 320px;
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      border-top: 1px solid #38414b;
+      background: var(--code);
+      color: var(--code-ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .answer {
+      border-left: 4px solid var(--signal);
+      font-size: 16px;
+    }
+
+    @media (max-width: 800px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .composer,
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <h1 class="brand">Ella Runtime</h1>
+      <p class="brand-copy">Local agent process display</p>
+      <p class="status-label">Memory status</p>
+      <p class="status-value">{{memory_status}}</p>
+    </aside>
+
+    <main>
+      <div class="workspace">
+        <form class="composer">
+          <div>
+            <label for="user-input">Message Ella</label>
+            <textarea
+              id="user-input"
+              name="user_input"
+              placeholder="Type a message for Ella"
+            >{{user_input}}</textarea>
+          </div>
+          <button type="button" disabled title="Submission arrives in PR 4.3">
+            Submit
+          </button>
+        </form>
+
+        <div class="grid">
+          <section class="panel">
+            <header class="panel-header"><h2>Input</h2></header>
+            <div class="panel-body">
+              <div class="field">
+                <span class="field-label">User input</span>
+                <p class="field-value">{{user_input}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Transcript</span>
+                <p class="field-value">{{transcript}}</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><h2>Vision</h2></header>
+            <div class="panel-body">
+              <div class="vision-frame">
+                <span>{{image_status}} {{captured_frame_reference}}</span>
+              </div>
+              <div class="field">
+                <span class="field-label">Scene summary</span>
+                <p class="field-value">{{scene_summary}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Visible items</span>
+                <p class="field-value">{{visible_items}}</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-wide">
+            <header class="panel-header"><h2>Prompt Sent to LLM</h2></header>
+            <div class="panel-body prompt-stack">
+              <details>
+                <summary>Task formulation prompt</summary>
+                <pre>{{task_formulation_prompt_text}}</pre>
+              </details>
+              <details>
+                <summary>Final response prompt</summary>
+                <pre>{{final_response_prompt_text}}</pre>
+              </details>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><h2>Agent</h2></header>
+            <div class="panel-body">
+              <div class="field">
+                <span class="field-label">Task goal</span>
+                <p class="field-value">{{task_goal}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Tool results</span>
+                <p class="field-value">{{tool_results_summary}}</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel answer">
+            <header class="panel-header"><h2>Answer</h2></header>
+            <div class="panel-body">
+              <p class="field-value">{{final_response}}</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
