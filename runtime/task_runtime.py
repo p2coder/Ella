@@ -76,10 +76,11 @@ class TaskRuntime:
         self._memory_results = {}
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
+        
         creation = self.session_manager.create_session(handoff)
         task_id = creation.session.task_id
         session_id = creation.session.session_id
-
+        print("[task_runtime.py]submit:submit event ",task_id)
         if task_id in self._tasks:
             raise ValueError(f"duplicate task_id: {task_id}")
         if session_id in self._sessions:
@@ -109,7 +110,7 @@ class TaskRuntime:
             TaskState.CANCELLED,
         }:
             raise ValueError(f"cannot step terminal task: {session.state.value}")
-
+        print("")
         if session.state is TaskState.CREATED:
             session.transition_to(TaskState.PLANNING)
             return self._result(creation)
@@ -155,10 +156,12 @@ class TaskRuntime:
             creation.context,
             session,
         )
+        print("[task_runtime]desicion action: ",decision.action)
         if execution.tool_result is not None:
             session.tool_trace += (execution.tool_result.to_dict(),)
 
         if execution.replan_required:
+            
             session.transition_to(TaskState.REPLANNING)
         elif decision.action == WAIT:
             session.transition_to(TaskState.WAITING)
@@ -182,6 +185,7 @@ class TaskRuntime:
 
         creation = self._tasks[task_id]
         stop_reason = self._stop_reason(creation.session)
+        print("[task_runtime]stop reason: ",stop_reason)
         if stop_reason is not None:
             return self._result(
                 creation,
@@ -192,6 +196,7 @@ class TaskRuntime:
         for steps in range(1, max_steps + 1):
             self.step(task_id)
             stop_reason = self._stop_reason(creation.session)
+            print("[task_runtime] stop_reason: ",stop_reason)
             if stop_reason is not None:
                 return self._result(
                     creation,

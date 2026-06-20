@@ -118,6 +118,7 @@ class SubAgent:
         task_session: TaskSession,
         strategy: StrategyDecision,
     ) -> ExecutionDecision:
+        print("[subagent]decide_next_action")
         skill = self._selected_skill(strategy, context)
         if strategy.skill_name is not None and skill is None:
             return self._replan(
@@ -134,6 +135,7 @@ class SubAgent:
             definitions,
         )
         if llm_decision is not None:
+            print("[subagent]llm_desicion is none")
             return llm_decision
 
         return self._fallback_decision(
@@ -285,15 +287,18 @@ class SubAgent:
                 "observations": task_session.tool_trace,
             },
         )
+        print("[subagent.py] prompt: ",prompt.prompt)
         result = self.llm_provider.generate(
             prompt.prompt,
             trace_id=context.trace_id,
             metadata={"boundary": "execution_decision"},
         )
+        print("[subagent]:result: ",result)
         if getattr(result, "failed", False):
             return None
         payload = self._extract_decision_payload(result.output)
         if not isinstance(payload, dict):
+            print("[subagent] replan")
             return self._replan("Invalid LLM action decision JSON.")
         return self._decision_from_payload(payload, serialized_tools)
 

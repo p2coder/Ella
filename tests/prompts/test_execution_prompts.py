@@ -69,3 +69,29 @@ def test_execution_prompt_engine_only_builds_text() -> None:
     )
 
     assert isinstance(result.prompt, str)
+
+
+def test_execution_prompt_prevents_repeated_camera_scene_calls() -> None:
+    result = PromptEngine().build(
+        PromptType.EXECUTION_DECISION,
+        {
+            "task": {"goal": "Identify what the user is holding."},
+            "visible_tools": (
+                {"name": "camera_scene", "description": "Capture visual context."},
+            ),
+            "observations": (
+                {
+                    "tool_name": "camera_scene",
+                    "payload": {
+                        "status": "available",
+                        "summary": "The user is holding a phone.",
+                    },
+                },
+            ),
+        },
+    )
+
+    assert "do not call camera_scene again" in result.prompt
+    assert "COMPLETE" in result.prompt
+    assert "insufficient" in result.prompt
+    assert "unavailable" in result.prompt

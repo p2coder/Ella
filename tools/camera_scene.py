@@ -125,6 +125,7 @@ class CameraSceneTool:
         context: AgentExecutionContext,
         arguments: dict[str, object] | None = None,
     ) -> ToolResult:
+        print("[camera_scene.py]: camera is used")
         arguments = arguments or {}
         frame_limit = self._runtime_limit(
             arguments,

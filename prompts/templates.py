@@ -70,7 +70,13 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     instruction=(
         "Return one strict JSON object. The action must be CALL_TOOL, COMPLETE, "
         "WAIT, or REPLAN. CALL_TOOL must include a visible tool_name and an "
-        "arguments object. Other actions must not include a tool name."
+        "arguments object. Other actions must not include a tool name. If "
+        "observations already contain camera_scene for the current task, do not "
+        "call camera_scene again; choose COMPLETE and answer from that visual "
+        "observation. If the visual observation is insufficient, choose COMPLETE "
+        "and explain what visual information is missing. If camera_scene is "
+        "unavailable, choose COMPLETE and explain that visual context is "
+        "unavailable. Do not retry visual tools in a loop."
     ),
 )
 
