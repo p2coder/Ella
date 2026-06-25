@@ -263,6 +263,35 @@
       font-size: 16px;
     }
 
+    .prompt-details {
+      margin: 0 0 10px;
+    }
+
+    .prompt-details:last-child {
+      margin-bottom: 0;
+    }
+
+    .prompt-details summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .prompt-text {
+      max-height: 280px;
+      margin: 8px 0 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: 6px;
+      background: var(--code);
+      color: var(--code-ink);
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     @media (max-width: 800px) {
       .app-shell {
         grid-template-columns: 1fr;
@@ -358,6 +387,30 @@
                 <span class="field-label">Tool results</span>
                 <p class="field-value">{{tool_results_summary}}</p>
               </div>
+            </div>
+          </section>
+
+          <section class="panel panel-wide">
+            <header class="panel-header">
+              <h2>Prompt Sent to LLM</h2>
+            </header>
+            <div class="panel-body">
+              <details class="prompt-details">
+                <summary>Task formulation prompt</summary>
+                <pre class="prompt-text">{{task_formulation_prompt_text}}</pre>
+              </details>
+              <details class="prompt-details">
+                <summary>Strategy selection prompt</summary>
+                <pre class="prompt-text">{{strategy_selection_prompt_text}}</pre>
+              </details>
+              <details class="prompt-details">
+                <summary>Execution decision prompt</summary>
+                <pre class="prompt-text">{{execution_decision_prompt_text}}</pre>
+              </details>
+              <details class="prompt-details">
+                <summary>Final response prompt</summary>
+                <pre class="prompt-text">{{final_response_prompt_text}}</pre>
+              </details>
             </div>
           </section>
 
