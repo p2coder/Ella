@@ -86,6 +86,7 @@ class EventRuntime:
         self.environment_summary = environment_summary
 
     def publish(self, raw_signal: RawSignal) -> EventRuntimeResult:
+        print("[event_runtime.py]line89: publish")
         event = self.trigger_pipeline.run(raw_signal)
         if not isinstance(event, StandardizedEvent):
             raise TypeError(

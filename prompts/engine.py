@@ -1,8 +1,24 @@
 from dataclasses import dataclass
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from prompts.templates import TEMPLATES_BY_TYPE, PromptTemplate
+
+
+WORKSPACE_CONTEXT_KEYS = frozenset(("workspace", "WorkSpace"))
+MEMORY_CONTEXT_KEYS = frozenset(("memory", "memory_context", "Memory"))
+SENSITIVE_FIELD_MARKERS = (
+    "api_key",
+    "authorization",
+    "credential",
+    "secret",
+    "token",
+    "raw_media",
+    "raw_audio",
+    "raw_image",
+    "raw_frame",
+    "raw_bytes",
+)
 
 
 class PromptType:
@@ -28,6 +44,44 @@ class PromptBuildResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PromptBlock:
+    name: str
+    content: Any
+    metadata: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("PromptBlock name must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class PromptFrame:
+    prompt_type: str
+    blocks: tuple[PromptBlock, ...]
+    output_contract: str
+
+    def __post_init__(self) -> None:
+        if not self.prompt_type:
+            raise ValueError("PromptFrame prompt_type must be non-empty")
+        if not self.output_contract:
+            raise ValueError("PromptFrame output_contract must be non-empty")
+
+    @classmethod
+    def from_blocks(
+        cls,
+        *,
+        prompt_type: str,
+        blocks: Sequence[PromptBlock],
+        output_contract: str,
+    ) -> "PromptFrame":
+        return cls(
+            prompt_type=prompt_type,
+            blocks=tuple(blocks),
+            output_contract=output_contract,
+        )
+
+
 class PromptEngine:
     def build(
         self,
@@ -40,7 +94,7 @@ class PromptEngine:
         prompt = redact_prompt_text(
             self._compose_prompt(template=template, context=safe_context)
         )
-
+        print("[prompts/engine.py]:prompt_type: ",prompt_type,"\nprompt: ",prompt)
         return PromptBuildResult(
             prompt=prompt,
             prompt_type=prompt_type,
@@ -60,17 +114,124 @@ class PromptEngine:
         template: PromptTemplate,
         context: Mapping[str, Any],
     ) -> str:
-        context_text = "\n".join(
-            f"- {key}: {self._format_value(context[key])}"
-            for key in sorted(context)
+        frame = self._frame_for(template=template, context=context)
+        block_text = "\n\n".join(
+            f"{block.name}:\n{self._format_value(block.content)}"
+            for block in frame.blocks
         )
-        if not context_text:
-            context_text = "- none"
 
         return (
-            f"System:\n{template.system_prompt}\n\n"
-            f"Instruction:\n{template.instruction}\n\n"
-            f"Context:\n{context_text}"
+            f"{block_text}\n\n"
+            f"OutputContract:\n{frame.output_contract}"
+        )
+
+    def _frame_for(
+        self,
+        *,
+        template: PromptTemplate,
+        context: Mapping[str, Any],
+    ) -> PromptFrame:
+        blocks: list[PromptBlock] = [
+            PromptBlock("SystemPrompt", template.system_prompt),
+            PromptBlock("Instruction", template.instruction),
+        ]
+
+        memory_content = self._first_context_value(
+            context,
+            keys=MEMORY_CONTEXT_KEYS,
+        )
+        workspace_content = self._first_context_value(
+            context,
+            keys=WORKSPACE_CONTEXT_KEYS,
+        )
+        remaining_context = {
+            key: context[key]
+            for key in sorted(context)
+            if key not in MEMORY_CONTEXT_KEYS
+            and key not in WORKSPACE_CONTEXT_KEYS
+        }
+
+        if memory_content is not None:
+            blocks.append(
+                PromptBlock(
+                    "Memory",
+                    self._sanitize_prompt_content(memory_content),
+                )
+            )
+        if workspace_content is not None:
+            blocks.append(
+                PromptBlock(
+                    "WorkSpace",
+                    self._sanitize_prompt_content(workspace_content),
+                )
+            )
+        if remaining_context or not context:
+            blocks.append(
+                PromptBlock(
+                    "Context",
+                    remaining_context or {"none": "none"},
+                )
+            )
+
+        return PromptFrame.from_blocks(
+            prompt_type=template.name,
+            blocks=blocks,
+            output_contract=template.instruction,
+        )
+
+    def _first_context_value(
+        self,
+        context: Mapping[str, Any],
+        *,
+        keys: frozenset[str],
+    ) -> Any | None:
+        for key in sorted(keys):
+            if key in context:
+                return context[key]
+        return None
+
+    def _sanitize_prompt_content(self, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            safe_items: dict[str, Any] = {}
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0])):
+                key_text = str(key)
+                if self._is_sensitive_field(key_text):
+                    safe_items[key_text] = "[REDACTED]"
+                else:
+                    safe_items[key_text] = self._sanitize_prompt_content(item)
+            return safe_items
+        if isinstance(value, tuple):
+            return tuple(self._sanitize_prompt_content(item) for item in value)
+        if isinstance(value, list):
+            return [self._sanitize_prompt_content(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            return tuple(
+                sorted(
+                    self._format_value(self._sanitize_prompt_content(item))
+                    for item in value
+                )
+            )
+        if isinstance(value, str):
+            if self._looks_like_sensitive_path(value):
+                return "[REDACTED]"
+            return value
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return "[UNSUPPORTED_OBJECT]"
+
+    def _is_sensitive_field(self, key: str) -> bool:
+        normalized = key.lower()
+        return any(marker in normalized for marker in SENSITIVE_FIELD_MARKERS)
+
+    def _looks_like_sensitive_path(self, value: str) -> bool:
+        return (
+            value.startswith("file://")
+            or value.startswith("/Users/")
+            or value.startswith("/private/")
+            or value.startswith("/var/")
+            or value.startswith("/tmp/")
+            or value.startswith("../")
+            or "/../" in value
         )
 
     def _format_value(self, value: Any) -> str:

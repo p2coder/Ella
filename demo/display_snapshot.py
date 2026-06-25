@@ -47,9 +47,13 @@ class RunDisplaySnapshot:
     tool_results_summary: str
     final_response: str
     memory_status: str
+    strategy_selection_prompt_text: str = ""
+    execution_decision_prompt_text: str = ""
 
-    prompt_display_fields: ClassVar[tuple[str, str]] = (
+    prompt_display_fields: ClassVar[tuple[str, ...]] = (
         "task_formulation_prompt_text",
+        "strategy_selection_prompt_text",
+        "execution_decision_prompt_text",
         "final_response_prompt_text",
     )
 
@@ -71,6 +75,16 @@ class RunDisplaySnapshot:
             "final_response_prompt_text",
             redact_prompt_text(self.final_response_prompt_text),
         )
+        object.__setattr__(
+            self,
+            "strategy_selection_prompt_text",
+            redact_prompt_text(self.strategy_selection_prompt_text),
+        )
+        object.__setattr__(
+            self,
+            "execution_decision_prompt_text",
+            redact_prompt_text(self.execution_decision_prompt_text),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -82,6 +96,8 @@ class RunDisplaySnapshot:
             "visible_items": self.visible_items,
             "task_goal": self.task_goal,
             "task_formulation_prompt_text": self.task_formulation_prompt_text,
+            "strategy_selection_prompt_text": self.strategy_selection_prompt_text,
+            "execution_decision_prompt_text": self.execution_decision_prompt_text,
             "final_response_prompt_text": self.final_response_prompt_text,
             "tool_results_summary": self.tool_results_summary,
             "final_response": self.final_response,

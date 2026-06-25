@@ -71,6 +71,9 @@ class AppRuntime:
         skill_manager.refresh()
 
         tool_manager = ToolManager()
+
+
+        # tool改成热插拔
         tool_manager.register(
             CameraSceneTool(
                 camera_provider=camera_provider,
@@ -81,6 +84,7 @@ class AppRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+
 
         subagent = SubAgent(
             skill_manager,
@@ -149,7 +153,7 @@ class AppRuntime:
             return _microphone_failure_result(
                 "Microphone input failed. Text input remains available."
             )
-
+        print("[appruntime.py]line156:before asr")
         transcript = signal.payload.get("text")
         if not isinstance(transcript, str) or not transcript.strip():
             return _microphone_failure_result(
@@ -196,7 +200,7 @@ class AppRuntime:
         event_result = self._event_runtime.publish(signal)
         if not event_result.submitted or event_result.task_handle is None:
             raise RuntimeError(event_result.reason)
-
+        print("[app_runtime]:_run_signal_to_completion")
         task_result = self._task_runtime.run_until_complete(
             event_result.task_handle.task_id,
             max_steps=MAX_APP_STEPS,

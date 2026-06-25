@@ -58,35 +58,22 @@ class SubAgent:
         context: AgentExecutionContext,
         task_session: TaskSession,
     ) -> StrategyDecision:
-        visible_skills = self._visible_skill_summaries(context)
-        llm_selection = self._llm_select_skill(
+        llm_selection = self._llm_select_strategy_mode(
             handoff,
             context,
-            visible_skills,
         )
         if llm_selection is None:
-            skill_name = self._metadata_skill_match(handoff, visible_skills)
-            reason = (
-                "Visible skill metadata matches the current task."
-                if skill_name is not None
-                else "Use ReAct without optional skill guidance."
-            )
+            mode = "react"
+            reason = "Use ReAct as the default execution mode."
+            initial_plan = None
         else:
-            requested_name, reason = llm_selection
-            visible_names = {
-                str(summary["name"])
-                for summary in visible_skills
-                if isinstance(summary.get("name"), str)
-            }
-            skill_name = requested_name if requested_name in visible_names else None
-            if requested_name is not None and skill_name is None:
-                reason = "The requested skill is not visible; use ReAct without it."
+            mode, reason, initial_plan = llm_selection
 
         return StrategyDecision(
-            mode="react",
-            skill_name=skill_name,
+            mode=mode,
+            skill_name=None,
             reason=reason,
-            initial_plan=None,
+            initial_plan=initial_plan,
             completion_criteria=handoff.completion_criteria,
             session_id=context.session_id,
             task_id=task_session.task_id,
@@ -118,10 +105,18 @@ class SubAgent:
         task_session: TaskSession,
         strategy: StrategyDecision,
     ) -> ExecutionDecision:
+        print("[subagent]decide_next_action")
+        visible_skills = self._visible_skill_summaries(context)
         skill = self._selected_skill(strategy, context)
         if strategy.skill_name is not None and skill is None:
             return self._replan(
                 f"Selected skill is no longer available: {strategy.skill_name}"
+            )
+        if skill is None and strategy.mode == "react":
+            skill = self._execution_skill_guidance(
+                handoff,
+                context,
+                visible_skills,
             )
 
         definitions = self._visible_tool_definitions(context)
@@ -132,8 +127,10 @@ class SubAgent:
             strategy,
             skill,
             definitions,
+            visible_skills,
         )
         if llm_decision is not None:
+            print("[subagent]llm_desicion is none")
             return llm_decision
 
         return self._fallback_decision(
@@ -172,12 +169,25 @@ class SubAgent:
             context.agent_role,
         )
 
-    def _llm_select_skill(
+    def _execution_skill_guidance(
         self,
         handoff: HandoffRequest,
         context: AgentExecutionContext,
         visible_skills: tuple[dict[str, object], ...],
-    ) -> tuple[str | None, str] | None:
+    ) -> Any | None:
+        skill_name = self._metadata_skill_match(handoff, visible_skills)
+        if skill_name is None:
+            return None
+        return self.skill_manager.get_summary_for_role(
+            skill_name,
+            context.agent_role,
+        )
+
+    def _llm_select_strategy_mode(
+        self,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+    ) -> tuple[str, str, tuple[str, ...] | None] | None:
         if self.llm_provider is None:
             return None
 
@@ -185,7 +195,6 @@ class SubAgent:
             PromptType.STRATEGY_SELECTION,
             {
                 "task": self._task_context(handoff, context),
-                "visible_skills": visible_skills,
             },
         )
         result = self.llm_provider.generate(
@@ -193,16 +202,30 @@ class SubAgent:
             trace_id=context.trace_id,
             metadata={"boundary": "strategy_selection"},
         )
+        print("\n[sessions/subagent.py] strategy selected: ",result.output if result else "none")
         if getattr(result, "failed", False):
             return None
         payload = self._extract_decision_payload(result.output)
-        if not isinstance(payload, dict) or payload.get("mode") != "react":
+        if not isinstance(payload, dict):
             return None
-        skill_name = payload.get("skill_name")
-        if skill_name is not None and not isinstance(skill_name, str):
+        mode = payload.get("mode")
+        if mode not in {"react", "plan_and_execute"}:
             return None
-        reason = str(payload.get("reason") or "LLM selected ReAct guidance.")
-        return skill_name, reason
+        reason = str(payload.get("reason") or "LLM selected execution mode.")
+        plan_summary = payload.get("plan_summary")
+        initial_plan: tuple[str, ...] | None = None
+        if isinstance(plan_summary, str) and plan_summary.strip():
+            initial_plan = (plan_summary.strip(),)
+        if mode == "plan_and_execute":
+            return (
+                "react",
+                (
+                    "LLM requested plan_and_execute, but this runtime only "
+                    "supports ReAct execution for now."
+                ),
+                initial_plan,
+            )
+        return "react", reason, initial_plan
 
     def _metadata_skill_match(
         self,
@@ -265,6 +288,7 @@ class SubAgent:
         strategy: StrategyDecision,
         skill: Any | None,
         definitions: tuple[Any, ...],
+        visible_skills: tuple[dict[str, object], ...],
     ) -> ExecutionDecision | None:
         if self.llm_provider is None or self.tool_directory is None:
             return None
@@ -273,16 +297,21 @@ class SubAgent:
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
-                "task": self._task_context(handoff, context),
-                "strategy": {
-                    "mode": strategy.mode,
-                    "skill_name": strategy.skill_name,
-                    "reason": strategy.reason,
-                    "completion_criteria": strategy.completion_criteria,
+                "user_prompt": handoff.trigger_event.payload.get("text", ""),
+                "workspace": {
+                    "overall_goal": handoff.task_goal,
+                    "current_goal": handoff.task_goal,
+                    "current_step_state": {
+                        "strategy_mode": strategy.mode,
+                        "strategy_reason": strategy.reason,
+                        "completion_criteria": strategy.completion_criteria,
+                    },
+                    "task": self._task_context(handoff, context),
+                    "selected_skill": self._skill_context(skill),
+                    "visible_skills": visible_skills,
+                    "visible_tools": serialized_tools,
+                    "observations": task_session.tool_trace,
                 },
-                "selected_skill": self._skill_context(skill),
-                "visible_tools": serialized_tools,
-                "observations": task_session.tool_trace,
             },
         )
         result = self.llm_provider.generate(
@@ -290,10 +319,12 @@ class SubAgent:
             trace_id=context.trace_id,
             metadata={"boundary": "execution_decision"},
         )
+        print("[subagent]:result: ",result)
         if getattr(result, "failed", False):
             return None
         payload = self._extract_decision_payload(result.output)
         if not isinstance(payload, dict):
+            print("[subagent] replan")
             return self._replan("Invalid LLM action decision JSON.")
         return self._decision_from_payload(payload, serialized_tools)
 
@@ -308,7 +339,7 @@ class SubAgent:
             "context_summary": handoff.context_summary,
             "user_preference_summary": handoff.user_preference_summary,
             "environment_summary": handoff.environment_summary,
-            "constraints": handoff.constraints,
+            "constraints": None,
             "completion_criteria": handoff.completion_criteria,
             "trace_id": context.trace_id,
         }
