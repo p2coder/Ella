@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 from events import StandardizedEvent
@@ -31,33 +32,13 @@ class TaskFormulator:
         current_agent_input: str | None = None,
     ) -> TaskFormulation:
         text = current_agent_input or str(trigger_event.payload.get("text", ""))
-        if self._is_going_out_input(text):
-            goal = "Give the user a short, necessary reminder before leaving."
-            context_summary = "User said they are about to leave."
-            completion_criteria = (
-                "A concise pre-leaving reminder goal is ready for handoff.",
-            )
-        else:
-            goal = "Clarify and prepare a concise response to the user input."
-            context_summary = "User provided an allowed event for task entry."
-            completion_criteria = (
-                "A clear task goal is ready for handoff.",
-            )
-
-        deterministic = TaskFormulation(
-            goal=goal,
-            constraints=(
-                "Keep the reminder short and necessary.",
-                "Use only the provided input, preference summary, and environment summary.",
-                "Do not choose a skill or execution strategy.",
-            ),
-            context_summary=context_summary,
+        deterministic = self._deterministic_formulation(
+            text=text,
             user_preference_summary=user_preference_summary,
             environment_summary=environment_summary,
-            completion_criteria=completion_criteria,
         )
 
-        if self.llm_provider is None:
+        if self.llm_provider is None or not self._needs_task_formulation(text):
             return deterministic
 
         try:
@@ -117,6 +98,169 @@ class TaskFormulator:
                 "A provider-generated task goal is ready for handoff.",
             ),
             formulation_source="llm_provider",
+        )
+
+    def _deterministic_formulation(
+        self,
+        *,
+        text: str,
+        user_preference_summary: str,
+        environment_summary: str,
+    ) -> TaskFormulation:
+        normalized = text.strip()
+        if self._is_greeting(normalized):
+            goal = "Respond naturally to the user's greeting."
+            context_summary = "User sent a greeting."
+            completion_criteria = ("A natural greeting response is ready.",)
+            constraints = self._default_constraints()
+        elif self._looks_ambiguous(normalized):
+            goal = "Clarify the user's intent and prepare a useful response."
+            context_summary = "User intent may need clarification or formulation."
+            completion_criteria = (
+                "A clear task goal is ready for handoff.",
+            )
+            constraints = self._default_constraints()
+        elif self._is_going_out_input(normalized):
+            goal = "Give the user a short, necessary reminder before leaving."
+            context_summary = "User said they are about to leave."
+            completion_criteria = (
+                "A concise pre-leaving reminder goal is ready for handoff.",
+            )
+            constraints = (
+                "Keep the reminder short and necessary.",
+                "Use only the provided input, preference summary, and environment summary.",
+                "Do not choose a skill or execution strategy.",
+            )
+        elif self._is_question(normalized):
+            goal = "Answer the user's question directly."
+            context_summary = "User asked a question."
+            completion_criteria = ("The user's question is answered.",)
+            constraints = self._default_constraints()
+        elif self._is_clear_direct_instruction(normalized):
+            goal = "Complete the user's direct instruction."
+            context_summary = "User gave a clear direct instruction."
+            completion_criteria = ("The direct instruction is handled.",)
+            constraints = self._default_constraints()
+        else:
+            goal = "Respond usefully to the user's input."
+            context_summary = "User provided a general input."
+            completion_criteria = ("A useful response is ready.",)
+            constraints = self._default_constraints()
+
+        return TaskFormulation(
+            goal=goal,
+            constraints=constraints,
+            context_summary=context_summary,
+            user_preference_summary=user_preference_summary,
+            environment_summary=environment_summary,
+            completion_criteria=completion_criteria,
+        )
+
+    @staticmethod
+    def _default_constraints() -> tuple[str, ...]:
+        return (
+            "Use only the provided input, preference summary, and environment summary.",
+            "Do not choose a skill or execution strategy.",
+            "Do not choose or call tools during task formulation.",
+        )
+
+    def _needs_task_formulation(self, text: str) -> bool:
+        normalized = text.strip()
+        if not normalized:
+            return True
+        if self._is_greeting(normalized):
+            return False
+        if self._looks_ambiguous(normalized):
+            return True
+        if self._is_question(normalized):
+            return False
+        if self._is_going_out_input(normalized):
+            return False
+        if self._is_clear_direct_instruction(normalized):
+            return False
+        return self._looks_ambiguous(normalized)
+
+    def _is_greeting(self, text: str) -> bool:
+        normalized = re.sub(r"[\s!！。,.，？?]", "", text.lower())
+        return normalized in {
+            "你好",
+            "您好",
+            "嗨",
+            "hello",
+            "hi",
+            "hey",
+            "ella你好",
+            "helloella",
+            "hiella",
+        }
+
+    def _is_question(self, text: str) -> bool:
+        normalized = text.lower()
+        return (
+            "?" in normalized
+            or "？" in normalized
+            or any(
+                marker in normalized
+                for marker in (
+                    "什么",
+                    "为什么",
+                    "怎么",
+                    "如何",
+                    "多少",
+                    "哪里",
+                    "能不能",
+                    "可以吗",
+                    "what",
+                    "why",
+                    "how",
+                    "where",
+                    "when",
+                    "can you",
+                )
+            )
+        )
+
+    def _is_clear_direct_instruction(self, text: str) -> bool:
+        normalized = text.lower()
+        return any(
+            marker in normalized
+            for marker in (
+                "帮我",
+                "请",
+                "总结",
+                "解释",
+                "翻译",
+                "写",
+                "生成",
+                "列出",
+                "整理",
+                "提醒我",
+                "please",
+                "summarize",
+                "explain",
+                "translate",
+                "write",
+                "list",
+                "remind me",
+            )
+        )
+
+    def _looks_ambiguous(self, text: str) -> bool:
+        normalized = text.lower()
+        return any(
+            marker in normalized
+            for marker in (
+                "有点迷茫",
+                "不知道",
+                "怎么办",
+                "帮帮我",
+                "随便",
+                "你觉得",
+                "不确定",
+                "confused",
+                "not sure",
+                "what should i do",
+            )
         )
 
     def _is_going_out_input(self, text: str) -> bool:
