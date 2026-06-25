@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from prompts.templates import TEMPLATES_BY_TYPE, PromptTemplate
 
@@ -26,6 +26,44 @@ class PromptBuildResult:
             "prompt_name": self.prompt_name,
             "context_keys": self.context_keys,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class PromptBlock:
+    name: str
+    content: Any
+    metadata: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("PromptBlock name must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class PromptFrame:
+    prompt_type: str
+    blocks: tuple[PromptBlock, ...]
+    output_contract: str
+
+    def __post_init__(self) -> None:
+        if not self.prompt_type:
+            raise ValueError("PromptFrame prompt_type must be non-empty")
+        if not self.output_contract:
+            raise ValueError("PromptFrame output_contract must be non-empty")
+
+    @classmethod
+    def from_blocks(
+        cls,
+        *,
+        prompt_type: str,
+        blocks: Sequence[PromptBlock],
+        output_contract: str,
+    ) -> "PromptFrame":
+        return cls(
+            prompt_type=prompt_type,
+            blocks=tuple(blocks),
+            output_contract=output_contract,
+        )
 
 
 class PromptEngine:
@@ -60,17 +98,40 @@ class PromptEngine:
         template: PromptTemplate,
         context: Mapping[str, Any],
     ) -> str:
-        context_text = "\n".join(
-            f"- {key}: {self._format_value(context[key])}"
-            for key in sorted(context)
+        frame = self._frame_for(template=template, context=context)
+        block_text = "\n\n".join(
+            f"{block.name}:\n{self._format_value(block.content)}"
+            for block in frame.blocks
         )
-        if not context_text:
-            context_text = "- none"
 
         return (
-            f"System:\n{template.system_prompt}\n\n"
-            f"Instruction:\n{template.instruction}\n\n"
-            f"Context:\n{context_text}"
+            f"{block_text}\n\n"
+            f"OutputContract:\n{frame.output_contract}"
+        )
+
+    def _frame_for(
+        self,
+        *,
+        template: PromptTemplate,
+        context: Mapping[str, Any],
+    ) -> PromptFrame:
+        context_content: Mapping[str, Any]
+        if context:
+            context_content = {
+                key: context[key]
+                for key in sorted(context)
+            }
+        else:
+            context_content = {"none": "none"}
+
+        return PromptFrame.from_blocks(
+            prompt_type=template.name,
+            blocks=(
+                PromptBlock("SystemPrompt", template.system_prompt),
+                PromptBlock("Instruction", template.instruction),
+                PromptBlock("Context", context_content),
+            ),
+            output_contract=template.instruction,
         )
 
     def _format_value(self, value: Any) -> str:
