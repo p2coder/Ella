@@ -96,10 +96,13 @@ STRATEGY_SELECTION_TEMPLATE = PromptTemplate(
     name="strategy_selection",
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
-        "Return one strict JSON object with mode set to react. Do not select "
-        "a Skill in this phase. Use skill_name=null and include a concise "
-        "reason. Skill may be considered later during execution decisions "
-        "from visible WorkSpace context."
+        "Return one strict JSON object for execution mode selection only. "
+        "Allowed fields are mode, reason, needs_decomposition, and "
+        "plan_summary. mode must be react or plan_and_execute. Do not return "
+        "skill_name. Do not select a Skill in this phase. Do not call Tool or "
+        "produce executable Tool calls. plan_and_execute is a future mode; "
+        "if runtime support is absent, the caller must safely continue with "
+        "react."
     ),
 )
 

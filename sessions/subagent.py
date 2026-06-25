@@ -58,35 +58,22 @@ class SubAgent:
         context: AgentExecutionContext,
         task_session: TaskSession,
     ) -> StrategyDecision:
-        visible_skills = self._visible_skill_summaries(context)
-        llm_selection = self._llm_select_skill(
+        llm_selection = self._llm_select_strategy_mode(
             handoff,
             context,
-            visible_skills,
         )
         if llm_selection is None:
-            skill_name = self._metadata_skill_match(handoff, visible_skills)
-            reason = (
-                "Visible skill metadata matches the current task."
-                if skill_name is not None
-                else "Use ReAct without optional skill guidance."
-            )
+            mode = "react"
+            reason = "Use ReAct as the default execution mode."
+            initial_plan = None
         else:
-            requested_name, reason = llm_selection
-            visible_names = {
-                str(summary["name"])
-                for summary in visible_skills
-                if isinstance(summary.get("name"), str)
-            }
-            skill_name = requested_name if requested_name in visible_names else None
-            if requested_name is not None and skill_name is None:
-                reason = "The requested skill is not visible; use ReAct without it."
+            mode, reason, initial_plan = llm_selection
 
         return StrategyDecision(
-            mode="react",
-            skill_name=skill_name,
+            mode=mode,
+            skill_name=None,
             reason=reason,
-            initial_plan=None,
+            initial_plan=initial_plan,
             completion_criteria=handoff.completion_criteria,
             session_id=context.session_id,
             task_id=task_session.task_id,
@@ -174,12 +161,11 @@ class SubAgent:
             context.agent_role,
         )
 
-    def _llm_select_skill(
+    def _llm_select_strategy_mode(
         self,
         handoff: HandoffRequest,
         context: AgentExecutionContext,
-        visible_skills: tuple[dict[str, object], ...],
-    ) -> tuple[str | None, str] | None:
+    ) -> tuple[str, str, tuple[str, ...] | None] | None:
         if self.llm_provider is None:
             return None
 
@@ -187,7 +173,6 @@ class SubAgent:
             PromptType.STRATEGY_SELECTION,
             {
                 "task": self._task_context(handoff, context),
-                "visible_skills": visible_skills,
             },
         )
         result = self.llm_provider.generate(
@@ -198,13 +183,26 @@ class SubAgent:
         if getattr(result, "failed", False):
             return None
         payload = self._extract_decision_payload(result.output)
-        if not isinstance(payload, dict) or payload.get("mode") != "react":
+        if not isinstance(payload, dict):
             return None
-        skill_name = payload.get("skill_name")
-        if skill_name is not None and not isinstance(skill_name, str):
+        mode = payload.get("mode")
+        if mode not in {"react", "plan_and_execute"}:
             return None
-        reason = str(payload.get("reason") or "LLM selected ReAct guidance.")
-        return skill_name, reason
+        reason = str(payload.get("reason") or "LLM selected execution mode.")
+        plan_summary = payload.get("plan_summary")
+        initial_plan: tuple[str, ...] | None = None
+        if isinstance(plan_summary, str) and plan_summary.strip():
+            initial_plan = (plan_summary.strip(),)
+        if mode == "plan_and_execute":
+            return (
+                "react",
+                (
+                    "LLM requested plan_and_execute, but this runtime only "
+                    "supports ReAct execution for now."
+                ),
+                initial_plan,
+            )
+        return "react", reason, initial_plan
 
     def _metadata_skill_match(
         self,

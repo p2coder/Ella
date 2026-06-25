@@ -33,9 +33,9 @@ def test_execution_decision_includes_skill_and_tool_policies():
 def test_strategy_selection_does_not_select_skill_in_strategy_phase():
     instruction = STRATEGY_SELECTION_TEMPLATE.instruction
 
-    assert "mode set to react" in instruction
+    assert "mode must be react or plan_and_execute" in instruction
     assert "Do not select a Skill in this phase" in instruction
-    assert "skill_name=null" in instruction
+    assert "Do not return skill_name" in instruction
 
 
 def test_policy_prompts_do_not_list_concrete_skill_or_tool_names():
