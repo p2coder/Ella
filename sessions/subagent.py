@@ -106,10 +106,17 @@ class SubAgent:
         strategy: StrategyDecision,
     ) -> ExecutionDecision:
         print("[subagent]decide_next_action")
+        visible_skills = self._visible_skill_summaries(context)
         skill = self._selected_skill(strategy, context)
         if strategy.skill_name is not None and skill is None:
             return self._replan(
                 f"Selected skill is no longer available: {strategy.skill_name}"
+            )
+        if skill is None and strategy.mode == "react":
+            skill = self._execution_skill_guidance(
+                handoff,
+                context,
+                visible_skills,
             )
 
         definitions = self._visible_tool_definitions(context)
@@ -120,6 +127,7 @@ class SubAgent:
             strategy,
             skill,
             definitions,
+            visible_skills,
         )
         if llm_decision is not None:
             print("[subagent]llm_desicion is none")
@@ -158,6 +166,20 @@ class SubAgent:
             return None
         return self.skill_manager.get_summary_for_role(
             strategy.skill_name,
+            context.agent_role,
+        )
+
+    def _execution_skill_guidance(
+        self,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+        visible_skills: tuple[dict[str, object], ...],
+    ) -> Any | None:
+        skill_name = self._metadata_skill_match(handoff, visible_skills)
+        if skill_name is None:
+            return None
+        return self.skill_manager.get_summary_for_role(
+            skill_name,
             context.agent_role,
         )
 
@@ -265,6 +287,7 @@ class SubAgent:
         strategy: StrategyDecision,
         skill: Any | None,
         definitions: tuple[Any, ...],
+        visible_skills: tuple[dict[str, object], ...],
     ) -> ExecutionDecision | None:
         if self.llm_provider is None or self.tool_directory is None:
             return None
@@ -273,16 +296,21 @@ class SubAgent:
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
-                "task": self._task_context(handoff, context),
-                "strategy": {
-                    "mode": strategy.mode,
-                    "skill_name": strategy.skill_name,
-                    "reason": strategy.reason,
-                    "completion_criteria": strategy.completion_criteria,
+                "user_prompt": handoff.trigger_event.payload.get("text", ""),
+                "workspace": {
+                    "overall_goal": handoff.task_goal,
+                    "current_goal": handoff.task_goal,
+                    "current_step_state": {
+                        "strategy_mode": strategy.mode,
+                        "strategy_reason": strategy.reason,
+                        "completion_criteria": strategy.completion_criteria,
+                    },
+                    "task": self._task_context(handoff, context),
+                    "selected_skill": self._skill_context(skill),
+                    "visible_skills": visible_skills,
+                    "visible_tools": serialized_tools,
+                    "observations": task_session.tool_trace,
                 },
-                "selected_skill": self._skill_context(skill),
-                "visible_tools": serialized_tools,
-                "observations": task_session.tool_trace,
             },
         )
         print("[subagent.py] prompt: ",prompt.prompt)
