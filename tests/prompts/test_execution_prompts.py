@@ -95,3 +95,33 @@ def test_execution_prompt_prevents_repeated_camera_scene_calls() -> None:
     assert "COMPLETE" in result.prompt
     assert "insufficient" in result.prompt
     assert "unavailable" in result.prompt
+
+
+def test_execution_prompt_prefers_matching_visible_visual_tool_over_wait() -> None:
+    result = PromptEngine().build(
+        PromptType.EXECUTION_DECISION,
+        {
+            "workspace": {
+                "current_goal": "和屏幕里的人打个招呼",
+                "visible_tools": (
+                    {
+                        "name": "screen_scene",
+                        "description": "Capture current screen content.",
+                    },
+                    {
+                        "name": "camera_scene",
+                        "description": "Capture physical camera scene.",
+                    },
+                ),
+                "observations": (),
+            }
+        },
+    )
+
+    assert "screen_scene is visible" in result.prompt
+    assert "CALL_TOOL screen_scene" in result.prompt
+    assert "Do not choose WAIT merely because no visual observation exists yet" in (
+        result.prompt
+    )
+    assert "屏幕" in result.prompt
+    assert "camera_scene is visible" in result.prompt

@@ -33,9 +33,21 @@ class RecordingEventRuntime:
 class CompletingTaskRuntime:
     memory_path: Path
     calls: list
+    tool_name: str = "camera_scene"
 
     def run_until_complete(self, task_id, max_steps):
         self.calls.append((task_id, max_steps))
+        payload = {
+            "scene_summary": "Desk scene with phone and keys.",
+            "visible_items": ["phone", "keys"],
+            "captured_frame_reference": "mock://frame-1",
+        }
+        if self.tool_name == "screen_scene":
+            payload = {
+                "summary": "Screen shows a video meeting with one person.",
+                "visible_items": ["meeting window", "person"],
+                "captured_frame_reference": "mock://screen-frame-1",
+            }
         completion = TaskCompletionPackage(
             context=None,
             summary="Completed through runtime.",
@@ -43,7 +55,7 @@ class CompletingTaskRuntime:
                 process={
                     "task_goal": "Give the user a short reminder before leaving.",
                     "strategy": "going_out",
-                    "tool_results": ("camera_scene",),
+                    "tool_results": (self.tool_name,),
                     "task_formulation_prompt_text": "TASK PROMPT",
                     "final_response_prompt_text": "FINAL PROMPT",
                 },
@@ -51,15 +63,11 @@ class CompletingTaskRuntime:
             ),
             tool_results=(
                 ToolResult(
-                    tool_name="camera_scene",
+                    tool_name=self.tool_name,
                     task_id="task-display",
                     session_id="session-display",
                     trace_id="trace-display",
-                    payload={
-                        "scene_summary": "Desk scene with phone and keys.",
-                        "visible_items": ["phone", "keys"],
-                        "captured_frame_reference": "mock://frame-1",
-                    },
+                    payload=payload,
                 ),
             ),
         )
@@ -91,6 +99,16 @@ class SuccessfulMicrophoneSource:
 def make_runtime(tmp_path):
     event_runtime = RecordingEventRuntime([])
     task_runtime = CompletingTaskRuntime(tmp_path / "memory.md", [])
+    return DemoRuntime(event_runtime, task_runtime), event_runtime, task_runtime
+
+
+def make_screen_runtime(tmp_path):
+    event_runtime = RecordingEventRuntime([])
+    task_runtime = CompletingTaskRuntime(
+        tmp_path / "memory.md",
+        [],
+        tool_name="screen_scene",
+    )
     return DemoRuntime(event_runtime, task_runtime), event_runtime, task_runtime
 
 
@@ -145,6 +163,19 @@ def test_snapshot_includes_visual_summary_prompt_fields_and_final_response(tmp_p
         "- visible_items: phone, keys"
     )
     assert snapshot.final_response == "Remember your phone and keys."
+
+
+def test_snapshot_uses_screen_scene_as_visual_result(tmp_path):
+    runtime, _, _ = make_screen_runtime(tmp_path)
+
+    result = runtime.run_with_display("和屏幕里的人打个招呼")
+    snapshot = result.snapshot
+
+    assert snapshot.image_status == CAMERA_FRAME
+    assert snapshot.captured_frame_reference == "mock://screen-frame-1"
+    assert snapshot.scene_summary == "Screen shows a video meeting with one person."
+    assert snapshot.visible_items == ("meeting window", "person")
+    assert "screen_scene:" in snapshot.tool_results_summary
 
 
 def test_demo_uses_page_viewer_to_write_display_page(tmp_path):

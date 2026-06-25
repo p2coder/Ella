@@ -32,7 +32,7 @@ from tools import (
     ToolResult,
 )
 from tools.camera_scene import CameraSceneTool
-
+from tools.screen_scene import ScreenSceneTool
 
 DEFAULT_MEMORY_PATH = Path("/tmp/ella-runtime-memory.md")
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -71,12 +71,24 @@ class AppRuntime:
         skill_manager.refresh()
 
         tool_manager = ToolManager()
-
+        screen_factory = getattr(device_factory, "screen", None)
+        screen_provider = (
+            screen_factory()
+            if screen_factory is not None
+            else ScreenSceneTool().screen_provider
+        )
 
         # tool改成热插拔
         tool_manager.register(
             CameraSceneTool(
                 camera_provider=camera_provider,
+                multimodal_provider=multimodal_provider,
+                store_raw_media=settings.debug_store_raw_media,
+            )
+        )
+        tool_manager.register(
+            ScreenSceneTool(
+                screen_provider=screen_provider,
                 multimodal_provider=multimodal_provider,
                 store_raw_media=settings.debug_store_raw_media,
             )

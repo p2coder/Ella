@@ -303,7 +303,6 @@ class SubAgent:
                     "current_goal": handoff.task_goal,
                     "current_step_state": {
                         "strategy_mode": strategy.mode,
-                        "strategy_reason": strategy.reason,
                         "completion_criteria": strategy.completion_criteria,
                     },
                     "task": self._task_context(handoff, context),
@@ -326,7 +325,14 @@ class SubAgent:
         if not isinstance(payload, dict):
             print("[subagent] replan")
             return self._replan("Invalid LLM action decision JSON.")
-        return self._decision_from_payload(payload, serialized_tools)
+        decision = self._decision_from_payload(payload, serialized_tools)
+        return self._correct_visual_wait_decision(
+            decision,
+            handoff,
+            context,
+            task_session,
+            serialized_tools,
+        )
 
     def _task_context(
         self,
@@ -587,6 +593,71 @@ class SubAgent:
                 f"Missing required tool arguments for {tool_name}: {', '.join(missing)}"
             )
         return ExecutionDecision(CALL_TOOL, tool_name, arguments, reason, False)
+
+    def _correct_visual_wait_decision(
+        self,
+        decision: ExecutionDecision,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+        task_session: TaskSession,
+        serialized_tools: tuple[dict[str, Any], ...],
+    ) -> ExecutionDecision:
+        if decision.action != WAIT:
+            return decision
+        if not self._explicit_screen_request(handoff):
+            return decision
+        if not self._tool_is_visible("screen_scene", serialized_tools):
+            return decision
+        if self._has_observation(task_session, "screen_scene"):
+            return decision
+        return ExecutionDecision(
+            CALL_TOOL,
+            "screen_scene",
+            {
+                "max_screenshots": 1,
+                "session_id": context.session_id,
+                "task_goal": handoff.task_goal,
+            },
+            (
+                "The request explicitly depends on current screen content, "
+                "and screen_scene is visible."
+            ),
+            False,
+        )
+
+    @staticmethod
+    def _explicit_screen_request(handoff: HandoffRequest) -> bool:
+        text = str(handoff.trigger_event.payload.get("text", "")).lower()
+        goal = handoff.task_goal.lower()
+        combined = f"{text} {goal}"
+        return any(
+            marker in combined
+            for marker in (
+                "屏幕",
+                "窗口",
+                "页面",
+                "screen",
+                "on my screen",
+                "web page",
+            )
+        )
+
+    @staticmethod
+    def _tool_is_visible(
+        tool_name: str,
+        serialized_tools: tuple[dict[str, Any], ...],
+    ) -> bool:
+        return any(tool.get("name") == tool_name for tool in serialized_tools)
+
+    @staticmethod
+    def _has_observation(task_session: TaskSession, tool_name: str) -> bool:
+        for observation in task_session.tool_trace:
+            if isinstance(observation, Mapping):
+                if observation.get("tool_name") == tool_name:
+                    return True
+            elif getattr(observation, "tool_name", None) == tool_name:
+                return True
+        return False
 
     @staticmethod
     def _missing_required_arguments(
