@@ -28,6 +28,40 @@ ELLA_SYSTEM_PROMPT = (
 )
 
 
+SKILL_POLICY_PROMPT = (
+    "Skill policy: Skill is guidance for behavior, not an independent "
+    "execution engine and not a fixed execution plan. Use a Skill only when "
+    "it fits the current goal and is visible in the current WorkSpace. A "
+    "Skill must not bypass task permissions, ToolManager visibility, "
+    "CapabilityExecutor validation, or Runtime state transitions. If no "
+    "Skill fits the user request, continue without Skill instead of failing "
+    "the task. If a Skill cannot be used, explain the visible reason when it "
+    "matters to the user and continue with another safe path when possible."
+)
+
+
+TOOL_POLICY_PROMPT = (
+    "Tool policy: Tool is an optional capability, not a mandatory step. "
+    "Call a Tool only when it is visible in the current WorkSpace and its "
+    "description and schema match the current need. If no suitable Tool is "
+    "available, answer directly, ask for missing information, WAIT, or "
+    "COMPLETE as appropriate. Treat Tool results as observations; update the "
+    "next decision from those observations. Tool failures are not successful "
+    "facts. Invalid parameters, missing permissions, unavailable tools, and "
+    "unexpected tool results should be reported or used to choose a safer "
+    "next action rather than retried blindly."
+)
+
+
+DECISION_POLICY_PROMPT = (
+    f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT} One execution decision may "
+    "choose at most one action. CALL_TOOL may use exactly one visible tool. "
+    "COMPLETE is valid when current information is enough, even if no Tool "
+    "was used. WAIT is valid when user input or external state is needed. "
+    "REPLAN is valid when the current approach no longer fits."
+)
+
+
 TASK_FORMULATION_TEMPLATE = PromptTemplate(
     name="task_formulation",
     system_prompt=ELLA_SYSTEM_PROMPT,
@@ -62,8 +96,10 @@ STRATEGY_SELECTION_TEMPLATE = PromptTemplate(
     name="strategy_selection",
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
-        "Return one strict JSON object with mode set to react, skill_name set "
-        "to one visible skill name or null, and a concise reason."
+        "Return one strict JSON object with mode set to react. Do not select "
+        "a Skill in this phase. Use skill_name=null and include a concise "
+        "reason. Skill may be considered later during execution decisions "
+        "from visible WorkSpace context."
     ),
 )
 
@@ -72,16 +108,19 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     name="execution_decision",
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
-        "Return one strict JSON object. The action must be CALL_TOOL, COMPLETE, "
-        "WAIT, or REPLAN. CALL_TOOL must include a visible tool_name and an "
-        "arguments object. Use the provided tool_results observations before "
-        "choosing another tool call. Other actions must not include a tool name. If "
-        "observations already contain camera_scene for the current task, do not "
-        "call camera_scene again; choose COMPLETE and answer from that visual "
-        "observation. If the visual observation is insufficient, choose COMPLETE "
-        "and explain what visual information is missing. If camera_scene is "
-        "unavailable, choose COMPLETE and explain that visual context is "
-        "unavailable. Do not retry visual tools in a loop."
+        f"{DECISION_POLICY_PROMPT} Return one strict JSON object. The action "
+        "must be CALL_TOOL, COMPLETE, WAIT, or REPLAN. CALL_TOOL must include "
+        "a visible tool_name and an arguments object matching that tool's "
+        "schema. Other actions must not include a tool name. Use the provided "
+        "tool_results observations before choosing another tool call. If an "
+        "observation is sufficient for the current task, choose COMPLETE. If "
+        "an observation is insufficient, choose COMPLETE or WAIT and clearly "
+        "state what information is missing rather than repeating the same "
+        "tool call in a loop. If observations already contain camera_scene "
+        "for the current task, do not call camera_scene again; use that "
+        "observation, explain missing visual information, or report visual "
+        "unavailability. If a tool is unavailable, choose COMPLETE, WAIT, or "
+        "REPLAN based on whether the task can continue without that tool."
     ),
 )
 
