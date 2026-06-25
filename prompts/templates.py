@@ -102,7 +102,19 @@ STRATEGY_SELECTION_TEMPLATE = PromptTemplate(
         "skill_name. Do not select a Skill in this phase. Do not call Tool or "
         "produce executable Tool calls. plan_and_execute is a future mode; "
         "if runtime support is absent, the caller must safely continue with "
-        "react."
+        "react.do not make claims about tool availability unless visible_tools "
+        "are provided in the context. If the task requires external capability, "
+        "state the capability needed, not whether it is available."
+        "Important:"
+        "The absence of visible_tools in this prompt does not mean tools are unavailable."
+        "STRATEGY_SELECTION may not receive visible_tools by design."
+        "Therefore, never write claims such as:"
+        "- no tool is available"
+        "- no camera is available"
+        "- I cannot access the camera"
+        "- no runtime support exists"
+        "- no external sensing interface is provided"
+        "unless the context explicitly contains a field saying that capability is unavailable."
     ),
 )
 

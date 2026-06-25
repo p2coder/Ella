@@ -110,7 +110,6 @@ class TaskRuntime:
             TaskState.CANCELLED,
         }:
             raise ValueError(f"cannot step terminal task: {session.state.value}")
-        print("")
         if session.state is TaskState.CREATED:
             session.transition_to(TaskState.PLANNING)
             return self._result(creation)
@@ -161,7 +160,6 @@ class TaskRuntime:
             session.tool_trace += (execution.tool_result.to_dict(),)
 
         if execution.replan_required:
-            
             session.transition_to(TaskState.REPLANNING)
         elif decision.action == WAIT:
             session.transition_to(TaskState.WAITING)

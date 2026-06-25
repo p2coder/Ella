@@ -202,6 +202,7 @@ class SubAgent:
             trace_id=context.trace_id,
             metadata={"boundary": "strategy_selection"},
         )
+        print("\n[sessions/subagent.py] strategy selected: ",result.output if result else "none")
         if getattr(result, "failed", False):
             return None
         payload = self._extract_decision_payload(result.output)
@@ -313,7 +314,6 @@ class SubAgent:
                 },
             },
         )
-        print("[subagent.py] prompt: ",prompt.prompt)
         result = self.llm_provider.generate(
             prompt.prompt,
             trace_id=context.trace_id,
@@ -339,7 +339,7 @@ class SubAgent:
             "context_summary": handoff.context_summary,
             "user_preference_summary": handoff.user_preference_summary,
             "environment_summary": handoff.environment_summary,
-            "constraints": handoff.constraints,
+            "constraints": None,
             "completion_criteria": handoff.completion_criteria,
             "trace_id": context.trace_id,
         }
