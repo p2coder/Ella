@@ -35,7 +35,8 @@ class FinalResponseGenerator:
     ) -> FinalResponseResult:
         tool_results_tuple = tuple(tool_results)
         tool_results_summary = self.summarize_tool_results(tool_results_tuple)
-        context = {
+        tool_errors = self._tool_errors(tool_results_tuple)
+        legacy_context = {
             "trace_id": trace_id,
             "user_input": user_input,
             "task_goal": task_goal,
@@ -50,8 +51,34 @@ class FinalResponseGenerator:
             "user_preference_summary": user_preference_summary,
             "environment_summary": environment_summary,
             "memory_context": memory_context,
-            "provider_or_tool_errors": self._tool_errors(tool_results_tuple),
+            "provider_or_tool_errors": tool_errors,
         }
+        context = dict(legacy_context)
+        if isinstance(self.prompt_engine, PromptEngine):
+            context.update(
+                {
+                    "user_prompt": user_input,
+                    "workspace": {
+                        "overall_goal": task_goal,
+                        "current_goal": task_goal,
+                        "completed_steps": self._completed_steps(tool_results_tuple),
+                        "current_step_state": {
+                            "task_constraints": tuple(task_constraints),
+                            "completion_criteria": tuple(completion_criteria),
+                            "uncertainty_and_failure_notes": tool_errors,
+                        },
+                        "tool_results_summary": tool_results_summary,
+                        "scene_summary": self._first_payload_text(
+                            tool_results_tuple,
+                            ("scene_summary", "summary"),
+                        ),
+                        "visible_items": self._visible_items(tool_results_tuple),
+                        "observations": self._observation_summaries(
+                            tool_results_tuple
+                        ),
+                    },
+                },
+            )
         prompt_result = self.prompt_engine.build(PromptType.FINAL_RESPONSE, context)
 
         try:
@@ -100,7 +127,6 @@ class FinalResponseGenerator:
             )
 
         final_response = self._provider_text(provider_result.output)
-        print(final_response)
         if final_response is None:
             return self._fallback_result(
                 trace_id=trace_id,
@@ -159,8 +185,8 @@ class FinalResponseGenerator:
         if "visual context is unavailable" in details.lower():
             visual_note = " 视觉上下文当前不可用。"
         final_response = (
-            f"我已经根据当前信息完成了检查：{details} "
-            f"任务目标是：{task_goal}.{visual_note}"
+            f"我已经根据当前信息完成了检查：{self._compact_summary(details)} "
+            f"目标是：{task_goal}。{visual_note}"
         )
         return FinalResponseResult(
             final_response=final_response,
@@ -247,6 +273,46 @@ class FinalResponseGenerator:
             elif available is False and isinstance(summary, str) and summary.strip():
                 errors.append(f"{tool_name}: {summary.strip()}")
         return tuple(errors)
+
+    def _completed_steps(
+        self,
+        tool_results: Iterable[ToolResult | Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        steps = []
+        for result in tool_results:
+            tool_name, payload = self._tool_name_and_payload(result)
+            status = payload.get("status")
+            if status:
+                steps.append(f"{tool_name}: {status}")
+            else:
+                steps.append(tool_name)
+        return tuple(steps)
+
+    def _observation_summaries(
+        self,
+        tool_results: Iterable[ToolResult | Mapping[str, Any]],
+    ) -> tuple[dict[str, Any], ...]:
+        observations = []
+        for result in tool_results:
+            tool_name, payload = self._tool_name_and_payload(result)
+            observations.append(
+                {
+                    "tool_name": tool_name,
+                    "summary": payload.get("summary")
+                    or payload.get("scene_summary")
+                    or self._format_value(payload),
+                    "status": payload.get("status", "unknown"),
+                    "error": payload.get("error"),
+                }
+            )
+        return tuple(observations)
+
+    @staticmethod
+    def _compact_summary(text: str) -> str:
+        normalized = " ".join(line.strip() for line in text.splitlines() if line.strip())
+        if len(normalized) > 240:
+            return normalized[:237].rstrip() + "..."
+        return normalized
 
     def _format_value(self, value: Any) -> str:
         if isinstance(value, Mapping):
