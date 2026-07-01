@@ -67,6 +67,7 @@ class ToolFailureObservation:
 class StepExecutionState:
     step_number: int = 1
     retry_index: int = 0
+    max_argument_retries: int = 2
     active_tool_name: str | None = None
     blacklisted_tools: tuple[str, ...] = ()
     failures: tuple[ToolFailureObservation, ...] = ()
@@ -76,6 +77,10 @@ class StepExecutionState:
             raise ValueError("step_number must be at least 1")
         if self.retry_index < 0:
             raise ValueError("retry_index must be non-negative")
+        if self.max_argument_retries < 0:
+            raise ValueError("max_argument_retries must be non-negative")
+        if self.retry_index > self.max_argument_retries:
+            raise ValueError("retry_index must not exceed max_argument_retries")
         if self.active_tool_name is not None and not self.active_tool_name.strip():
             raise ValueError("active_tool_name must be non-empty when provided")
         object.__setattr__(
@@ -91,10 +96,15 @@ class StepExecutionState:
             return f"step{self.step_number}_try"
         return f"step{self.step_number}_retry{self.retry_index}"
 
+    @property
+    def retries_remaining(self) -> int:
+        return self.max_argument_retries - self.retry_index
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "step_number": self.step_number,
             "retry_index": self.retry_index,
+            "max_argument_retries": self.max_argument_retries,
             "attempt_id": self.attempt_id,
             "active_tool_name": self.active_tool_name,
             "blacklisted_tools": self.blacklisted_tools,

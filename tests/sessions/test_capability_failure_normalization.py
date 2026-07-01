@@ -154,6 +154,7 @@ def test_unavailable_legacy_result_is_normalized_and_retained_as_raw_only():
     assert result.failure.kind is ToolFailureKind.ENVIRONMENT_UNAVAILABLE
     assert result.failure.code == "backend_unavailable"
     assert isinstance(result.raw_result, ToolResult)
+    assert "raw_result" not in repr(result)
 
 
 def test_permission_denied_legacy_result_maps_to_permission_failure():

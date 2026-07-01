@@ -396,18 +396,12 @@ class SubAgent:
             for failure in archived_step.failures
         )
         current_failures = tuple(failure.to_dict() for failure in step.failures)
-        configured_max = 2
-        retries_remaining = (
-            max(0, configured_max - step.retry_index)
-            if isinstance(configured_max, int)
-            else None
-        )
         return {
             "attempt_id": step.attempt_id,
             "retry_index": step.retry_index,
             "active_tool_name": step.active_tool_name,
             "repair_mode": step.active_tool_name is not None,
-            "retries_remaining": retries_remaining,
+            "retries_remaining": step.retries_remaining,
             "blacklisted_tools": step.blacklisted_tools,
             "failures": current_failures,
             "successful_tool_results": task_session.tool_trace,

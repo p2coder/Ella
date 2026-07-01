@@ -86,16 +86,26 @@ def test_step_state_normalizes_collections_without_sharing():
     assert state.to_dict()["attempt_id"] == "step1_try"
 
 
+def test_step_state_carries_retry_budget():
+    state = StepExecutionState(max_argument_retries=4, retry_index=1)
+
+    assert state.max_argument_retries == 4
+    assert state.retries_remaining == 3
+    assert state.to_dict()["max_argument_retries"] == 4
+
+
 @pytest.mark.parametrize(
-    ("step_number", "retry_index"),
-    ((0, 0), (-1, 0), (1, -1)),
+    ("step_number", "retry_index", "max_argument_retries"),
+    ((0, 0, 2), (-1, 0, 2), (1, -1, 2), (1, 0, -1), (1, 3, 2)),
 )
 def test_invalid_step_numbers_and_retry_indexes_are_rejected(
     step_number,
     retry_index,
+    max_argument_retries,
 ):
     with pytest.raises(ValueError):
         StepExecutionState(
             step_number=step_number,
             retry_index=retry_index,
+            max_argument_retries=max_argument_retries,
         )

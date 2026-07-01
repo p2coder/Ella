@@ -89,6 +89,10 @@ class TaskRuntime:
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
         creation = self.session_manager.create_session(handoff)
+        creation.session.current_step = replace(
+            creation.session.current_step,
+            max_argument_retries=self.max_argument_retries,
+        )
         task_id = creation.session.task_id
         session_id = creation.session.session_id
         print("[task_runtime.py]submit:submit event ",task_id)
@@ -238,7 +242,7 @@ class TaskRuntime:
             ToolFailureKind.INVALID_ARGUMENTS_REPAIR_VIOLATION,
         }:
             active_tool = step.active_tool_name or failure.tool_name
-            if step.retry_index < self.max_argument_retries:
+            if step.retry_index < step.max_argument_retries:
                 session.current_step = replace(
                     step,
                     retry_index=step.retry_index + 1,
@@ -293,6 +297,7 @@ class TaskRuntime:
         session.step_history += (archived,)
         session.current_step = StepExecutionState(
             step_number=archived.step_number + 1,
+            max_argument_retries=archived.max_argument_retries,
         )
 
     def run_until_blocked(

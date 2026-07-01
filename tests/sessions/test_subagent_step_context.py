@@ -98,6 +98,21 @@ def test_repair_mode_exposes_only_active_tool():
     assert tuple(item.name for item in filtered) == ("camera_scene",)
 
 
+def test_step_context_uses_runtime_retry_budget():
+    session = make_session()
+    session.current_step = replace(
+        session.current_step,
+        retry_index=1,
+        max_argument_retries=4,
+        active_tool_name="camera_scene",
+        failures=(failure(),),
+    )
+
+    context = SubAgent(SkillManager())._execution_step_context(session)
+
+    assert context["retries_remaining"] == 3
+
+
 def test_repair_tool_switch_remains_detectable():
     subagent = SubAgent(SkillManager())
 

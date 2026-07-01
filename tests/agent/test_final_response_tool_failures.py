@@ -70,3 +70,25 @@ def test_failure_summary_is_user_safe_and_deterministic():
         "camera_scene: permission_denied "
         "(permission_denied) - camera permission was denied; retryable=false"
     )
+
+
+def test_failure_summary_redacts_credentials_and_local_paths():
+    unsafe = ToolFailureObservation(
+        attempt_id="step1_try",
+        tool_name="file_tool",
+        kind=ToolFailureKind.ENVIRONMENT_UNAVAILABLE,
+        code="file_not_found",
+        message=(
+            "missing /Users/wx/private.txt with "
+            "Bearer abcdefghijklmnopqrstuvwxyz"
+        ),
+        arguments={},
+        retryable=False,
+    )
+    generator = FinalResponseGenerator(RecordingPromptEngine(), AnswerProvider())
+
+    summary = generator.summarize_execution_failures((unsafe,))
+
+    assert "/Users/wx/private.txt" not in summary
+    assert "abcdefghijklmnopqrstuvwxyz" not in summary
+    assert "[REDACTED]" in summary

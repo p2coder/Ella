@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from agent.context import AgentExecutionContext
@@ -23,7 +23,7 @@ class CapabilityExecutionResult:
     failure_reason: str | None = None
     unavailable_tool: str | None = None
     failure: ToolFailureObservation | None = None
-    raw_result: Any | None = None
+    raw_result: Any | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.tool_result is not None and self.failure is not None:

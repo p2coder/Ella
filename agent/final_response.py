@@ -1,10 +1,16 @@
 from dataclasses import dataclass
+import re
 from typing import Any, Iterable, Mapping
 
-from prompts.engine import PromptEngine, PromptType
+from prompts.engine import PromptEngine, PromptType, redact_prompt_text
 from providers.llm import LLMProvider
 from sessions.execution_state import ToolFailureObservation
 from tools.base import ToolResult
+
+
+LOCAL_PATH_PATTERN = re.compile(
+    r"(?:(?:[A-Za-z]:\\\\)|/)[^\s;,]+"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,20 +202,27 @@ class FinalResponseGenerator:
                 tool_name = failure.tool_name
                 kind = failure.kind.value
                 code = failure.code
-                message = failure.message
+                message = self._safe_failure_message(failure.message)
                 retryable = failure.retryable
             else:
                 tool_name = str(failure.get("tool_name", "unknown_tool"))
                 raw_kind = failure.get("kind", "tool_execution_failed")
                 kind = getattr(raw_kind, "value", str(raw_kind))
                 code = str(failure.get("code", kind))
-                message = str(failure.get("message", "tool execution failed"))
+                message = self._safe_failure_message(
+                    str(failure.get("message", "tool execution failed"))
+                )
                 retryable = bool(failure.get("retryable", False))
             summaries.append(
                 f"{tool_name}: {kind} ({code}) - {message}; "
                 f"retryable={str(retryable).lower()}"
             )
         return "\n".join(summaries)
+
+    @staticmethod
+    def _safe_failure_message(message: str) -> str:
+        redacted = redact_prompt_text(message)
+        return LOCAL_PATH_PATTERN.sub("[REDACTED]", redacted)
 
     def _fallback_result(
         self,
