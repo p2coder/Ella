@@ -48,7 +48,12 @@ class CameraSceneTool:
                 "Use to capture a bounded visual scene summary when the current "
                 "task needs fresh visual context. Do not use for continuous "
                 "surveillance, unbounded capture, identity recognition, or when "
-                "the task can be answered without visual context."
+                "the task can be answered without visual context. If the task "
+                "already has a successful camera_scene observation, do not call "
+                "camera_scene again, even when the requested object is missing "
+                "or the image is blurred, obstructed, poorly angled, or otherwise "
+                "insufficient. Use the existing observation and explain what is "
+                "visible, missing, or uncertain."
             ),
             schema_version="1.0",
             input_schema={

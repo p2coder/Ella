@@ -49,7 +49,11 @@ TOOL_POLICY_PROMPT = (
     "next decision from those observations. Tool failures are not successful "
     "facts. Invalid parameters, missing permissions, unavailable tools, and "
     "unexpected tool results should be reported or used to choose a safer "
-    "next action rather than retried blindly."
+    "next action rather than retried blindly. A ToolResult is a successful "
+    "business observation. A ToolFailureObservation records an execution "
+    "failure and must not be treated as successful facts. Permission, "
+    "environment, and internal Tool failures are non-retryable by default; "
+    "do not retry them in the current logical Step."
 )
 
 
@@ -159,7 +163,11 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "for the current task, do not call camera_scene again; use that "
         "observation, explain missing visual information, or report visual "
         "unavailability. If a tool is unavailable, choose COMPLETE, WAIT, or "
-        "REPLAN based on whether the task can continue without that tool."
+        "REPLAN based on whether the task can continue without that tool. In "
+        "argument repair mode, regenerate arguments for active_tool_name only. "
+        "The repair must use the same Tool and must not switch tool_name, "
+        "COMPLETE, WAIT, or REPLAN. Never select a Tool listed in "
+        "blacklisted_tools."
     ),
 )
 
