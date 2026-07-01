@@ -1,5 +1,6 @@
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,7 +120,10 @@ class SubAgent:
                 visible_skills,
             )
 
-        definitions = self._visible_tool_definitions(context)
+        definitions = self._filter_definitions_for_step(
+            self._visible_tool_definitions(context),
+            task_session,
+        )
         llm_decision = self._llm_decide_next_action(
             handoff,
             context,
@@ -294,6 +298,7 @@ class SubAgent:
             return None
 
         serialized_tools = serialize_tool_definitions(definitions)
+        step_context = self._execution_step_context(task_session)
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
@@ -304,12 +309,20 @@ class SubAgent:
                     "current_step_state": {
                         "strategy_mode": strategy.mode,
                         "completion_criteria": strategy.completion_criteria,
+                        **step_context,
                     },
                     "task": self._task_context(handoff, context),
                     "selected_skill": self._skill_context(skill),
                     "visible_skills": visible_skills,
                     "visible_tools": serialized_tools,
-                    "observations": task_session.tool_trace,
+                    "observations": {
+                        "successful_tool_results": step_context[
+                            "successful_tool_results"
+                        ],
+                        "failure_observations": step_context[
+                            "failure_observations"
+                        ],
+                    },
                 },
             },
         )
@@ -325,7 +338,11 @@ class SubAgent:
         if not isinstance(payload, dict):
             print("[subagent] replan")
             return self._replan("Invalid LLM action decision JSON.")
-        decision = self._decision_from_payload(payload, serialized_tools)
+        decision = self._decision_from_payload(
+            payload,
+            serialized_tools,
+            repair_active_tool=task_session.current_step.active_tool_name,
+        )
         return self._correct_visual_wait_decision(
             decision,
             handoff,
@@ -367,6 +384,60 @@ class SubAgent:
             "optional_tools": tuple(getattr(skill, "optional_tools", ()) or ()),
             "content": content,
         }
+
+    def _execution_step_context(
+        self,
+        task_session: TaskSession,
+    ) -> dict[str, object]:
+        step = task_session.current_step
+        historical_failures = tuple(
+            failure.to_dict()
+            for archived_step in task_session.step_history
+            for failure in archived_step.failures
+        )
+        current_failures = tuple(failure.to_dict() for failure in step.failures)
+        configured_max = task_session.task_local_state.get(
+            "max_argument_retries",
+            2,
+        )
+        retries_remaining = (
+            max(0, configured_max - step.retry_index)
+            if isinstance(configured_max, int)
+            else None
+        )
+        return {
+            "attempt_id": step.attempt_id,
+            "retry_index": step.retry_index,
+            "active_tool_name": step.active_tool_name,
+            "repair_mode": step.active_tool_name is not None,
+            "retries_remaining": retries_remaining,
+            "blacklisted_tools": step.blacklisted_tools,
+            "failures": current_failures,
+            "successful_tool_results": task_session.tool_trace,
+            "failure_observations": (*historical_failures, *current_failures),
+        }
+
+    def _filter_definitions_for_step(
+        self,
+        definitions: tuple[Any, ...],
+        task_session: TaskSession,
+    ) -> tuple[Any, ...]:
+        step = task_session.current_step
+        if step.active_tool_name is not None:
+            return tuple(
+                definition
+                for definition in definitions
+                if getattr(definition, "name", None) == step.active_tool_name
+            )
+
+        excluded = set(step.blacklisted_tools)
+        if self._has_successful_observation(task_session, "camera_scene"):
+            excluded.add("camera_scene")
+        return tuple(
+            definition
+            for definition in definitions
+            if getattr(definition, "name", None) not in excluded
+        )
 
     def _fallback_decision(
         self,
@@ -560,6 +631,7 @@ class SubAgent:
         self,
         payload: dict[str, Any],
         serialized_tools: tuple[dict[str, Any], ...],
+        repair_active_tool: str | None = None,
     ) -> ExecutionDecision:
         action = payload.get("action")
         reason = str(payload.get("reason") or "LLM selected the next action.")
@@ -575,6 +647,11 @@ class SubAgent:
         tool_name = payload.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name:
             return self._replan("CALL_TOOL decision is missing tool_name.")
+        if repair_active_tool is not None and tool_name != repair_active_tool:
+            arguments = payload.get("arguments", payload.get("tool_input", {}))
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return ExecutionDecision(CALL_TOOL, tool_name, arguments, reason, False)
         visible_by_name = {
             str(tool["name"]): tool
             for tool in serialized_tools
@@ -657,6 +734,25 @@ class SubAgent:
                     return True
             elif getattr(observation, "tool_name", None) == tool_name:
                 return True
+        return False
+
+    @staticmethod
+    def _has_successful_observation(
+        task_session: TaskSession,
+        tool_name: str,
+    ) -> bool:
+        for observation in task_session.tool_trace:
+            if isinstance(observation, Mapping):
+                observed_name = observation.get("tool_name")
+                payload = observation.get("payload", {})
+            else:
+                observed_name = getattr(observation, "tool_name", None)
+                payload = getattr(observation, "payload", {})
+            if observed_name != tool_name or not isinstance(payload, Mapping):
+                continue
+            if payload.get("status") == "unavailable" or payload.get("error"):
+                continue
+            return True
         return False
 
     @staticmethod
