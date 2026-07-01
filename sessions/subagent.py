@@ -396,10 +396,7 @@ class SubAgent:
             for failure in archived_step.failures
         )
         current_failures = tuple(failure.to_dict() for failure in step.failures)
-        configured_max = task_session.task_local_state.get(
-            "max_argument_retries",
-            2,
-        )
+        configured_max = 2
         retries_remaining = (
             max(0, configured_max - step.retry_index)
             if isinstance(configured_max, int)
@@ -431,6 +428,7 @@ class SubAgent:
             )
 
         excluded = set(step.blacklisted_tools)
+        excluded.update(self._non_retryable_failed_tool_names(task_session))
         if self._has_successful_observation(task_session, "camera_scene"):
             excluded.add("camera_scene")
         return tuple(
@@ -468,25 +466,31 @@ class SubAgent:
 
         visible_names = self._visible_tool_names(context, definitions)
         tool_order = self._skill_guided_tool_order(skill, handoff, visible_names)
-        unavailable = tuple(name for name in tool_order if name not in visible_names)
+        completed_tools = {
+            entry.get("tool_name")
+            for entry in task_session.tool_trace
+            if isinstance(entry, dict)
+        }
+        failed_tools = self._non_retryable_failed_tool_names(task_session)
+        resolved_tools = completed_tools | failed_tools
+        unavailable = tuple(
+            name
+            for name in tool_order
+            if name not in visible_names and name not in resolved_tools
+        )
         if unavailable:
             return self._replan(
                 "Skill-referenced tools are no longer available: "
                 + ", ".join(unavailable)
             )
 
-        completed_tools = {
-            entry.get("tool_name")
-            for entry in task_session.tool_trace
-            if isinstance(entry, dict)
-        }
         definitions_by_name = {
             definition.name: definition
             for definition in definitions
             if isinstance(getattr(definition, "name", None), str)
         }
         for tool_name in tool_order:
-            if tool_name not in completed_tools:
+            if tool_name not in resolved_tools:
                 return ExecutionDecision(
                     action=CALL_TOOL,
                     tool_name=tool_name,
@@ -754,6 +758,17 @@ class SubAgent:
                 continue
             return True
         return False
+
+    @staticmethod
+    def _non_retryable_failed_tool_names(
+        task_session: TaskSession,
+    ) -> set[str]:
+        return {
+            failure.tool_name
+            for step in (*task_session.step_history, task_session.current_step)
+            for failure in step.failures
+            if not failure.retryable
+        }
 
     @staticmethod
     def _missing_required_arguments(

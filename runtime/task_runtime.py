@@ -89,10 +89,6 @@ class TaskRuntime:
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
         creation = self.session_manager.create_session(handoff)
-        creation.session.set_task_state(
-            "max_argument_retries",
-            self.max_argument_retries,
-        )
         task_id = creation.session.task_id
         session_id = creation.session.session_id
         print("[task_runtime.py]submit:submit event ",task_id)

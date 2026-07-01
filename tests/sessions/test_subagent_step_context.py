@@ -161,3 +161,28 @@ def test_failed_camera_observation_does_not_count_as_success():
     )
 
     assert tuple(item.name for item in filtered) == ("camera_scene",)
+
+
+def test_non_retryable_failure_hides_tool_from_later_steps():
+    session = make_session()
+    denied = ToolFailureObservation(
+        attempt_id="step1_try",
+        tool_name="camera_scene",
+        kind=ToolFailureKind.PERMISSION_DENIED,
+        code="permission_denied",
+        message="camera permission denied",
+        arguments={},
+        retryable=False,
+    )
+    session.step_history = (
+        replace(session.current_step, failures=(denied,)),
+    )
+    session.current_step = replace(session.current_step, step_number=2)
+    subagent = SubAgent(SkillManager())
+
+    filtered = subagent._filter_definitions_for_step(
+        (definition("camera_scene"), definition("weather")),
+        session,
+    )
+
+    assert tuple(item.name for item in filtered) == ("weather",)
