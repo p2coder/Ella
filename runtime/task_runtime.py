@@ -459,8 +459,20 @@ class TaskRuntime:
             user_preference_summary=handoff.user_preference_summary,
             environment_summary=handoff.environment_summary,
             memory_context=self._memory_context(),
+            execution_failures=self._execution_failures(session),
         )
         return result.final_response
+
+    @staticmethod
+    def _execution_failures(
+        session: TaskSession,
+    ) -> tuple[ToolFailureObservation, ...]:
+        historical = tuple(
+            failure
+            for step in session.step_history
+            for failure in step.failures
+        )
+        return (*historical, *session.current_step.failures)
 
     def _memory_context(self) -> str:
         query = getattr(self._memory_manager, "query", None)
