@@ -15,6 +15,7 @@ class HandoffRequest:
     context_summary: str
     constraints: tuple[str, ...]
     completion_criteria: tuple[str, ...]
+    task_formulation_prompt_text: str = ""
 
     @classmethod
     def from_formulation(
@@ -30,6 +31,7 @@ class HandoffRequest:
             context_summary=formulation.context_summary,
             constraints=formulation.constraints,
             completion_criteria=formulation.completion_criteria,
+            task_formulation_prompt_text=formulation.prompt_text,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -41,4 +43,5 @@ class HandoffRequest:
             "context_summary": self.context_summary,
             "constraints": self.constraints,
             "completion_criteria": self.completion_criteria,
+            "task_formulation_prompt_text": self.task_formulation_prompt_text,
         }

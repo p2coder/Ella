@@ -62,6 +62,7 @@ class SubAgent:
         llm_selection = self._llm_select_strategy_mode(
             handoff,
             context,
+            task_session,
         )
         if llm_selection is None:
             mode = "react"
@@ -191,6 +192,7 @@ class SubAgent:
         self,
         handoff: HandoffRequest,
         context: AgentExecutionContext,
+        task_session: TaskSession,
     ) -> tuple[str, str, tuple[str, ...] | None] | None:
         if self.llm_provider is None:
             return None
@@ -200,6 +202,9 @@ class SubAgent:
             {
                 "task": self._task_context(handoff, context),
             },
+        )
+        task_session.task_local_state["strategy_selection_prompt_text"] = (
+            prompt.prompt
         )
         result = self.llm_provider.generate(
             prompt.prompt,
@@ -325,6 +330,9 @@ class SubAgent:
                     },
                 },
             },
+        )
+        task_session.task_local_state["execution_decision_prompt_text"] = (
+            prompt.prompt
         )
         result = self.llm_provider.generate(
             prompt.prompt,

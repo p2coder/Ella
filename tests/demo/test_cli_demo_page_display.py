@@ -57,6 +57,8 @@ class CompletingTaskRuntime:
                     "strategy": "going_out",
                     "tool_results": (self.tool_name,),
                     "task_formulation_prompt_text": "TASK PROMPT",
+                    "strategy_selection_prompt_text": "STRATEGY PROMPT",
+                    "execution_decision_prompt_text": "EXECUTION PROMPT",
                     "final_response_prompt_text": "FINAL PROMPT",
                 },
                 final_response="Remember your phone and keys.",
@@ -155,6 +157,8 @@ def test_snapshot_includes_visual_summary_prompt_fields_and_final_response(tmp_p
     assert snapshot.scene_summary == "Desk scene with phone and keys."
     assert snapshot.visible_items == ("phone", "keys")
     assert snapshot.task_formulation_prompt_text == "TASK PROMPT"
+    assert snapshot.strategy_selection_prompt_text == "STRATEGY PROMPT"
+    assert snapshot.execution_decision_prompt_text == "EXECUTION PROMPT"
     assert snapshot.final_response_prompt_text == "FINAL PROMPT"
     assert snapshot.tool_results_summary == (
         "camera_scene:\n"

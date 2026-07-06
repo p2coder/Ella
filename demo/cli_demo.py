@@ -102,6 +102,7 @@ class DemoRuntime:
         subagent = SubAgent(
             skill_manager,
             tool_directory=tool_manager,
+            llm_provider=llm_provider,
         )
         final_response_generator = FinalResponseGenerator(
             prompt_engine=PromptEngine(),
@@ -408,6 +409,12 @@ def _build_display_snapshot(
         task_goal=str(process.get("task_goal", "")),
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
+        ),
+        strategy_selection_prompt_text=str(
+            process.get("strategy_selection_prompt_text", "")
+        ),
+        execution_decision_prompt_text=str(
+            process.get("execution_decision_prompt_text", "")
         ),
         final_response_prompt_text=str(process.get("final_response_prompt_text", "")),
         tool_results_summary=_tool_results_summary(tool_results),

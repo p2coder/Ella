@@ -34,7 +34,7 @@ from tools import (
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 
-DEFAULT_MEMORY_PATH = Path("/tmp/ella-runtime-memory.md")
+DEFAULT_MEMORY_PATH = Path("/Users/wx/ella-runtime-memory.md")
 PROJECT_ROOT = Path(__file__).resolve().parent
 MAX_APP_STEPS = 20
 
@@ -270,6 +270,12 @@ def _build_display_snapshot(
         task_goal=str(process.get("task_goal", "")),
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
+        ),
+        strategy_selection_prompt_text=str(
+            process.get("strategy_selection_prompt_text", "")
+        ),
+        execution_decision_prompt_text=str(
+            process.get("execution_decision_prompt_text", "")
         ),
         final_response_prompt_text=str(
             process.get("final_response_prompt_text", "")

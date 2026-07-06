@@ -400,6 +400,9 @@ class TaskRuntime:
         creation: TaskSessionCreation,
     ) -> TaskCompletionPackage:
         session = creation.session
+        user_input = session.handoff.trigger_event.payload.get("text", "")
+        if not isinstance(user_input, str):
+            user_input = str(user_input)
         tool_results = tuple(
             ToolResult(
                 tool_name=entry["tool_name"],
@@ -410,10 +413,14 @@ class TaskRuntime:
             )
             for entry in session.tool_trace
         )
-        final_response = self._generate_final_response(creation, tool_results)
+        final_response, final_response_prompt_text = self._generate_final_response(
+            creation,
+            tool_results,
+        )
         output = UserVisibleAgentOutput(
             process={
                 "task_goal": session.handoff.task_goal,
+                "user_input": user_input,
                 "strategy": getattr(
                     session.current_strategy,
                     "skill_name",
@@ -422,6 +429,18 @@ class TaskRuntime:
                 "tool_results": tuple(
                     result.tool_name for result in tool_results
                 ),
+                "task_formulation_prompt_text": (
+                    session.handoff.task_formulation_prompt_text
+                ),
+                "strategy_selection_prompt_text": session.task_local_state.get(
+                    "strategy_selection_prompt_text",
+                    "",
+                ),
+                "execution_decision_prompt_text": session.task_local_state.get(
+                    "execution_decision_prompt_text",
+                    "",
+                ),
+                "final_response_prompt_text": final_response_prompt_text,
             },
             final_response=final_response,
         )
@@ -436,7 +455,7 @@ class TaskRuntime:
         self,
         creation: TaskSessionCreation,
         tool_results: tuple[ToolResult, ...],
-    ) -> str:
+    ) -> tuple[str, str]:
         session = creation.session
         handoff = session.handoff
         trigger_payload = handoff.trigger_event.payload
@@ -445,9 +464,12 @@ class TaskRuntime:
             user_input = str(user_input)
 
         if self.final_response_generator is None:
-            return self._default_final_response(
-                task_goal=handoff.task_goal,
-                tool_results=tool_results,
+            return (
+                self._default_final_response(
+                    task_goal=handoff.task_goal,
+                    tool_results=tool_results,
+                ),
+                "",
             )
 
         result = self.final_response_generator.generate(
@@ -462,7 +484,10 @@ class TaskRuntime:
             memory_context=self._memory_context(),
             execution_failures=self._execution_failures(session),
         )
-        return result.final_response
+        prompt_text = result.prompt_trace.get("prompt_text", "")
+        return result.final_response, (
+            prompt_text if isinstance(prompt_text, str) else str(prompt_text)
+        )
 
     @staticmethod
     def _execution_failures(

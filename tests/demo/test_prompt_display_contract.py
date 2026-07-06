@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from demo.display_snapshot import CAMERA_FRAME, RunDisplaySnapshot
 from demo.page_viewer import render_snapshot_html
 from demo.web_ui import LocalWebUIShell, render_web_ui_shell
@@ -63,6 +65,15 @@ def test_web_ui_displays_all_prompts_from_snapshot():
     assert "STRATEGY prompt" in html
     assert "EXECUTION prompt" in html
     assert "FINAL prompt &lt;answer&gt;" in html
+
+
+def test_web_ui_explains_when_a_prompt_was_not_invoked():
+    snapshot = replace(make_snapshot(), task_formulation_prompt_text="")
+
+    html = render_web_ui_shell(snapshot)
+
+    assert "Not invoked for this run." in html
+    assert '<pre class="prompt-text"></pre>' not in html
 
 
 def test_prompt_display_avoids_hidden_reasoning_labels():

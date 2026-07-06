@@ -182,6 +182,9 @@ def test_subagent_places_visible_skills_tools_and_observations_in_workspace():
     assert "Found today's note." in provider.last_prompt
     assert "strategy_reason" not in provider.last_prompt
     assert "Do not attempt tool use" not in provider.last_prompt
+    assert creation.session.task_local_state[
+        "execution_decision_prompt_text"
+    ] == provider.last_prompt
 
 
 def test_subagent_can_return_complete_when_no_tool_is_needed():

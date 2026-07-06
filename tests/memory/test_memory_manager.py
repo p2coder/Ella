@@ -24,7 +24,10 @@ def make_package() -> TaskCompletionPackage:
         context=context,
         summary="Prepared and delivered a short pre-leaving reminder.",
         user_visible_output=UserVisibleAgentOutput(
-            process={"task_goal": "Prepare a short pre-leaving reminder."},
+            process={
+                "task_goal": "Prepare a short pre-leaving reminder.",
+                "user_input": "Ella，我要出门了，需要带什么？",
+            },
             final_response="Take your keys and phone. Consider an umbrella.",
         ),
         tool_results=(
@@ -63,6 +66,7 @@ def test_memory_manager_appends_deterministic_memory_record(tmp_path: Path):
         "## Task task-memory\n"
         "- session_id: session-memory\n"
         "- trace_id: trace-memory\n"
+        "- user_input: Ella，我要出门了，需要带什么？\n"
         "- summary: Prepared and delivered a short pre-leaving reminder.\n"
         "- final_response: Take your keys and phone. Consider an umbrella.\n"
         "\n"
@@ -89,6 +93,9 @@ def test_memory_manager_stores_every_submitted_memory_record(tmp_path: Path):
     assert second.action == "appended"
     memory_text = memory_path.read_text(encoding="utf-8")
     assert memory_text.count("## Task task-memory") == 2
+    assert memory_text.count(
+        "- user_input: Ella，我要出门了，需要带什么？"
+    ) == 2
     assert memory_text.count(
         "- final_response: Take your keys and phone. Consider an umbrella."
     ) == 2
