@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from time import perf_counter
 
 from agent.main_agent import MainAgent
 from events import RawSignal, StandardizedEvent
@@ -16,6 +17,7 @@ from .event_router import (
 )
 from .presence_runtime import PresenceRuntime
 from .task_runtime import TaskHandle, TaskRuntime
+from .timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,7 @@ class EventRuntime:
     main_agent: MainAgent
     llm_provider: LLMProvider | None
     task_runtime: TaskRuntime
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     user_preference_summary: str
     environment_summary: str
 
@@ -48,9 +51,11 @@ class EventRuntime:
         main_agent: MainAgent | None = None,
         llm_provider: LLMProvider | None = None,
         task_runtime: TaskRuntime | None = None,
+        timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         user_preference_summary: str = "No user preference summary provided.",
         environment_summary: str = "No environment summary provided.",
     ) -> None:
+        recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         queue = presence_queue if presence_queue is not None else PresenceQueue()
         runtime = (
             presence_runtime
@@ -69,7 +74,10 @@ class EventRuntime:
         self.presence_queue = queue
         self.presence_runtime = runtime
         if main_agent is None:
-            active_agent = MainAgent(llm_provider=llm_provider)
+            active_agent = MainAgent(
+                llm_provider=llm_provider,
+                timing_recorder=recorder,
+            )
         else:
             active_agent = main_agent
             if (
@@ -82,18 +90,32 @@ class EventRuntime:
         self.main_agent = active_agent
         self.llm_provider = active_agent.llm_provider
         self.task_runtime = task_runtime or TaskRuntime()
+        self.timing_recorder = recorder
         self.user_preference_summary = user_preference_summary
         self.environment_summary = environment_summary
 
     def publish(self, raw_signal: RawSignal) -> EventRuntimeResult:
         print("[event_runtime.py]line89: publish")
+        self.timing_recorder.start_input(raw_signal.trace_id)
+        stage_started = perf_counter()
         event = self.trigger_pipeline.run(raw_signal)
+        self.timing_recorder.record_stage_duration(
+            raw_signal.trace_id,
+            "trigger_pipeline_duration_ms",
+            stage_started,
+        )
         if not isinstance(event, StandardizedEvent):
             raise TypeError(
                 "EventRuntime trigger pipeline must produce a StandardizedEvent"
             )
 
+        stage_started = perf_counter()
         route = self.event_router.route(event)
+        self.timing_recorder.record_stage_duration(
+            event.trace_id,
+            "routing_duration_ms",
+            stage_started,
+        )
         if route.destination != PRESENCE_QUEUE:
             return EventRuntimeResult(
                 event=event,
@@ -112,11 +134,17 @@ class EventRuntime:
                 previous_boundary(allowed_event)
 
         self.presence_runtime.next_boundary = forward_allowed
+        stage_started = perf_counter()
         self.presence_queue.enqueue(event)
         try:
             self.presence_runtime.process_available()
         finally:
             self.presence_runtime.next_boundary = previous_boundary
+        self.timing_recorder.record_stage_duration(
+            event.trace_id,
+            "presence_queue_duration_ms",
+            stage_started,
+        )
 
         if event not in allowed_events:
             return EventRuntimeResult(
@@ -127,12 +155,19 @@ class EventRuntime:
                 reason="presence runtime did not allow event",
             )
 
+        stage_started = perf_counter()
         handoff = self.main_agent.create_handoff(
             trigger_event=event,
             user_preference_summary=self.user_preference_summary,
             environment_summary=self.environment_summary,
         )
+        self.timing_recorder.record_stage_duration(
+            event.trace_id,
+            "task_formulation_duration_ms",
+            stage_started,
+        )
         task_handle = self.task_runtime.submit(handoff)
+        self.timing_recorder.record_input_to_task_submitted(event.trace_id)
         return EventRuntimeResult(
             event=event,
             route=route,

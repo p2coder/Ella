@@ -1,13 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from skill import SkillManager
 from tools import ToolManager, ToolResult
 from tools.base import invoke_tool
 
 from .decision import CALL_TOOL, REPLAN, ExecutionDecision
+from .execution_state import ToolFailureKind, ToolFailureObservation
 from .session import TaskSession
 from .strategy import StrategyDecision
 from .subagent import SubAgent
@@ -21,6 +24,12 @@ class CapabilityExecutionResult:
     replan_required: bool
     failure_reason: str | None = None
     unavailable_tool: str | None = None
+    failure: ToolFailureObservation | None = None
+    raw_result: Any | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.tool_result is not None and self.failure is not None:
+            raise ValueError("tool_result and failure are mutually exclusive")
 
     @property
     def tool_results(self) -> tuple[ToolResult, ...]:
@@ -44,6 +53,9 @@ class CapabilityExecutor:
     skill_manager: SkillManager
     tool_manager: ToolManager
     subagent: SubAgent | None = None
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def execute(
         self,
@@ -70,7 +82,11 @@ class CapabilityExecutor:
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"skill {strategy.skill_name} is not registered",
+                kind=ToolFailureKind.ENVIRONMENT_UNAVAILABLE,
+                code="skill_not_registered",
+                tool_name=strategy.skill_name,
             )
 
         if decision.action == REPLAN:
@@ -96,7 +112,10 @@ class CapabilityExecutor:
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"tool {tool_name} is not allowed",
+                kind=ToolFailureKind.PERMISSION_DENIED,
+                code="tool_not_allowed",
                 unavailable_tool=tool_name,
             )
 
@@ -105,14 +124,20 @@ class CapabilityExecutor:
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"tool {tool_name} is not registered",
+                kind=ToolFailureKind.ENVIRONMENT_UNAVAILABLE,
+                code="tool_not_registered",
                 unavailable_tool=tool_name,
             )
         if context.agent_role not in self.tool_manager._allowed_roles(tool):
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"tool {tool_name} is not visible to agent role {context.agent_role}",
+                kind=ToolFailureKind.PERMISSION_DENIED,
+                code="tool_role_not_allowed",
                 unavailable_tool=tool_name,
             )
 
@@ -127,11 +152,57 @@ class CapabilityExecutor:
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"invalid_tool_input: {input_error}",
+                kind=ToolFailureKind.INVALID_ARGUMENTS,
+                code="invalid_tool_input",
+                retryable=True,
                 unavailable_tool=tool_name,
             )
 
-        tool_result = invoke_tool(tool, context, arguments)
+        tool_started = perf_counter()
+        try:
+            tool_result = invoke_tool(tool, context, arguments)
+        except ValueError as error:
+            duration_ms = round((perf_counter() - tool_started) * 1000, 3)
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.INVALID_ARGUMENTS.value,
+                failure_code="invalid_tool_input",
+            )
+            return self._failure(
+                decision=decision,
+                strategy=strategy,
+                task_session=task_session,
+                reason=f"invalid_tool_input: {error}",
+                kind=ToolFailureKind.INVALID_ARGUMENTS,
+                code="invalid_tool_input",
+                retryable=True,
+                unavailable_tool=tool_name,
+            )
+        except Exception:
+            duration_ms = round((perf_counter() - tool_started) * 1000, 3)
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.TOOL_EXECUTION_FAILED.value,
+                failure_code="tool_execution_failed",
+            )
+            return self._failure(
+                decision=decision,
+                strategy=strategy,
+                task_session=task_session,
+                reason=f"tool {tool_name} execution failed",
+                kind=ToolFailureKind.TOOL_EXECUTION_FAILED,
+                code="tool_execution_failed",
+                unavailable_tool=tool_name,
+            )
+        tool_duration_ms = round((perf_counter() - tool_started) * 1000, 3)
         output_schema = _tool_schema(tool, "output_schema")
         output_error = _validate_schema(
             tool_result.payload,
@@ -139,13 +210,56 @@ class CapabilityExecutor:
             path="payload",
         )
         if output_error is not None:
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=tool_duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.TOOL_EXECUTION_FAILED.value,
+                failure_code="invalid_tool_output",
+            )
             return self._failure(
                 decision=decision,
                 strategy=strategy,
+                task_session=task_session,
                 reason=f"invalid_tool_output: {output_error}",
+                kind=ToolFailureKind.TOOL_EXECUTION_FAILED,
+                code="invalid_tool_output",
                 unavailable_tool=tool_name,
+                raw_result=tool_result,
             )
 
+        normalized_failure = _failure_from_tool_result(
+            tool_result,
+            attempt_id=task_session.current_step.attempt_id,
+            arguments=arguments,
+        )
+        if normalized_failure is not None:
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=tool_duration_ms,
+                success=False,
+                failure_kind=normalized_failure.kind.value,
+                failure_code=normalized_failure.code,
+            )
+            return CapabilityExecutionResult(
+                decision=decision,
+                strategy=strategy,
+                tool_result=None,
+                replan_required=False,
+                failure_reason=normalized_failure.message,
+                unavailable_tool=tool_name,
+                failure=normalized_failure,
+                raw_result=tool_result,
+            )
+
+        self.timing_recorder.record_tool_call(
+            context.trace_id,
+            tool_name=tool_name,
+            duration_ms=tool_duration_ms,
+            success=True,
+        )
         return CapabilityExecutionResult(
             decision=decision,
             strategy=strategy,
@@ -230,9 +344,16 @@ class CapabilityExecutor:
     def _failure(
         decision: ExecutionDecision,
         strategy: StrategyDecision,
+        task_session: TaskSession,
         reason: str,
+        kind: ToolFailureKind,
+        code: str,
+        retryable: bool = False,
+        tool_name: str | None = None,
         unavailable_tool: str | None = None,
+        raw_result: Any | None = None,
     ) -> CapabilityExecutionResult:
+        failure_tool_name = tool_name or unavailable_tool or decision.tool_name or "unknown"
         return CapabilityExecutionResult(
             decision=decision,
             strategy=strategy,
@@ -240,7 +361,76 @@ class CapabilityExecutor:
             replan_required=True,
             failure_reason=reason,
             unavailable_tool=unavailable_tool,
+            failure=ToolFailureObservation(
+                attempt_id=task_session.current_step.attempt_id,
+                tool_name=failure_tool_name,
+                kind=kind,
+                code=code,
+                message=reason,
+                arguments=decision.tool_input or {},
+                retryable=retryable,
+            ),
+            raw_result=raw_result,
         )
+
+
+_PERMISSION_ERROR_CODES = frozenset(
+    {
+        "permission_denied",
+        "authentication_failed",
+        "authorization_failed",
+    }
+)
+_ENVIRONMENT_ERROR_CODES = frozenset(
+    {
+        "backend_unavailable",
+        "device_busy",
+        "device_not_found",
+        "device_unavailable",
+        "file_not_found",
+        "network_unavailable",
+        "timeout",
+        "tool_not_registered",
+    }
+)
+
+
+def _failure_from_tool_result(
+    tool_result: ToolResult,
+    *,
+    attempt_id: str,
+    arguments: dict[str, object],
+) -> ToolFailureObservation | None:
+    payload = tool_result.payload
+    error = payload.get("error")
+    if payload.get("status") != "unavailable" and error is None:
+        return None
+
+    if isinstance(error, dict):
+        raw_code = error.get("code")
+        raw_message = error.get("message")
+    else:
+        raw_code = None
+        raw_message = error
+    code = str(raw_code or "tool_unavailable")
+    message = str(raw_message or payload.get("summary") or "tool is unavailable")
+
+    if code in _PERMISSION_ERROR_CODES:
+        kind = ToolFailureKind.PERMISSION_DENIED
+    elif code in _ENVIRONMENT_ERROR_CODES or code == "tool_unavailable":
+        kind = ToolFailureKind.ENVIRONMENT_UNAVAILABLE
+    else:
+        kind = ToolFailureKind.TOOL_EXECUTION_FAILED
+
+    return ToolFailureObservation(
+        attempt_id=attempt_id,
+        tool_name=tool_result.tool_name,
+        kind=kind,
+        code=code,
+        message=message,
+        arguments=arguments,
+        retryable=False,
+    )
 
 
 def _tool_schema(tool: Any, schema_name: str) -> dict[str, Any]:

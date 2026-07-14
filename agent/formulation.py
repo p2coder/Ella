@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
+from time import perf_counter
 import re
 from typing import Any
 
 from events import StandardizedEvent
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import LLMProvider
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,12 +19,16 @@ class TaskFormulation:
     completion_criteria: tuple[str, ...]
     formulation_source: str = "deterministic"
     provider_error: dict[str, str | None] | None = None
+    prompt_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class TaskFormulator:
     llm_provider: LLMProvider | None = None
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def formulate(
         self,
@@ -41,6 +47,7 @@ class TaskFormulator:
         if self.llm_provider is None or not self._needs_task_formulation(text):
             return deterministic
 
+        prompt_text = ""
         try:
             prompt_result = self.prompt_engine.build(
                 PromptType.TASK_FORMULATION,
@@ -52,17 +59,40 @@ class TaskFormulator:
                     "trace_id": trigger_event.trace_id,
                 },
             )
+            prompt_text = prompt_result.prompt
+            llm_started = perf_counter()
             provider_result = self.llm_provider.generate(
                 prompt_result.prompt,
                 trace_id=trigger_event.trace_id,
                 metadata={"boundary": "task_formulation"},
             )
+            self.timing_recorder.record_llm_call(
+                trigger_event.trace_id,
+                boundary="task_formulation",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=not provider_result.failed,
+                provider_name=provider_result.provider_name,
+                model_name=provider_result.model_name,
+            )
         except Exception as error:
+            if "llm_started" in locals():
+                self.timing_recorder.record_llm_call(
+                    trigger_event.trace_id,
+                    boundary="task_formulation",
+                    duration_ms=round(
+                        (perf_counter() - llm_started) * 1000,
+                        3,
+                    ),
+                    success=False,
+                    provider_name=self.llm_provider.provider_name,
+                    model_name=self.llm_provider.model_name,
+                )
             return self._fallback(
                 deterministic,
                 provider_name=self.llm_provider.provider_name,
                 code="provider_exception",
                 message=str(error),
+                prompt_text=prompt_text,
             )
 
         if provider_result.failed:
@@ -71,6 +101,7 @@ class TaskFormulator:
                 provider_name=provider_result.error.provider_name,
                 code=provider_result.error.code,
                 message=provider_result.error.message,
+                prompt_text=prompt_result.prompt,
             )
 
         output = provider_result.output
@@ -83,6 +114,7 @@ class TaskFormulator:
                 provider_name=provider_result.provider_name,
                 code="invalid_provider_output",
                 message="provider output did not include a task goal",
+                prompt_text=prompt_result.prompt,
             )
 
         return TaskFormulation(
@@ -98,6 +130,7 @@ class TaskFormulator:
                 "A provider-generated task goal is ready for handoff.",
             ),
             formulation_source="llm_provider",
+            prompt_text=prompt_result.prompt,
         )
 
     def _deterministic_formulation(
@@ -282,6 +315,7 @@ class TaskFormulator:
         provider_name: str,
         code: str | None,
         message: str,
+        prompt_text: str = "",
     ) -> TaskFormulation:
         return TaskFormulation(
             goal=deterministic.goal,
@@ -291,6 +325,7 @@ class TaskFormulator:
             environment_summary=deterministic.environment_summary,
             completion_criteria=deterministic.completion_criteria,
             formulation_source="deterministic_fallback",
+            prompt_text=prompt_text,
             provider_error={
                 "provider_name": provider_name,
                 "code": code,

@@ -97,6 +97,9 @@ def test_subagent_accepts_react_strategy_output():
     assert strategy.reason == "The request can be handled step by step."
     assert strategy.initial_plan is None
     assert provider.metadata == {"boundary": "strategy_selection"}
+    assert creation.session.task_local_state[
+        "strategy_selection_prompt_text"
+    ] == provider.last_prompt
 
 
 def test_subagent_falls_back_from_plan_and_execute_to_react():

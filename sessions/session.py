@@ -4,6 +4,8 @@ from typing import Any
 
 from agent.handoff import HandoffRequest
 
+from .execution_state import StepExecutionState
+
 
 class TaskState(StrEnum):
     CREATED = "created"
@@ -67,6 +69,8 @@ class TaskSession:
     current_strategy: Any | None = None
     completion: Any | None = None
     failure_reason: str | None = None
+    current_step: StepExecutionState = field(default_factory=StepExecutionState)
+    step_history: tuple[StepExecutionState, ...] = ()
 
     def set_task_state(self, key: str, value: Any) -> None:
         self.task_local_state[key] = value

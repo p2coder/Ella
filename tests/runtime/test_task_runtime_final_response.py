@@ -225,8 +225,10 @@ def test_final_response_uses_tool_results_and_preserves_process_data():
     assert output.process["task_goal"] == (
         "Give the user a short reminder before leaving."
     )
+    assert output.process["user_input"] == "Ella，我要出门了"
     assert output.process["strategy"] == "going_out"
     assert output.process["tool_results"] == ("camera_scene",)
+    assert output.process["final_response_prompt_text"] == "prompt from generator"
 
 
 def test_task_runtime_does_not_call_llm_or_build_prompt_directly():
@@ -236,7 +238,7 @@ def test_task_runtime_does_not_call_llm_or_build_prompt_directly():
     assert "PromptType" not in source
     assert "LLMProvider" not in source
     assert "llm_provider" not in source
-    assert "prompt_text" not in source
+    assert ".build(" not in source
 
 
 def test_task_runtime_still_creates_completion_package_and_memory_flow(tmp_path):

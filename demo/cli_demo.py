@@ -31,6 +31,7 @@ from tools import (
     ToolResult,
 )
 from tools.camera_scene import CameraSceneTool
+from tools.screen_scene import ScreenSceneTool
 
 
 DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
@@ -68,6 +69,12 @@ class DemoRuntime:
             else CameraSceneTool().multimodal_provider
         )
         camera_provider = device_factory.camera()
+        screen_factory = getattr(device_factory, "screen", None)
+        screen_provider = (
+            screen_factory()
+            if screen_factory is not None
+            else ScreenSceneTool().screen_provider
+        )
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
         )
@@ -81,6 +88,13 @@ class DemoRuntime:
                 store_raw_media=settings.debug_store_raw_media,
             )
         )
+        tool_manager.register(
+            ScreenSceneTool(
+                screen_provider=screen_provider,
+                multimodal_provider=multimodal_provider,
+                store_raw_media=settings.debug_store_raw_media,
+            )
+        )
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
@@ -88,6 +102,7 @@ class DemoRuntime:
         subagent = SubAgent(
             skill_manager,
             tool_directory=tool_manager,
+            llm_provider=llm_provider,
         )
         final_response_generator = FinalResponseGenerator(
             prompt_engine=PromptEngine(),
@@ -357,7 +372,8 @@ def _render_output(
     process_values.extend(
         f"Visual context: {result.payload['summary']}"
         for result in tool_results
-        if result.tool_name == "camera_scene" and "summary" in result.payload
+        if result.tool_name in {"camera_scene", "screen_scene"}
+        and "summary" in result.payload
     )
     process_lines = "\n".join(process_values)
     return (
@@ -380,17 +396,25 @@ def _build_display_snapshot(
     output = completion.user_visible_output
     tool_results = completion.tool_results
     camera_result = _find_tool_result(tool_results, "camera_scene")
+    screen_result = _find_tool_result(tool_results, "screen_scene")
+    visual_result = camera_result or screen_result
     process = output.process
     return RunDisplaySnapshot(
         user_input=user_input,
         transcript=transcript,
-        captured_frame_reference=_captured_frame_reference(camera_result),
-        image_status=_image_status(tool_results, camera_result),
-        scene_summary=_scene_summary(camera_result),
-        visible_items=_visible_items(camera_result),
+        captured_frame_reference=_captured_frame_reference(visual_result),
+        image_status=_image_status(tool_results, visual_result),
+        scene_summary=_scene_summary(visual_result),
+        visible_items=_visible_items(visual_result),
         task_goal=str(process.get("task_goal", "")),
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
+        ),
+        strategy_selection_prompt_text=str(
+            process.get("strategy_selection_prompt_text", "")
+        ),
+        execution_decision_prompt_text=str(
+            process.get("execution_decision_prompt_text", "")
         ),
         final_response_prompt_text=str(process.get("final_response_prompt_text", "")),
         tool_results_summary=_tool_results_summary(tool_results),
@@ -411,10 +435,10 @@ def _find_tool_result(
 
 def _image_status(
     tool_results: tuple[ToolResult, ...],
-    camera_result: ToolResult | None,
+    visual_result: ToolResult | None,
 ) -> str:
-    if camera_result is not None:
-        payload = camera_result.payload
+    if visual_result is not None:
+        payload = visual_result.payload
         if payload.get("available") is False:
             return CAMERA_UNAVAILABLE
         summary = payload.get("summary") or payload.get("scene_summary")
@@ -426,28 +450,28 @@ def _image_status(
     return TEXT_ONLY
 
 
-def _captured_frame_reference(camera_result: ToolResult | None) -> str | None:
-    if camera_result is None:
+def _captured_frame_reference(visual_result: ToolResult | None) -> str | None:
+    if visual_result is None:
         return None
-    payload = camera_result.payload
+    payload = visual_result.payload
     value = payload.get("captured_frame_reference") or payload.get(
         "frame_reference"
     )
     return value if isinstance(value, str) else None
 
 
-def _scene_summary(camera_result: ToolResult | None) -> str:
-    if camera_result is None:
+def _scene_summary(visual_result: ToolResult | None) -> str:
+    if visual_result is None:
         return ""
-    payload = camera_result.payload
+    payload = visual_result.payload
     value = payload.get("scene_summary") or payload.get("summary")
     return value if isinstance(value, str) else ""
 
 
-def _visible_items(camera_result: ToolResult | None) -> tuple[str, ...]:
-    if camera_result is None:
+def _visible_items(visual_result: ToolResult | None) -> tuple[str, ...]:
+    if visual_result is None:
         return ()
-    value = camera_result.payload.get("visible_items")
+    value = visual_result.payload.get("visible_items")
     if isinstance(value, str) and value.strip():
         return (value.strip(),)
     if isinstance(value, (list, tuple)):

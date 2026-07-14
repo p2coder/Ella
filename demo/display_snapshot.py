@@ -49,6 +49,7 @@ class RunDisplaySnapshot:
     memory_status: str
     strategy_selection_prompt_text: str = ""
     execution_decision_prompt_text: str = ""
+    timing_summary: str = ""
 
     prompt_display_fields: ClassVar[tuple[str, ...]] = (
         "task_formulation_prompt_text",
@@ -102,6 +103,7 @@ class RunDisplaySnapshot:
             "tool_results_summary": self.tool_results_summary,
             "final_response": self.final_response,
             "memory_status": self.memory_status,
+            "timing_summary": self.timing_summary,
             "prompt_display_fields": self.prompt_display_fields,
         }
 

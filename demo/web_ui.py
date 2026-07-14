@@ -127,20 +127,24 @@ def render_web_ui_shell(
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
         "task_goal": _value(data, "task_goal"),
-        "task_formulation_prompt_text": _value(
+        "task_formulation_prompt_text": _prompt_value(
             data,
             "task_formulation_prompt_text",
         ),
-        "strategy_selection_prompt_text": _value(
+        "strategy_selection_prompt_text": _prompt_value(
             data,
             "strategy_selection_prompt_text",
         ),
-        "execution_decision_prompt_text": _value(
+        "execution_decision_prompt_text": _prompt_value(
             data,
             "execution_decision_prompt_text",
         ),
-        "final_response_prompt_text": _value(data, "final_response_prompt_text"),
+        "final_response_prompt_text": _prompt_value(
+            data,
+            "final_response_prompt_text",
+        ),
         "tool_results_summary": _value(data, "tool_results_summary"),
+        "timing_summary": _value(data, "timing_summary"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),
         "form_error": escape(form_error),
@@ -204,6 +208,13 @@ def _value(data: Mapping[str, Any], key: str) -> str:
     value = data.get(key)
     if value is None:
         return ""
+    return escape(str(value))
+
+
+def _prompt_value(data: Mapping[str, Any], key: str) -> str:
+    value = data.get(key)
+    if value is None or not str(value).strip():
+        return "Not invoked for this run."
     return escape(str(value))
 
 

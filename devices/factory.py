@@ -12,6 +12,7 @@ from .microphone import (
     RealMicrophoneProvider,
     UnavailableMicrophoneProvider,
 )
+from .screen import MockScreenProvider, RealScreenProvider
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,3 +57,8 @@ class DeviceFactory:
         return RealCameraProvider(
             camera_device=self.settings.camera_device,
         )
+
+    def screen(self) -> MockScreenProvider | RealScreenProvider:
+        if not self.settings.use_real_providers:
+            return MockScreenProvider()
+        return RealScreenProvider()

@@ -1,12 +1,15 @@
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import serialize_tool_definitions
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from skill.manager import SkillManager
 
 from .decision import CALL_TOOL, COMPLETE, REPLAN, WAIT, ExecutionDecision
@@ -51,6 +54,9 @@ class SubAgent:
     tool_directory: Any | None = None
     llm_provider: Any | None = None
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def select_strategy(
         self,
@@ -61,6 +67,7 @@ class SubAgent:
         llm_selection = self._llm_select_strategy_mode(
             handoff,
             context,
+            task_session,
         )
         if llm_selection is None:
             mode = "react"
@@ -119,7 +126,10 @@ class SubAgent:
                 visible_skills,
             )
 
-        definitions = self._visible_tool_definitions(context)
+        definitions = self._filter_definitions_for_step(
+            self._visible_tool_definitions(context),
+            task_session,
+        )
         llm_decision = self._llm_decide_next_action(
             handoff,
             context,
@@ -187,6 +197,7 @@ class SubAgent:
         self,
         handoff: HandoffRequest,
         context: AgentExecutionContext,
+        task_session: TaskSession,
     ) -> tuple[str, str, tuple[str, ...] | None] | None:
         if self.llm_provider is None:
             return None
@@ -197,10 +208,33 @@ class SubAgent:
                 "task": self._task_context(handoff, context),
             },
         )
-        result = self.llm_provider.generate(
-            prompt.prompt,
-            trace_id=context.trace_id,
-            metadata={"boundary": "strategy_selection"},
+        task_session.task_local_state["strategy_selection_prompt_text"] = (
+            prompt.prompt
+        )
+        llm_started = perf_counter()
+        try:
+            result = self.llm_provider.generate(
+                prompt.prompt,
+                trace_id=context.trace_id,
+                metadata={"boundary": "strategy_selection"},
+            )
+        except Exception:
+            self.timing_recorder.record_llm_call(
+                context.trace_id,
+                boundary="strategy_selection",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=False,
+                provider_name=getattr(self.llm_provider, "provider_name", None),
+                model_name=getattr(self.llm_provider, "model_name", None),
+            )
+            raise
+        self.timing_recorder.record_llm_call(
+            context.trace_id,
+            boundary="strategy_selection",
+            duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+            success=not getattr(result, "failed", False),
+            provider_name=getattr(result, "provider_name", None),
+            model_name=getattr(result, "model_name", None),
         )
         print("\n[sessions/subagent.py] strategy selected: ",result.output if result else "none")
         if getattr(result, "failed", False):
@@ -294,6 +328,7 @@ class SubAgent:
             return None
 
         serialized_tools = serialize_tool_definitions(definitions)
+        step_context = self._execution_step_context(task_session)
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
@@ -303,7 +338,35 @@ class SubAgent:
                     "current_goal": handoff.task_goal,
                     "current_step_state": {
                         "strategy_mode": strategy.mode,
-                        "strategy_reason": strategy.reason,
+                        "completion_criteria": strategy.completion_criteria,
+                        **step_context,
+                    },
+                    "task": self._task_context(handoff, context),
+                    "selected_skill": self._skill_context(skill),
+                    "visible_skills": visible_skills,
+                    "visible_tools": serialized_tools,
+                    "observations": {
+                        "successful_tool_results": step_context[
+                            "successful_tool_results"
+                        ],
+                        "failure_observations": step_context[
+                            "failure_observations"
+                        ],
+                    },
+                },
+            },
+        )
+        task_session.task_local_state["execution_decision_prompt_text"] = (
+            prompt.prompt
+        )
+        with open("trace/trace.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "user_prompt": handoff.trigger_event.payload.get("text", ""),
+                "workspace": {
+                    "overall_goal": handoff.task_goal,
+                    "current_goal": handoff.task_goal,
+                    "current_step_state": {
+                        "strategy_mode": strategy.mode,
                         "completion_criteria": strategy.completion_criteria,
                     },
                     "task": self._task_context(handoff, context),
@@ -311,13 +374,33 @@ class SubAgent:
                     "visible_skills": visible_skills,
                     "visible_tools": serialized_tools,
                     "observations": task_session.tool_trace,
-                },
-            },
-        )
-        result = self.llm_provider.generate(
-            prompt.prompt,
-            trace_id=context.trace_id,
-            metadata={"boundary": "execution_decision"},
+                }
+            }, ensure_ascii=False, indent=2))
+            f.close()
+        llm_started = perf_counter()
+        try:
+            result = self.llm_provider.generate(
+                prompt.prompt,
+                trace_id=context.trace_id,
+                metadata={"boundary": "execution_decision"},
+            )
+        except Exception:
+            self.timing_recorder.record_llm_call(
+                context.trace_id,
+                boundary="execution_decision",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=False,
+                provider_name=getattr(self.llm_provider, "provider_name", None),
+                model_name=getattr(self.llm_provider, "model_name", None),
+            )
+            raise
+        self.timing_recorder.record_llm_call(
+            context.trace_id,
+            boundary="execution_decision",
+            duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+            success=not getattr(result, "failed", False),
+            provider_name=getattr(result, "provider_name", None),
+            model_name=getattr(result, "model_name", None),
         )
         print("[subagent]:result: ",result)
         if getattr(result, "failed", False):
@@ -326,7 +409,18 @@ class SubAgent:
         if not isinstance(payload, dict):
             print("[subagent] replan")
             return self._replan("Invalid LLM action decision JSON.")
-        return self._decision_from_payload(payload, serialized_tools)
+        decision = self._decision_from_payload(
+            payload,
+            serialized_tools,
+            repair_active_tool=task_session.current_step.active_tool_name,
+        )
+        return self._correct_visual_wait_decision(
+            decision,
+            handoff,
+            context,
+            task_session,
+            serialized_tools,
+        )
 
     def _task_context(
         self,
@@ -362,6 +456,52 @@ class SubAgent:
             "content": content,
         }
 
+    def _execution_step_context(
+        self,
+        task_session: TaskSession,
+    ) -> dict[str, object]:
+        step = task_session.current_step
+        historical_failures = tuple(
+            failure.to_dict()
+            for archived_step in task_session.step_history
+            for failure in archived_step.failures
+        )
+        current_failures = tuple(failure.to_dict() for failure in step.failures)
+        return {
+            "attempt_id": step.attempt_id,
+            "retry_index": step.retry_index,
+            "active_tool_name": step.active_tool_name,
+            "repair_mode": step.active_tool_name is not None,
+            "retries_remaining": step.retries_remaining,
+            "blacklisted_tools": step.blacklisted_tools,
+            "failures": current_failures,
+            "successful_tool_results": task_session.tool_trace,
+            "failure_observations": (*historical_failures, *current_failures),
+        }
+
+    def _filter_definitions_for_step(
+        self,
+        definitions: tuple[Any, ...],
+        task_session: TaskSession,
+    ) -> tuple[Any, ...]:
+        step = task_session.current_step
+        if step.active_tool_name is not None:
+            return tuple(
+                definition
+                for definition in definitions
+                if getattr(definition, "name", None) == step.active_tool_name
+            )
+
+        excluded = set(step.blacklisted_tools)
+        excluded.update(self._non_retryable_failed_tool_names(task_session))
+        if self._has_successful_observation(task_session, "camera_scene"):
+            excluded.add("camera_scene")
+        return tuple(
+            definition
+            for definition in definitions
+            if getattr(definition, "name", None) not in excluded
+        )
+
     def _fallback_decision(
         self,
         handoff: HandoffRequest,
@@ -391,25 +531,31 @@ class SubAgent:
 
         visible_names = self._visible_tool_names(context, definitions)
         tool_order = self._skill_guided_tool_order(skill, handoff, visible_names)
-        unavailable = tuple(name for name in tool_order if name not in visible_names)
+        completed_tools = {
+            entry.get("tool_name")
+            for entry in task_session.tool_trace
+            if isinstance(entry, dict)
+        }
+        failed_tools = self._non_retryable_failed_tool_names(task_session)
+        resolved_tools = completed_tools | failed_tools
+        unavailable = tuple(
+            name
+            for name in tool_order
+            if name not in visible_names and name not in resolved_tools
+        )
         if unavailable:
             return self._replan(
                 "Skill-referenced tools are no longer available: "
                 + ", ".join(unavailable)
             )
 
-        completed_tools = {
-            entry.get("tool_name")
-            for entry in task_session.tool_trace
-            if isinstance(entry, dict)
-        }
         definitions_by_name = {
             definition.name: definition
             for definition in definitions
             if isinstance(getattr(definition, "name", None), str)
         }
         for tool_name in tool_order:
-            if tool_name not in completed_tools:
+            if tool_name not in resolved_tools:
                 return ExecutionDecision(
                     action=CALL_TOOL,
                     tool_name=tool_name,
@@ -554,6 +700,7 @@ class SubAgent:
         self,
         payload: dict[str, Any],
         serialized_tools: tuple[dict[str, Any], ...],
+        repair_active_tool: str | None = None,
     ) -> ExecutionDecision:
         action = payload.get("action")
         reason = str(payload.get("reason") or "LLM selected the next action.")
@@ -569,6 +716,11 @@ class SubAgent:
         tool_name = payload.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name:
             return self._replan("CALL_TOOL decision is missing tool_name.")
+        if repair_active_tool is not None and tool_name != repair_active_tool:
+            arguments = payload.get("arguments", payload.get("tool_input", {}))
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return ExecutionDecision(CALL_TOOL, tool_name, arguments, reason, False)
         visible_by_name = {
             str(tool["name"]): tool
             for tool in serialized_tools
@@ -587,6 +739,101 @@ class SubAgent:
                 f"Missing required tool arguments for {tool_name}: {', '.join(missing)}"
             )
         return ExecutionDecision(CALL_TOOL, tool_name, arguments, reason, False)
+
+    def _correct_visual_wait_decision(
+        self,
+        decision: ExecutionDecision,
+        handoff: HandoffRequest,
+        context: AgentExecutionContext,
+        task_session: TaskSession,
+        serialized_tools: tuple[dict[str, Any], ...],
+    ) -> ExecutionDecision:
+        if decision.action != WAIT:
+            return decision
+        if not self._explicit_screen_request(handoff):
+            return decision
+        if not self._tool_is_visible("screen_scene", serialized_tools):
+            return decision
+        if self._has_observation(task_session, "screen_scene"):
+            return decision
+        return ExecutionDecision(
+            CALL_TOOL,
+            "screen_scene",
+            {
+                "max_screenshots": 1,
+                "session_id": context.session_id,
+                "task_goal": handoff.task_goal,
+            },
+            (
+                "The request explicitly depends on current screen content, "
+                "and screen_scene is visible."
+            ),
+            False,
+        )
+
+    @staticmethod
+    def _explicit_screen_request(handoff: HandoffRequest) -> bool:
+        text = str(handoff.trigger_event.payload.get("text", "")).lower()
+        goal = handoff.task_goal.lower()
+        combined = f"{text} {goal}"
+        return any(
+            marker in combined
+            for marker in (
+                "屏幕",
+                "窗口",
+                "页面",
+                "screen",
+                "on my screen",
+                "web page",
+            )
+        )
+
+    @staticmethod
+    def _tool_is_visible(
+        tool_name: str,
+        serialized_tools: tuple[dict[str, Any], ...],
+    ) -> bool:
+        return any(tool.get("name") == tool_name for tool in serialized_tools)
+
+    @staticmethod
+    def _has_observation(task_session: TaskSession, tool_name: str) -> bool:
+        for observation in task_session.tool_trace:
+            if isinstance(observation, Mapping):
+                if observation.get("tool_name") == tool_name:
+                    return True
+            elif getattr(observation, "tool_name", None) == tool_name:
+                return True
+        return False
+
+    @staticmethod
+    def _has_successful_observation(
+        task_session: TaskSession,
+        tool_name: str,
+    ) -> bool:
+        for observation in task_session.tool_trace:
+            if isinstance(observation, Mapping):
+                observed_name = observation.get("tool_name")
+                payload = observation.get("payload", {})
+            else:
+                observed_name = getattr(observation, "tool_name", None)
+                payload = getattr(observation, "payload", {})
+            if observed_name != tool_name or not isinstance(payload, Mapping):
+                continue
+            if payload.get("status") == "unavailable" or payload.get("error"):
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _non_retryable_failed_tool_names(
+        task_session: TaskSession,
+    ) -> set[str]:
+        return {
+            failure.tool_name
+            for step in (*task_session.step_history, task_session.current_step)
+            for failure in step.failures
+            if not failure.retryable
+        }
 
     @staticmethod
     def _missing_required_arguments(

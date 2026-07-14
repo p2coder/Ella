@@ -27,6 +27,15 @@ def test_strategy_selection_prompt_forbids_tool_calls():
     assert "executable Tool calls" in instruction
 
 
+def test_strategy_selection_prompt_forbids_execution_policy_reasons():
+    instruction = STRATEGY_SELECTION_TEMPLATE.instruction
+
+    assert "must decide only whether the task needs decomposition" in instruction
+    assert "must not decide whether to ask the user" in instruction
+    assert "must not make execution-policy recommendations" in instruction
+    assert "external capability may be needed in execution phase" in instruction
+
+
 def test_strategy_selection_builds_prompt_without_visible_skills():
     result = PromptEngine().build(
         "STRATEGY_SELECTION",

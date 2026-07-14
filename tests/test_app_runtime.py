@@ -3,6 +3,32 @@ import inspect
 import textwrap
 
 import app_runtime
+from memory import MemoryWriteResult
+from sessions.completion import TaskCompletionPackage
+from sessions.output import UserVisibleAgentOutput
+
+
+class _DisplayTaskResult:
+    def __init__(self):
+        self.completion = TaskCompletionPackage(
+            context=None,
+            summary="done",
+            user_visible_output=UserVisibleAgentOutput(
+                process={
+                    "task_goal": "Answer.",
+                    "task_formulation_prompt_text": "FORMULATION",
+                    "strategy_selection_prompt_text": "STRATEGY",
+                    "execution_decision_prompt_text": "EXECUTION",
+                    "final_response_prompt_text": "FINAL",
+                },
+                final_response="Done.",
+            ),
+            tool_results=(),
+        )
+        self.memory_result = MemoryWriteResult(
+            action="recorded",
+            memory_path=app_runtime.DEFAULT_MEMORY_PATH,
+        )
 
 
 def test_formal_app_runtime_uses_neutral_event_context():
@@ -38,3 +64,15 @@ def test_formal_app_runtime_injects_llm_into_subagent_skill_selection():
     assert "llm_provider" in keywords
     assert isinstance(keywords["llm_provider"], ast.Name)
     assert keywords["llm_provider"].id == "llm_provider"
+
+
+def test_formal_app_runtime_snapshot_preserves_all_generated_prompts():
+    snapshot = app_runtime._build_display_snapshot(
+        "hello",
+        _DisplayTaskResult(),
+    )
+
+    assert snapshot.task_formulation_prompt_text == "FORMULATION"
+    assert snapshot.strategy_selection_prompt_text == "STRATEGY"
+    assert snapshot.execution_decision_prompt_text == "EXECUTION"
+    assert snapshot.final_response_prompt_text == "FINAL"

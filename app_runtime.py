@@ -21,6 +21,7 @@ from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
+from runtime.timing import RuntimeTimingRecorder
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
@@ -32,9 +33,9 @@ from tools import (
     ToolResult,
 )
 from tools.camera_scene import CameraSceneTool
+from tools.screen_scene import ScreenSceneTool
 
-
-DEFAULT_MEMORY_PATH = Path("/tmp/ella-runtime-memory.md")
+DEFAULT_MEMORY_PATH = Path("/Users/wx/ella-runtime-memory.md")
 PROJECT_ROOT = Path(__file__).resolve().parent
 MAX_APP_STEPS = 20
 
@@ -64,6 +65,7 @@ class AppRuntime:
         llm_provider = provider_factory.llm()
         multimodal_provider = provider_factory.multimodal()
         camera_provider = device_factory.camera()
+        timing_recorder = RuntimeTimingRecorder()
 
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
@@ -71,12 +73,24 @@ class AppRuntime:
         skill_manager.refresh()
 
         tool_manager = ToolManager()
-
+        screen_factory = getattr(device_factory, "screen", None)
+        screen_provider = (
+            screen_factory()
+            if screen_factory is not None
+            else ScreenSceneTool().screen_provider
+        )
 
         # tool改成热插拔
         tool_manager.register(
             CameraSceneTool(
                 camera_provider=camera_provider,
+                multimodal_provider=multimodal_provider,
+                store_raw_media=settings.debug_store_raw_media,
+            )
+        )
+        tool_manager.register(
+            ScreenSceneTool(
+                screen_provider=screen_provider,
                 multimodal_provider=multimodal_provider,
                 store_raw_media=settings.debug_store_raw_media,
             )
@@ -90,6 +104,7 @@ class AppRuntime:
             skill_manager,
             tool_directory=tool_manager,
             llm_provider=llm_provider,
+            timing_recorder=timing_recorder,
         )
         task_runtime = TaskRuntime(
             session_manager=TaskSessionManager(
@@ -101,16 +116,20 @@ class AppRuntime:
                 subagent=subagent,
                 skill_manager=skill_manager,
                 tool_manager=tool_manager,
+                timing_recorder=timing_recorder,
             ),
             memory_manager=MemoryManager(memory_path),
             final_response_generator=FinalResponseGenerator(
                 prompt_engine=PromptEngine(),
                 llm_provider=llm_provider,
+                timing_recorder=timing_recorder,
             ),
+            timing_recorder=timing_recorder,
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
             llm_provider=llm_provider,
+            timing_recorder=timing_recorder,
         )
         microphone_source = MicrophoneSource.from_factories(
             device_factory=device_factory,
@@ -259,12 +278,19 @@ def _build_display_snapshot(
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
         ),
+        strategy_selection_prompt_text=str(
+            process.get("strategy_selection_prompt_text", "")
+        ),
+        execution_decision_prompt_text=str(
+            process.get("execution_decision_prompt_text", "")
+        ),
         final_response_prompt_text=str(
             process.get("final_response_prompt_text", "")
         ),
         tool_results_summary=_tool_results_summary(tool_results),
         final_response=output.final_response,
         memory_status=getattr(task_result.memory_result, "action", "unknown"),
+        timing_summary=_timing_summary(task_result),
     )
 
 
@@ -284,8 +310,31 @@ def _microphone_failure_result(message: str) -> AppDisplayResult:
             tool_results_summary="",
             final_response=message,
             memory_status="not recorded",
+            timing_summary="",
         ),
     )
+
+
+def _timing_summary(task_result: TaskRuntimeResult) -> str:
+    snapshot = task_result.timing
+    if snapshot is None:
+        return ""
+    lines = []
+    values = (
+        ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
+        ("task_formulation", snapshot.task_formulation_duration_ms),
+        ("queue_wait", snapshot.queue_wait_duration_ms),
+        ("llm_total", snapshot.total_llm_duration_ms),
+        ("tool_total", snapshot.total_tool_duration_ms),
+        ("final_response", snapshot.final_response_generation_duration_ms),
+        ("total_execution", snapshot.total_execution_duration_ms),
+    )
+    for label, value in values:
+        if value is not None:
+            lines.append(f"{label}: {value}ms")
+    for entry in snapshot.tool_calls:
+        lines.append(f"tool:{entry.tool_name}: {entry.duration_ms}ms")
+    return "\n".join(lines)
 
 
 def _find_tool_result(

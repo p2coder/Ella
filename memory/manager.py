@@ -64,11 +64,18 @@ class MemoryManager:
 
     def _format_record(self, request: MemoryManagementRequest) -> str:
         completion = request.completion
+        user_input = completion.user_visible_output.process.get("user_input")
         final_response = completion.user_visible_output.final_response
+        user_input_record = (
+            f"- user_input: {user_input}\n"
+            if isinstance(user_input, str) and user_input
+            else ""
+        )
         return (
             f"## Task {request.task_id}\n"
             f"- session_id: {request.session_id}\n"
             f"- trace_id: {request.trace_id}\n"
+            f"{user_input_record}"
             f"- summary: {completion.summary}\n"
             f"- final_response: {final_response}\n"
             "\n"

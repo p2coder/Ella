@@ -45,7 +45,10 @@ def make_strategy(creation) -> StrategyDecision:
     return StrategyDecision(
         mode="react",
         skill_name=None,
-        reason="Use ReAct.",
+        reason=(
+            "Do not attempt tool use; ask for clarification because no "
+            "visual capability was visible during strategy selection."
+        ),
         initial_plan=None,
         completion_criteria=creation.session.handoff.completion_criteria,
         session_id=creation.context.session_id,
@@ -80,6 +83,28 @@ def note_tool_definition() -> ToolDefinition:
             "additionalProperties": False,
         },
         input_examples=({"query": "today"},),
+        output_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+        },
+    )
+
+
+def screen_tool_definition() -> ToolDefinition:
+    return ToolDefinition(
+        name="screen_scene",
+        description="Capture current screen content.",
+        schema_version="1.0",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "max_screenshots": {"type": "number"},
+                "session_id": {"type": "string"},
+                "task_goal": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+        input_examples=({"max_screenshots": 1},),
         output_schema={
             "type": "object",
             "properties": {"summary": {"type": "string"}},
@@ -155,6 +180,11 @@ def test_subagent_places_visible_skills_tools_and_observations_in_workspace():
     assert "input_examples" in provider.last_prompt
     assert "observations" in provider.last_prompt
     assert "Found today's note." in provider.last_prompt
+    assert "strategy_reason" not in provider.last_prompt
+    assert "Do not attempt tool use" not in provider.last_prompt
+    assert creation.session.task_local_state[
+        "execution_decision_prompt_text"
+    ] == provider.last_prompt
 
 
 def test_subagent_can_return_complete_when_no_tool_is_needed():
@@ -248,4 +278,36 @@ def test_subagent_does_not_repeat_tool_when_observation_is_sufficient():
     assert decision.action == COMPLETE
     assert decision.tool_name is None
     assert "The user has one meeting today." in provider.last_prompt
+    assert directory.execute_called is False
+
+
+def test_subagent_corrects_wait_to_screen_scene_for_explicit_screen_request():
+    provider = RecordingProvider(
+        {
+            "action": "WAIT",
+            "reason": "I cannot confirm without observing the current screen.",
+        }
+    )
+    directory = DefinitionDirectory((screen_tool_definition(),))
+    handoff = make_handoff("和屏幕里的人打个招呼吧")
+    creation = TaskSessionManager(
+        allowed_tools=("screen_scene",),
+        session_id_factory=lambda: "session-screen-decision",
+        task_id_factory=lambda: "task-screen-decision",
+    ).create_session(handoff)
+
+    decision = make_subagent(provider, directory).decide_next_action(
+        creation.session.handoff,
+        creation.context,
+        creation.session,
+        make_strategy(creation),
+    )
+
+    assert decision.action == CALL_TOOL
+    assert decision.tool_name == "screen_scene"
+    assert decision.tool_input == {
+        "max_screenshots": 1,
+        "session_id": "session-screen-decision",
+        "task_goal": "Help the user with the current request.",
+    }
     assert directory.execute_called is False
