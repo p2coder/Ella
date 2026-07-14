@@ -18,6 +18,11 @@ from sessions.session_manager import TaskSessionCreation, TaskSessionManager
 from sessions.strategy import StrategyDecision
 from sessions.subagent import SubAgent
 from tools import ToolResult
+from .timing import (
+    NoOpRuntimeTimingRecorder,
+    RuntimeTimingRecorder,
+    RuntimeTimingSnapshot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +44,7 @@ class TaskRuntimeResult:
     memory_result: MemoryWriteResult | None = None
     failure_reason: str | None = None
     logical_steps: int = 0
+    timing: RuntimeTimingSnapshot | None = None
 
 
 @dataclass(slots=True, init=False)
@@ -47,6 +53,7 @@ class TaskRuntime:
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
     final_response_generator: FinalResponseGenerator | None = None
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     max_argument_retries: int = 2
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
@@ -72,6 +79,7 @@ class TaskRuntime:
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
         final_response_generator: FinalResponseGenerator | None = None,
+        timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         max_argument_retries: int = 2,
     ) -> None:
         if max_argument_retries < 0:
@@ -80,6 +88,7 @@ class TaskRuntime:
         self.subagent = subagent
         self.executor = executor
         self.final_response_generator = final_response_generator
+        self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         self.max_argument_retries = max_argument_retries
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
@@ -103,6 +112,11 @@ class TaskRuntime:
 
         self._tasks[task_id] = creation
         self._sessions[session_id] = creation
+        self.timing_recorder.record_task_submitted(
+            creation.context.trace_id,
+            task_id=task_id,
+            session_id=session_id,
+        )
         return TaskHandle(
             task_id=task_id,
             session_id=session_id,
@@ -158,6 +172,7 @@ class TaskRuntime:
         if not isinstance(strategy, StrategyDecision):
             raise ValueError("running task requires a current strategy")
 
+        self.timing_recorder.record_execution_started(creation.context.trace_id)
         decision = subagent.decide_next_action(
             session.handoff,
             creation.context,
@@ -193,6 +208,9 @@ class TaskRuntime:
         elif decision.action == COMPLETE:
             self._archive_and_advance(session)
             session.completion = self._build_completion(creation)
+            self.timing_recorder.record_execution_completed(
+                creation.context.trace_id
+            )
             session.transition_to(TaskState.COMPLETED)
             return self._result(
                 creation,
@@ -441,6 +459,7 @@ class TaskRuntime:
                     "",
                 ),
                 "final_response_prompt_text": final_response_prompt_text,
+                "timing": self._timing_dict(creation),
             },
             final_response=final_response,
         )
@@ -535,8 +554,8 @@ class TaskRuntime:
             )
         return f"我已经根据当前信息完成了任务。任务目标是：{task_goal}"
 
-    @staticmethod
     def _result(
+        self,
         creation: TaskSessionCreation,
         steps: int = 0,
         stop_reason: str | None = None,
@@ -559,4 +578,9 @@ class TaskRuntime:
             memory_result=memory_result,
             failure_reason=failure_reason,
             logical_steps=len(creation.session.step_history),
+            timing=self.timing_recorder.snapshot(creation.context.trace_id),
         )
+
+    def _timing_dict(self, creation: TaskSessionCreation) -> dict:
+        snapshot = self.timing_recorder.snapshot(creation.context.trace_id)
+        return {} if snapshot is None else snapshot.to_dict()

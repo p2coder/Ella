@@ -2,12 +2,14 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import serialize_tool_definitions
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from skill.manager import SkillManager
 
 from .decision import CALL_TOOL, COMPLETE, REPLAN, WAIT, ExecutionDecision
@@ -52,6 +54,9 @@ class SubAgent:
     tool_directory: Any | None = None
     llm_provider: Any | None = None
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def select_strategy(
         self,
@@ -206,10 +211,30 @@ class SubAgent:
         task_session.task_local_state["strategy_selection_prompt_text"] = (
             prompt.prompt
         )
-        result = self.llm_provider.generate(
-            prompt.prompt,
-            trace_id=context.trace_id,
-            metadata={"boundary": "strategy_selection"},
+        llm_started = perf_counter()
+        try:
+            result = self.llm_provider.generate(
+                prompt.prompt,
+                trace_id=context.trace_id,
+                metadata={"boundary": "strategy_selection"},
+            )
+        except Exception:
+            self.timing_recorder.record_llm_call(
+                context.trace_id,
+                boundary="strategy_selection",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=False,
+                provider_name=getattr(self.llm_provider, "provider_name", None),
+                model_name=getattr(self.llm_provider, "model_name", None),
+            )
+            raise
+        self.timing_recorder.record_llm_call(
+            context.trace_id,
+            boundary="strategy_selection",
+            duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+            success=not getattr(result, "failed", False),
+            provider_name=getattr(result, "provider_name", None),
+            model_name=getattr(result, "model_name", None),
         )
         print("\n[sessions/subagent.py] strategy selected: ",result.output if result else "none")
         if getattr(result, "failed", False):
@@ -334,10 +359,48 @@ class SubAgent:
         task_session.task_local_state["execution_decision_prompt_text"] = (
             prompt.prompt
         )
-        result = self.llm_provider.generate(
-            prompt.prompt,
-            trace_id=context.trace_id,
-            metadata={"boundary": "execution_decision"},
+        with open("trace/trace.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "user_prompt": handoff.trigger_event.payload.get("text", ""),
+                "workspace": {
+                    "overall_goal": handoff.task_goal,
+                    "current_goal": handoff.task_goal,
+                    "current_step_state": {
+                        "strategy_mode": strategy.mode,
+                        "completion_criteria": strategy.completion_criteria,
+                    },
+                    "task": self._task_context(handoff, context),
+                    "selected_skill": self._skill_context(skill),
+                    "visible_skills": visible_skills,
+                    "visible_tools": serialized_tools,
+                    "observations": task_session.tool_trace,
+                }
+            }, ensure_ascii=False, indent=2))
+            f.close()
+        llm_started = perf_counter()
+        try:
+            result = self.llm_provider.generate(
+                prompt.prompt,
+                trace_id=context.trace_id,
+                metadata={"boundary": "execution_decision"},
+            )
+        except Exception:
+            self.timing_recorder.record_llm_call(
+                context.trace_id,
+                boundary="execution_decision",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=False,
+                provider_name=getattr(self.llm_provider, "provider_name", None),
+                model_name=getattr(self.llm_provider, "model_name", None),
+            )
+            raise
+        self.timing_recorder.record_llm_call(
+            context.trace_id,
+            boundary="execution_decision",
+            duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+            success=not getattr(result, "failed", False),
+            provider_name=getattr(result, "provider_name", None),
+            model_name=getattr(result, "model_name", None),
         )
         print("[subagent]:result: ",result)
         if getattr(result, "failed", False):

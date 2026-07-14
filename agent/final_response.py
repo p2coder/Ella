@@ -1,9 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
+from time import perf_counter
 from typing import Any, Iterable, Mapping
 
 from prompts.engine import PromptEngine, PromptType, redact_prompt_text
 from providers.llm import LLMProvider
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from sessions.execution_state import ToolFailureObservation
 from tools.base import ToolResult
 
@@ -25,6 +27,9 @@ class FinalResponseResult:
 class FinalResponseGenerator:
     prompt_engine: PromptEngine
     llm_provider: LLMProvider
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def generate(
         self,
@@ -43,6 +48,7 @@ class FinalResponseGenerator:
         ] = (),
         **_: Any,
     ) -> FinalResponseResult:
+        generation_started = perf_counter()
         tool_results_tuple = tuple(tool_results)
         execution_failures_tuple = tuple(execution_failures)
         tool_results_summary = self.summarize_tool_results(tool_results_tuple)
@@ -104,6 +110,7 @@ class FinalResponseGenerator:
             )
         prompt_result = self.prompt_engine.build(PromptType.FINAL_RESPONSE, context)
 
+        llm_started = perf_counter()
         try:
             provider_result = self.llm_provider.generate(
                 prompt_result.prompt,
@@ -111,7 +118,14 @@ class FinalResponseGenerator:
                 metadata={"boundary": "final_response"},
             )
         except Exception as error:
-            return self._fallback_result(
+            self._record_llm_timing(
+                trace_id=trace_id,
+                started=llm_started,
+                success=False,
+                provider_name=self.llm_provider.provider_name,
+                model_name=self.llm_provider.model_name,
+            )
+            result = self._fallback_result(
                 trace_id=trace_id,
                 prompt_result=prompt_result,
                 tool_results_summary=tool_results_summary,
@@ -124,6 +138,16 @@ class FinalResponseGenerator:
                 message=str(error),
                 execution_failure_summary=execution_failure_summary,
             )
+            self._record_generation_timing(trace_id, generation_started)
+            return result
+
+        self._record_llm_timing(
+            trace_id=trace_id,
+            started=llm_started,
+            success=not provider_result.failed,
+            provider_name=provider_result.provider_name,
+            model_name=provider_result.model_name,
+        )
 
         prompt_trace = {
             "trace_id": trace_id,
@@ -137,7 +161,7 @@ class FinalResponseGenerator:
 
         if provider_result.failed:
             error = provider_result.error
-            return self._fallback_result(
+            result = self._fallback_result(
                 trace_id=trace_id,
                 prompt_result=prompt_result,
                 tool_results_summary=tool_results_summary,
@@ -150,10 +174,12 @@ class FinalResponseGenerator:
                 message="provider failed" if error is None else error.message,
                 execution_failure_summary=execution_failure_summary,
             )
+            self._record_generation_timing(trace_id, generation_started)
+            return result
 
         final_response = self._provider_text(provider_result.output)
         if final_response is None:
-            return self._fallback_result(
+            result = self._fallback_result(
                 trace_id=trace_id,
                 prompt_result=prompt_result,
                 tool_results_summary=tool_results_summary,
@@ -166,12 +192,16 @@ class FinalResponseGenerator:
                 message="provider output did not include final response text",
                 execution_failure_summary=execution_failure_summary,
             )
+            self._record_generation_timing(trace_id, generation_started)
+            return result
 
-        return FinalResponseResult(
+        result = FinalResponseResult(
             final_response=final_response,
             tool_results_summary=tool_results_summary,
             prompt_trace=prompt_trace,
         )
+        self._record_generation_timing(trace_id, generation_started)
+        return result
 
     def summarize_tool_results(
         self,
@@ -278,6 +308,38 @@ class FinalResponseGenerator:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    def _record_llm_timing(
+        self,
+        *,
+        trace_id: str | None,
+        started: float,
+        success: bool,
+        provider_name: str | None,
+        model_name: str | None,
+    ) -> None:
+        if trace_id is None:
+            return
+        self.timing_recorder.record_llm_call(
+            trace_id,
+            boundary="final_response",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            success=success,
+            provider_name=provider_name,
+            model_name=model_name,
+        )
+
+    def _record_generation_timing(
+        self,
+        trace_id: str | None,
+        started: float,
+    ) -> None:
+        if trace_id is None:
+            return
+        self.timing_recorder.record_final_response_generation(
+            trace_id,
+            round((perf_counter() - started) * 1000, 3),
+        )
 
     def _tool_name_and_payload(
         self,

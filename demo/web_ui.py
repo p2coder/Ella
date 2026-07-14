@@ -144,6 +144,7 @@ def render_web_ui_shell(
             "final_response_prompt_text",
         ),
         "tool_results_summary": _value(data, "tool_results_summary"),
+        "timing_summary": _value(data, "timing_summary"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),
         "form_error": escape(form_error),

@@ -1,7 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from events import StandardizedEvent
 from providers.llm import LLMProvider
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 
 from .formulation import TaskFormulator
 from .handoff import HandoffRequest
@@ -11,13 +12,19 @@ from .handoff import HandoffRequest
 class MainAgent:
     formulator: TaskFormulator | None = None
     llm_provider: LLMProvider | None = None
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def __post_init__(self) -> None:
         if self.formulator is None:
             object.__setattr__(
                 self,
                 "formulator",
-                TaskFormulator(llm_provider=self.llm_provider),
+                TaskFormulator(
+                    llm_provider=self.llm_provider,
+                    timing_recorder=self.timing_recorder,
+                ),
             )
         elif self.llm_provider is None:
             object.__setattr__(

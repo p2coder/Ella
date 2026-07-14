@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from skill import SkillManager
 from tools import ToolManager, ToolResult
 from tools.base import invoke_tool
@@ -51,6 +53,9 @@ class CapabilityExecutor:
     skill_manager: SkillManager
     tool_manager: ToolManager
     subagent: SubAgent | None = None
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def execute(
         self,
@@ -155,9 +160,19 @@ class CapabilityExecutor:
                 unavailable_tool=tool_name,
             )
 
+        tool_started = perf_counter()
         try:
             tool_result = invoke_tool(tool, context, arguments)
         except ValueError as error:
+            duration_ms = round((perf_counter() - tool_started) * 1000, 3)
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.INVALID_ARGUMENTS.value,
+                failure_code="invalid_tool_input",
+            )
             return self._failure(
                 decision=decision,
                 strategy=strategy,
@@ -169,6 +184,15 @@ class CapabilityExecutor:
                 unavailable_tool=tool_name,
             )
         except Exception:
+            duration_ms = round((perf_counter() - tool_started) * 1000, 3)
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.TOOL_EXECUTION_FAILED.value,
+                failure_code="tool_execution_failed",
+            )
             return self._failure(
                 decision=decision,
                 strategy=strategy,
@@ -178,6 +202,7 @@ class CapabilityExecutor:
                 code="tool_execution_failed",
                 unavailable_tool=tool_name,
             )
+        tool_duration_ms = round((perf_counter() - tool_started) * 1000, 3)
         output_schema = _tool_schema(tool, "output_schema")
         output_error = _validate_schema(
             tool_result.payload,
@@ -185,6 +210,14 @@ class CapabilityExecutor:
             path="payload",
         )
         if output_error is not None:
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=tool_duration_ms,
+                success=False,
+                failure_kind=ToolFailureKind.TOOL_EXECUTION_FAILED.value,
+                failure_code="invalid_tool_output",
+            )
             return self._failure(
                 decision=decision,
                 strategy=strategy,
@@ -202,6 +235,14 @@ class CapabilityExecutor:
             arguments=arguments,
         )
         if normalized_failure is not None:
+            self.timing_recorder.record_tool_call(
+                context.trace_id,
+                tool_name=tool_name,
+                duration_ms=tool_duration_ms,
+                success=False,
+                failure_kind=normalized_failure.kind.value,
+                failure_code=normalized_failure.code,
+            )
             return CapabilityExecutionResult(
                 decision=decision,
                 strategy=strategy,
@@ -213,6 +254,12 @@ class CapabilityExecutor:
                 raw_result=tool_result,
             )
 
+        self.timing_recorder.record_tool_call(
+            context.trace_id,
+            tool_name=tool_name,
+            duration_ms=tool_duration_ms,
+            success=True,
+        )
         return CapabilityExecutionResult(
             decision=decision,
             strategy=strategy,

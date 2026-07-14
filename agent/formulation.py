@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
+from time import perf_counter
 import re
 from typing import Any
 
 from events import StandardizedEvent
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import LLMProvider
+from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +26,9 @@ class TaskFormulation:
 class TaskFormulator:
     llm_provider: LLMProvider | None = None
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
+    timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
+        default_factory=NoOpRuntimeTimingRecorder
+    )
 
     def formulate(
         self,
@@ -55,12 +60,33 @@ class TaskFormulator:
                 },
             )
             prompt_text = prompt_result.prompt
+            llm_started = perf_counter()
             provider_result = self.llm_provider.generate(
                 prompt_result.prompt,
                 trace_id=trigger_event.trace_id,
                 metadata={"boundary": "task_formulation"},
             )
+            self.timing_recorder.record_llm_call(
+                trigger_event.trace_id,
+                boundary="task_formulation",
+                duration_ms=round((perf_counter() - llm_started) * 1000, 3),
+                success=not provider_result.failed,
+                provider_name=provider_result.provider_name,
+                model_name=provider_result.model_name,
+            )
         except Exception as error:
+            if "llm_started" in locals():
+                self.timing_recorder.record_llm_call(
+                    trigger_event.trace_id,
+                    boundary="task_formulation",
+                    duration_ms=round(
+                        (perf_counter() - llm_started) * 1000,
+                        3,
+                    ),
+                    success=False,
+                    provider_name=self.llm_provider.provider_name,
+                    model_name=self.llm_provider.model_name,
+                )
             return self._fallback(
                 deterministic,
                 provider_name=self.llm_provider.provider_name,
