@@ -280,15 +280,7 @@ class FinalResponseGenerator:
         execution_failure_summary: str = "",
     ) -> FinalResponseResult:
         details = tool_results_summary or execution_failure_summary
-        if not details:
-            details = "没有可用的工具结果摘要。"
-        visual_note = ""
-        if "visual context is unavailable" in details.lower():
-            visual_note = " 视觉上下文当前不可用。"
-        final_response = (
-            f"我已经根据当前信息完成了检查：{self._compact_summary(details)} "
-            f"目标是：{task_goal}。{visual_note}"
-        )
+        final_response = self._fallback_text(user_input, details)
         return FinalResponseResult(
             final_response=final_response,
             tool_results_summary=tool_results_summary,
@@ -307,6 +299,21 @@ class FinalResponseGenerator:
                 "message": message,
             },
         )
+
+    @classmethod
+    def _fallback_text(cls, user_input: str, details: str) -> str:
+        normalized_input = user_input.strip().lower().rstrip("!！。,.，?？")
+        if normalized_input in {"你好", "您好", "hello", "hi", "hey"}:
+            return "你好！有什么我可以帮你的吗？"
+        if details:
+            visual_note = ""
+            if "visual context is unavailable" in details.lower():
+                visual_note = " 视觉上下文当前不可用。"
+            return (
+                "我已经根据当前可用信息完成了处理："
+                f"{cls._compact_summary(details)}。{visual_note}"
+            )
+        return "抱歉，我暂时无法生成完整回复，请稍后再试。"
 
     def _provider_text(self, output: Any) -> str | None:
         if isinstance(output, str) and output.strip():

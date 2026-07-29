@@ -124,15 +124,31 @@ def test_provider_failure_returns_deterministic_fallback_not_old_template():
         ],
     )
 
-    assert result.final_response.startswith("我已经根据当前信息完成了检查")
+    assert result.final_response.startswith("我已经根据当前可用信息完成了处理")
     assert not result.final_response.startswith("Task completed:")
-    assert "Check essentials before leaving." in result.final_response
+    assert "Check essentials before leaving." not in result.final_response
     assert "Visual context is unavailable." in result.final_response
     assert result.provider_error == {
         "provider_name": "failing_llm",
         "code": "provider_unavailable",
         "message": "llm unavailable",
     }
+
+
+def test_provider_failure_greeting_does_not_expose_internal_task_goal():
+    result = FinalResponseGenerator(
+        prompt_engine=RecordingPromptEngine(prompt="prompt"),
+        llm_provider=FailingLLMProvider(),
+    ).generate(
+        trace_id="trace-greeting-fallback",
+        user_input="你好",
+        task_goal="Respond naturally to the user's greeting.",
+        tool_results=[],
+    )
+
+    assert result.final_response == "你好！有什么我可以帮你的吗？"
+    assert "Respond naturally" not in result.final_response
+    assert "工具结果" not in result.final_response
 
 
 def test_memory_context_is_passed_into_final_response_prompt():
