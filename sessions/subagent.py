@@ -249,15 +249,18 @@ class SubAgent:
         initial_plan: tuple[str, ...] | None = None
         if isinstance(plan_summary, str) and plan_summary.strip():
             initial_plan = (plan_summary.strip(),)
-        if mode == "plan_and_execute":
-            return (
-                "react",
-                (
-                    "LLM requested plan_and_execute, but this runtime only "
-                    "supports ReAct execution for now."
-                ),
-                initial_plan,
-            )
+        estimate = payload.get("estimated_logical_steps")
+        if (
+            mode == "plan_and_execute"
+            and isinstance(estimate, int)
+            and not isinstance(estimate, bool)
+            and estimate > 5
+        ):
+            task_session.task_local_state["estimated_logical_steps"] = estimate
+            return "plan", reason, initial_plan
+        task_session.task_local_state["estimated_logical_steps"] = (
+            estimate if isinstance(estimate, int) and estimate > 0 else None
+        )
         return "react", reason, initial_plan
 
     def _metadata_skill_match(

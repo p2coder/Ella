@@ -20,6 +20,7 @@ from memory import MemoryManager
 from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
+from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.timing import RuntimeTimingRecorder
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
@@ -34,6 +35,7 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
+from tools.plan import PlanUpdateTool, PlanWrittenTool
 
 DEFAULT_MEMORY_PATH = Path("/Users/wx/ella-runtime-memory.md")
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -98,6 +100,9 @@ class AppRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        plan_store = PlanStore(PROJECT_ROOT / "output" / "plans")
+        tool_manager.register(PlanWrittenTool(plan_store))
+        tool_manager.register(PlanUpdateTool(plan_store))
 
 
         subagent = SubAgent(

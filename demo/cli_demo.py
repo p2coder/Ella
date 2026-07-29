@@ -19,6 +19,7 @@ from memory import MemoryManager
 from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
+from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
 from sessions.output import UserVisibleAgentOutput
@@ -32,6 +33,7 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
+from tools.plan import PlanUpdateTool, PlanWrittenTool
 
 
 DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
@@ -98,6 +100,9 @@ class DemoRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        plan_store = PlanStore(PROJECT_ROOT / "output" / "plans")
+        tool_manager.register(PlanWrittenTool(plan_store))
+        tool_manager.register(PlanUpdateTool(plan_store))
 
         subagent = SubAgent(
             skill_manager,
