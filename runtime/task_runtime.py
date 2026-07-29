@@ -14,7 +14,12 @@ from sessions.execution_state import (
 from sessions.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
 from sessions.session import TaskSession, TaskState
-from sessions.session_manager import TaskSessionCreation, TaskSessionManager
+from sessions.session import Task
+from sessions.session_manager import (
+    TaskCreationResult,
+    TaskSessionCreation,
+    TaskSessionManager,
+)
 from sessions.strategy import StrategyDecision
 from sessions.subagent import SubAgent
 from tools import ToolResult
@@ -23,6 +28,8 @@ from .timing import (
     RuntimeTimingRecorder,
     RuntimeTimingSnapshot,
 )
+from .task_queue import TaskQueue
+from .task_store import TaskStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +65,8 @@ class TaskRuntime:
     final_response_generator: FinalResponseGenerator | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     max_argument_retries: int = 2
+    task_store: TaskStore | None = None
+    task_queue: TaskQueue | None = None
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
@@ -84,6 +93,8 @@ class TaskRuntime:
         final_response_generator: FinalResponseGenerator | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         max_argument_retries: int = 2,
+        task_store: TaskStore | None = None,
+        task_queue: TaskQueue | None = None,
     ) -> None:
         if max_argument_retries < 0:
             raise ValueError("max_argument_retries must be non-negative")
@@ -93,10 +104,84 @@ class TaskRuntime:
         self.final_response_generator = final_response_generator
         self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         self.max_argument_retries = max_argument_retries
+        self.task_store = task_store
+        self.task_queue = task_queue
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._sessions = {}
         self._memory_results = {}
+
+    def create_task(self, source_event) -> TaskHandle:
+        task_id = self.session_manager._new_task_id()
+        scope = self.session_manager._resolve_capability_scope()
+        context = AgentExecutionContext(
+            agent_id=self.session_manager.agent_id,
+            agent_role=self.session_manager.agent_role,
+            parent_agent_id=self.session_manager.parent_agent_id,
+            task_id=task_id,
+            trace_id=source_event.trace_id,
+            handoff_goal="",
+            memory_scope=self.session_manager.memory_scope,
+            permissions=self.session_manager.permissions,
+            capability_scope=scope,
+        )
+        task = Task(
+            task_id,
+            task_id,
+            trace_id=source_event.trace_id,
+            source_event=source_event,
+            execution_context=context,
+        )
+        creation = TaskCreationResult(task)
+        self._tasks[task_id] = creation
+        self._sessions[task_id] = creation
+        self._persist(task)
+        return TaskHandle(task_id, source_event.trace_id)
+
+    def begin_formulation(self, task_id: str) -> None:
+        task = self._tasks[task_id].task
+        task.transition_to(TaskState.FORMULATING)
+        self._persist(task)
+
+    def submit_formulated(
+        self, task_id: str, handoff: HandoffRequest
+    ) -> TaskHandle:
+        creation = self._tasks[task_id]
+        task = creation.task
+        task.handoff = handoff
+        old = task.execution_context
+        task.execution_context = AgentExecutionContext(
+            agent_id=old.agent_id,
+            agent_role=old.agent_role,
+            parent_agent_id=old.parent_agent_id,
+            task_id=task.task_id,
+            trace_id=task.trace_id,
+            handoff_goal=handoff.task_goal,
+            memory_scope=old.memory_scope,
+            permissions=old.permissions,
+            capability_scope=old.capability_scope,
+        )
+        task.transition_to(TaskState.READY)
+        self._persist(task)
+        if self.task_queue is not None:
+            self.task_queue.enqueue(task_id)
+        self.timing_recorder.record_task_submitted(
+            task.trace_id, task_id=task_id
+        )
+        return TaskHandle(task_id, task.trace_id)
+
+    def fail_formulation(self, task_id: str, reason: str) -> None:
+        task = self._tasks[task_id].task
+        task.failure = {"code": "task_formulation_failed", "message": reason}
+        task.failure_reason = reason
+        task.transition_to(TaskState.FAILED)
+        self._persist(task)
+
+    def _persist(self, task: Task) -> None:
+        if self.task_store is None:
+            return
+        current = self.task_store.version(task.task_id)
+        self.task_store.save(task, expected_version=current)
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
@@ -137,6 +222,9 @@ class TaskRuntime:
         }:
             raise ValueError(f"cannot step terminal task: {session.state.value}")
         if session.state is TaskState.CREATED:
+            session.transition_to(TaskState.PLANNING)
+            return self._result(creation)
+        if session.state is TaskState.READY:
             session.transition_to(TaskState.PLANNING)
             return self._result(creation)
 

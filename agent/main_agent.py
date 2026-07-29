@@ -39,6 +39,7 @@ class MainAgent:
         user_preference_summary: str,
         environment_summary: str,
         current_agent_input: str | None = None,
+        task_id: str | None = None,
     ) -> HandoffRequest:
         formulation = self.formulator.formulate(
             trigger_event=trigger_event,
