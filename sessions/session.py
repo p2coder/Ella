@@ -1,10 +1,14 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
+from typing import Any, Mapping
 
+from agent.context import AgentExecutionContext
 from agent.handoff import HandoffRequest
+from events import StandardizedEvent
 
 from .execution_state import StepExecutionState
+from .graph import TaskGraphNodeType, TaskGraphRun
 
 
 class TaskState(StrEnum):
@@ -131,10 +135,12 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 
 
 @dataclass(slots=True)
-class TaskSession:
+class Task:
+    # Deprecated constructor identity retained until PR 5 removes session_id
+    # from all public protocols.
     session_id: str
     task_id: str
-    handoff: HandoffRequest
+    handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
@@ -144,6 +150,36 @@ class TaskSession:
     failure_reason: str | None = None
     current_step: StepExecutionState = field(default_factory=StepExecutionState)
     step_history: tuple[StepExecutionState, ...] = ()
+    trace_id: str = ""
+    source_event: StandardizedEvent | None = None
+    execution_context: AgentExecutionContext | None = None
+    graph: TaskGraphRun | None = None
+    waiting_condition: Any | None = None
+    paused_from_state: TaskState | None = None
+    terminal_outcome: Any | None = None
+    failure: Any | None = None
+    uncertain_resolution: Any | None = None
+    delivery: Any | None = None
+    control_request: Any | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def active_step_ids(self) -> tuple[str, ...]:
+        if self.graph is None:
+            return ()
+        step_ids = {
+            node.node_id
+            for node in self.graph.definition.nodes
+            if node.node_type is TaskGraphNodeType.STEP
+        }
+        active_states = {"ready", "running", "paused"}
+        return tuple(
+            node_id
+            for node_id in self.graph.definition.topological_order()
+            if node_id in step_ids
+            and _node_run_state(self.graph.node_runs.get(node_id)) in active_states
+        )
 
     def set_task_state(self, key: str, value: Any) -> None:
         self.task_local_state[key] = value
@@ -155,3 +191,21 @@ class TaskSession:
                 f"{self.state.value} -> {next_state.value}"
             )
         self.state = next_state
+        self.updated_at = datetime.now(timezone.utc)
+
+
+def _node_run_state(node_run: Any) -> str | None:
+    if node_run is None:
+        return None
+    value = (
+        node_run.get("state")
+        if isinstance(node_run, Mapping)
+        else getattr(node_run, "state", None)
+    )
+    if value is None:
+        return None
+    return str(getattr(value, "value", value)).lower()
+
+
+# Compatibility import only. This is the same aggregate, not another class.
+TaskSession = Task

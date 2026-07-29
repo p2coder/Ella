@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from agent.handoff import HandoffRequest
 from events import StandardizedEvent
 from sessions import TaskSessionManager, TaskState
+from sessions.session import Task
+from sessions.session_manager import TaskCreationResult, TaskFactory
 
 
 FIXED_TIME = datetime(2026, 6, 13, 13, 0, tzinfo=timezone.utc)
@@ -88,3 +90,17 @@ def test_task_session_does_not_select_or_execute_skill():
     assert not hasattr(session, "skill_name")
     assert not hasattr(session, "execution_strategy")
     assert not hasattr(session, "run")
+
+
+def test_task_factory_returns_the_task_aggregate_and_context_projection():
+    result = TaskFactory(
+        task_id_factory=lambda: "task-factory",
+        session_id_factory=lambda: "legacy-session",
+    ).create_task(make_handoff("trace-factory"))
+
+    assert isinstance(result, TaskCreationResult)
+    assert isinstance(result.task, Task)
+    assert result.session is result.task
+    assert result.context is result.task.execution_context
+    assert result.task.trace_id == "trace-factory"
+    assert result.task.source_event is result.task.handoff.trigger_event
