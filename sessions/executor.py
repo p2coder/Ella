@@ -57,6 +57,29 @@ class CapabilityExecutor:
         default_factory=NoOpRuntimeTimingRecorder
     )
 
+    def execute_tool_node(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, object],
+        strategy: StrategyDecision,
+        context: AgentExecutionContext,
+        task: TaskSession,
+    ) -> CapabilityExecutionResult:
+        """Execute one graph-selected ToolNode through the normal boundary."""
+        return self.execute(
+            decision=ExecutionDecision(
+                CALL_TOOL,
+                tool_name,
+                arguments,
+                "Execute the selected ToolGraph node.",
+                False,
+            ),
+            strategy=strategy,
+            context=context,
+            task_session=task,
+        )
+
     def execute(
         self,
         decision: ExecutionDecision | StrategyDecision | None = None,
