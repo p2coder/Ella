@@ -9,6 +9,9 @@ from sessions.completion import TaskCompletionPackage
 from sessions.decision import CALL_TOOL, COMPLETE, WAIT
 from sessions.execution_state import (
     StepExecutionState,
+    TaskControlCommand,
+    TaskControlResult,
+    TaskControlType,
     ToolFailureKind,
     ToolFailureObservation,
 )
@@ -194,6 +197,63 @@ class TaskRuntime:
             return
         current = self.task_store.version(task.task_id)
         self.task_store.save(task, expected_version=current)
+
+    def apply_control(self, command: TaskControlCommand) -> TaskControlResult:
+        creation = self._tasks.get(command.task_id)
+        if creation is None and self.task_store is not None:
+            stored = self.task_store.load(command.task_id)
+            if stored is not None:
+                creation = TaskCreationResult(stored.task)
+                self._tasks[command.task_id] = creation
+        if creation is None:
+            return TaskControlResult(command.command_id, command.task_id, False, "missing", "missing", "task_not_found", "Task does not exist.")
+        task = creation.task
+        handled = task.task_local_state.setdefault("handled_control_commands", {})
+        if command.command_id in handled:
+            previous = handled[command.command_id]
+            return TaskControlResult(**previous)
+        previous_state = task.state
+        accepted, code, message = True, "accepted", "Control command accepted."
+        if command.command_type is TaskControlType.KILL:
+            if task.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.KILLED, TaskState.DELIVERED}:
+                accepted, code, message = False, "terminal_task", "Terminal Task cannot be killed."
+            else:
+                task.control_request = command
+                if task.state is not TaskState.KILL_REQUESTED:
+                    task.transition_to(TaskState.KILL_REQUESTED)
+                task.transition_to(TaskState.KILLED)
+        elif command.command_type is TaskControlType.PAUSE:
+            if task.state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
+                accepted, code, message = False, "kill_has_priority", "Kill has priority over pause."
+            elif task.state not in {TaskState.CREATED, TaskState.FORMULATING, TaskState.READY, TaskState.RUNNING, TaskState.WAITING}:
+                accepted, code, message = False, "invalid_state", "Task cannot be paused from its current state."
+            else:
+                task.paused_from_state = task.state
+                task.control_request = command
+                task.transition_to(TaskState.PAUSE_REQUESTED)
+                self._persist(task)
+                task.transition_to(TaskState.PAUSED)
+        elif command.command_type is TaskControlType.RESUME:
+            if task.state is not TaskState.PAUSED or task.paused_from_state is None:
+                accepted, code, message = False, "invalid_state", "Only a paused Task can resume."
+            else:
+                destination = task.paused_from_state
+                task.control_request = command
+                task.transition_to(destination)
+                task.paused_from_state = None
+                if destination is TaskState.READY and self.task_queue is not None:
+                    self.task_queue.enqueue(task.task_id)
+        else:
+            accepted, code, message = False, "unsupported_command", "Command is not handled by the control plane."
+        result = TaskControlResult(command.command_id, task.task_id, accepted, previous_state.value, task.state.value, code, message)
+        handled[command.command_id] = {
+            "command_id": result.command_id, "task_id": result.task_id, "accepted": result.accepted,
+            "previous_state": result.previous_state, "current_state": result.current_state,
+            "code": result.code, "message": result.message,
+        }
+        if accepted:
+            self._persist(task)
+        return result
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         

@@ -47,5 +47,11 @@ class TaskScheduler:
 
     def next_recovery(self) -> StoredTask | None:
         task_id = self.recovery_queue.dequeue()
-        return None if task_id is None else self.store.load(task_id)
-
+        if task_id is None:
+            return None
+        record = self.store.load(task_id)
+        if record is not None and record.task.state is TaskState.KILL_REQUESTED:
+            record.task.transition_to(TaskState.KILLED)
+            self.store.save(record.task, expected_version=record.version)
+            return self.store.load(task_id)
+        return record

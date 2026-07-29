@@ -16,3 +16,6 @@ class AppRuntime:
 
     def run_text_with_display(self, input_text: str) -> Any:
         return self._demo_runtime.run_with_display(input_text)
+
+    def control_task(self, command: Any) -> Any:
+        return self._demo_runtime.task_runtime.apply_control(command)
