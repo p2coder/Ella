@@ -1,4 +1,3 @@
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -10,6 +9,7 @@ from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
 
 from .decision import CALL_TOOL, COMPLETE, REPLAN, WAIT, ExecutionDecision
@@ -56,6 +56,9 @@ class SubAgent:
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
+    )
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
     )
 
     def select_strategy(
@@ -361,24 +364,17 @@ class SubAgent:
         task_session.task_local_state["execution_decision_prompt_text"] = (
             prompt.prompt
         )
-        with open("trace/trace.json", "w", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "user_prompt": handoff.trigger_event.payload.get("text", ""),
-                "workspace": {
-                    "overall_goal": handoff.task_goal,
-                    "current_goal": handoff.task_goal,
-                    "current_step_state": {
-                        "strategy_mode": strategy.mode,
-                        "completion_criteria": strategy.completion_criteria,
-                    },
-                    "task": self._task_context(handoff, context),
-                    "selected_skill": self._skill_context(skill),
-                    "visible_skills": visible_skills,
-                    "visible_tools": serialized_tools,
-                    "observations": task_session.tool_trace,
-                }
-            }, ensure_ascii=False, indent=2))
-            f.close()
+        self.trace_recorder.record(
+            task_id=task_session.task_id,
+            trace_id=context.trace_id,
+            boundary="reasoning.execution_decision",
+            event_type="prompt_built",
+            payload={
+                "prompt_name": prompt.prompt_name,
+                "visible_tools": serialized_tools,
+                "observation_count": len(task_session.tool_trace),
+            },
+        )
         llm_started = perf_counter()
         try:
             result = self.llm_provider.generate(

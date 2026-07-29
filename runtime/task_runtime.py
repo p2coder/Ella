@@ -44,6 +44,7 @@ from .task_queue import TaskQueue
 from .task_store import TaskStore
 from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
 from .waiting import WaitingRegistry
+from .trace import NoOpTraceRecorder, TraceRecorder
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,7 @@ class TaskRuntime:
     max_runtime_ticks: int = 100
     max_steps: int = 20
     waiting_registry: WaitingRegistry | None = None
+    trace_recorder: TraceRecorder | NoOpTraceRecorder
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
@@ -117,6 +119,7 @@ class TaskRuntime:
         max_runtime_ticks: int = 100,
         max_steps: int = 20,
         waiting_registry: WaitingRegistry | None = None,
+        trace_recorder: TraceRecorder | NoOpTraceRecorder | None = None,
     ) -> None:
         if max_argument_retries < 0:
             raise ValueError("max_argument_retries must be non-negative")
@@ -132,6 +135,7 @@ class TaskRuntime:
         self.max_runtime_ticks = max_runtime_ticks
         self.max_steps = max_steps
         self.waiting_registry = waiting_registry
+        self.trace_recorder = trace_recorder or NoOpTraceRecorder()
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._sessions = {}
@@ -162,12 +166,14 @@ class TaskRuntime:
         self._tasks[task_id] = creation
         self._sessions[task_id] = creation
         self._persist(task)
+        self._trace_task(task, "task", "created")
         return TaskHandle(task_id, source_event.trace_id)
 
     def begin_formulation(self, task_id: str) -> None:
         task = self._tasks[task_id].task
         task.transition_to(TaskState.FORMULATING)
         self._persist(task)
+        self._trace_task(task, "reasoning.formulation", "started")
 
     def submit_formulated(
         self, task_id: str, handoff: HandoffRequest
@@ -189,6 +195,7 @@ class TaskRuntime:
         )
         task.transition_to(TaskState.READY)
         self._persist(task)
+        self._trace_task(task, "task", "submitted")
         if self.task_queue is not None:
             self.task_queue.enqueue(task_id)
         self.timing_recorder.record_task_submitted(
@@ -202,6 +209,7 @@ class TaskRuntime:
         task.failure_reason = reason
         task.transition_to(TaskState.FAILED)
         self._persist(task)
+        self._trace_task(task, "reasoning.formulation", "failed", task.failure)
 
     def _persist(self, task: Task) -> None:
         if self.task_store is None:
@@ -264,6 +272,12 @@ class TaskRuntime:
         }
         if accepted:
             self._persist(task)
+            self._trace_task(
+                task,
+                "control",
+                command.command_type.value,
+                {"previous_state": previous_state.value, "state": task.state.value},
+            )
         return result
 
     def enter_waiting(self, task_id: str, condition) -> None:
@@ -275,6 +289,12 @@ class TaskRuntime:
         if self.waiting_registry is not None:
             self.waiting_registry.register(task_id, condition)
         self._persist(task)
+        self._trace_task(
+            task,
+            "waiting",
+            "registered",
+            {"kind": condition.kind.value, "correlation_key": condition.correlation_key},
+        )
 
     def wake_waiting(
         self, task_id: str, *, correlation_key: str | None = None, now=None
@@ -293,6 +313,7 @@ class TaskRuntime:
         if self.task_queue is not None:
             self.task_queue.enqueue(task_id)
         self._persist(task)
+        self._trace_task(task, "waiting", "woken")
         return True
 
     def resolve_uncertain_as_failed(self, task_id: str, reason: str) -> None:
@@ -974,6 +995,17 @@ class TaskRuntime:
         memory_result: MemoryWriteResult | None = None,
         failure_reason: str | None = None,
     ) -> TaskRuntimeResult:
+        timing = self.timing_recorder.snapshot(creation.context.trace_id)
+        self._trace_task(
+            creation.task,
+            "task_node.runtime",
+            "state_observed",
+            {
+                "state": creation.task.state.value,
+                "stop_reason": stop_reason,
+                "timing": None if timing is None else timing.to_dict(),
+            },
+        )
         return TaskRuntimeResult(
             handle=TaskHandle(
                 task_id=creation.session.task_id,
@@ -988,7 +1020,22 @@ class TaskRuntime:
             memory_result=memory_result,
             failure_reason=failure_reason,
             logical_steps=len(creation.session.step_history),
-            timing=self.timing_recorder.snapshot(creation.context.trace_id),
+            timing=timing,
+        )
+
+    def _trace_task(
+        self,
+        task: Task,
+        boundary: str,
+        event_type: str,
+        payload: Mapping | None = None,
+    ) -> None:
+        self.trace_recorder.record(
+            task_id=task.task_id,
+            trace_id=task.trace_id,
+            boundary=boundary,
+            event_type=event_type,
+            payload=payload or {},
         )
 
     def _timing_dict(self, creation: TaskSessionCreation) -> dict:
