@@ -147,6 +147,13 @@ def render_web_ui_shell(
         "timing_summary": _value(data, "timing_summary"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),
+        "task_id": _value(data, "task_id"),
+        "task_state": _value(data, "task_state"),
+        "active_step_ids": _join_items(data.get("active_step_ids", ())),
+        "waiting_condition": _value(data, "waiting_condition"),
+        "paused_from_state": _value(data, "paused_from_state"),
+        "terminal_outcome": _value(data, "terminal_outcome"),
+        "delivery_status": _value(data, "delivery_status"),
         "form_error": escape(form_error),
     }
     html = TEMPLATE_PATH.read_text(encoding="utf-8")

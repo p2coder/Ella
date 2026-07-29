@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -23,6 +24,11 @@ from runtime.event_runtime import EventRuntime
 from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.timing import RuntimeTimingRecorder
+from runtime.trace import TraceRecorder
+from sessions.execution_state import (
+    TaskControlCommand,
+    TaskControlType,
+)
 from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
@@ -68,6 +74,7 @@ class AppRuntime:
         multimodal_provider = provider_factory.multimodal()
         camera_provider = device_factory.camera()
         timing_recorder = RuntimeTimingRecorder()
+        trace_recorder = TraceRecorder()
 
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
@@ -110,6 +117,7 @@ class AppRuntime:
             tool_directory=tool_manager,
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
+            trace_recorder=trace_recorder,
         )
         task_runtime = TaskRuntime(
             session_manager=TaskSessionManager(
@@ -130,6 +138,7 @@ class AppRuntime:
                 timing_recorder=timing_recorder,
             ),
             timing_recorder=timing_recorder,
+            trace_recorder=trace_recorder,
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
@@ -154,6 +163,63 @@ class AppRuntime:
         return self._run_signal_with_display(
             signal,
             user_input=input_text,
+        )
+
+    def submit_text(self, input_text: str):
+        signal = CLITextSignalSource().create_signal(
+            text=input_text,
+            trace_id=f"trace-app-{uuid4().hex}",
+        )
+        result = self._event_runtime.publish(signal)
+        if not result.submitted or result.task_handle is None:
+            raise RuntimeError(result.reason)
+        return result.task_handle
+
+    def get_task(self, task_id: str) -> dict[str, object]:
+        creation = self._task_runtime._tasks.get(task_id)
+        if creation is None:
+            raise KeyError(task_id)
+        task = creation.task
+        trace = self._task_runtime.trace_recorder.snapshot(task_id)
+        return {
+            "task_id": task.task_id,
+            "state": task.state.value,
+            "active_step_ids": task.active_step_ids,
+            "waiting_condition": task.waiting_condition,
+            "paused_from_state": (
+                None if task.paused_from_state is None else task.paused_from_state.value
+            ),
+            "terminal_outcome": task.terminal_outcome,
+            "failure": task.failure,
+            "uncertain_resolution": task.uncertain_resolution,
+            "delivery": task.delivery,
+            "graph": task.graph,
+            "trace": None if trace is None else trace.to_dict(),
+        }
+
+    def pause(self, task_id: str, reason: str = ""):
+        return self._control(task_id, TaskControlType.PAUSE, reason)
+
+    def resume(self, task_id: str, reason: str = ""):
+        return self._control(task_id, TaskControlType.RESUME, reason)
+
+    def kill(self, task_id: str, reason: str = ""):
+        return self._control(task_id, TaskControlType.KILL, reason)
+
+    def resolve_uncertain_as_failed(self, task_id: str, reason: str):
+        self._task_runtime.resolve_uncertain_as_failed(task_id, reason)
+        return self.get_task(task_id)
+
+    def _control(self, task_id: str, command_type: TaskControlType, reason: str):
+        return self._task_runtime.apply_control(
+            TaskControlCommand(
+                command_id=f"control-{uuid4().hex}",
+                task_id=task_id,
+                command_type=command_type,
+                requested_at=datetime.now(timezone.utc),
+                actor="app_runtime",
+                reason=reason or None,
+            )
         )
 
     def run_microphone_with_display(
@@ -296,7 +362,25 @@ def _build_display_snapshot(
         final_response=output.final_response,
         memory_status=getattr(task_result.memory_result, "action", "unknown"),
         timing_summary=_timing_summary(task_result),
+        task_id=task_result.handle.task_id,
+        task_state=task_result.session.state.value,
+        active_step_ids=task_result.session.active_step_ids,
+        waiting_condition=_display_value(task_result.session.waiting_condition),
+        paused_from_state=(
+            ""
+            if task_result.session.paused_from_state is None
+            else task_result.session.paused_from_state.value
+        ),
+        terminal_outcome=_display_value(task_result.session.terminal_outcome),
+        delivery_status=_display_value(task_result.session.delivery),
     )
+
+
+def _display_value(value) -> str:
+    if value is None:
+        return ""
+    to_dict = getattr(value, "to_dict", None)
+    return str(to_dict() if callable(to_dict) else value)
 
 
 def _microphone_failure_result(message: str) -> AppDisplayResult:

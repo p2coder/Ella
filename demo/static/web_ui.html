@@ -391,6 +391,26 @@
                 <span class="field-label">Timing</span>
                 <p class="field-value">{{timing_summary}}</p>
               </div>
+              <div class="field">
+                <span class="field-label">Task state</span>
+                <p class="field-value">{{task_state}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Task ID</span>
+                <p class="field-value">{{task_id}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Active steps</span>
+                <p class="field-value">{{active_step_ids}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Waiting / paused origin</span>
+                <p class="field-value">{{waiting_condition}} {{paused_from_state}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Outcome / delivery</span>
+                <p class="field-value">{{terminal_outcome}} {{delivery_status}}</p>
+              </div>
             </div>
           </section>
 
