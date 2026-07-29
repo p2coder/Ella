@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, replace
+from collections.abc import Mapping
 
 from agent.context import AgentExecutionContext
 from agent.final_response import FinalResponseGenerator
@@ -15,6 +16,7 @@ from sessions.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
 from sessions.session import TaskSession, TaskState
 from sessions.session import Task
+from sessions.graph import TaskGraphRun, TaskGraphNodeType, ToolGraphRun
 from sessions.session_manager import (
     TaskCreationResult,
     TaskSessionCreation,
@@ -30,6 +32,7 @@ from .timing import (
 )
 from .task_queue import TaskQueue
 from .task_store import TaskStore
+from .step_runtime import StepRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +70,9 @@ class TaskRuntime:
     max_argument_retries: int = 2
     task_store: TaskStore | None = None
     task_queue: TaskQueue | None = None
+    step_runtime: StepRuntime | None = None
+    max_runtime_ticks: int = 100
+    max_steps: int = 20
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
@@ -95,6 +101,9 @@ class TaskRuntime:
         max_argument_retries: int = 2,
         task_store: TaskStore | None = None,
         task_queue: TaskQueue | None = None,
+        step_runtime: StepRuntime | None = None,
+        max_runtime_ticks: int = 100,
+        max_steps: int = 20,
     ) -> None:
         if max_argument_retries < 0:
             raise ValueError("max_argument_retries must be non-negative")
@@ -106,6 +115,9 @@ class TaskRuntime:
         self.max_argument_retries = max_argument_retries
         self.task_store = task_store
         self.task_queue = task_queue
+        self.step_runtime = step_runtime
+        self.max_runtime_ticks = max_runtime_ticks
+        self.max_steps = max_steps
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._sessions = {}
@@ -214,6 +226,11 @@ class TaskRuntime:
     def step(self, task_id: str) -> TaskRuntimeResult:
         creation = self._tasks[task_id]
         session = creation.session
+        if session.graph is not None and session.state is TaskState.RUNNING:
+            return self._step_task_graph(creation)
+        self.timing_recorder.record_task_processing_started(
+            creation.context.trace_id
+        )
 
         if session.state in {
             TaskState.COMPLETED,
@@ -292,17 +309,97 @@ class TaskRuntime:
             session.transition_to(TaskState.WAITING)
         elif decision.action == COMPLETE:
             self._archive_and_advance(session)
-            session.completion = self._build_completion(creation)
             self.timing_recorder.record_execution_completed(
                 creation.context.trace_id
             )
+            session.completion = self._build_completion(creation)
+            self.timing_recorder.record_task_completed(creation.context.trace_id)
             session.transition_to(TaskState.COMPLETED)
-            return self._result(
-                creation,
-                stop_reason="completed",
-            )
+            return self._result(creation, stop_reason="completed")
 
         return self._result(creation)
+
+    def _step_task_graph(
+        self, creation: TaskCreationResult
+    ) -> TaskRuntimeResult:
+        task = creation.task
+        ticks = int(task.task_local_state.get("runtime_ticks", 0)) + 1
+        task.task_local_state["runtime_ticks"] = ticks
+        if ticks > self.max_runtime_ticks:
+            return self._fail_graph_task(
+                creation, "max_runtime_ticks_exhausted"
+            )
+        graph = task.graph
+        runs = {key: value for key, value in graph.node_runs.items()}
+        completed_steps = sum(
+            1
+            for value in runs.values()
+            if _graph_run_state(value) == "succeeded"
+        )
+        if completed_steps >= self.max_steps:
+            return self._fail_graph_task(creation, "max_steps_exhausted")
+        ready = []
+        for node in graph.definition.nodes:
+            if node.node_type is not TaskGraphNodeType.STEP:
+                continue
+            if _graph_run_state(runs.get(node.node_id)) not in {None, "pending", "ready", "running"}:
+                continue
+            if all(
+                _graph_run_state(runs.get(predecessor)) == "succeeded"
+                for predecessor in graph.definition.predecessors(node.node_id)
+            ):
+                ready.append(node.node_id)
+        ordered = graph.definition.stable_ready_order(ready)
+        if not ordered:
+            terminal_states = {
+                _graph_run_state(runs.get(node_id))
+                for node_id in graph.definition.terminal_node_ids
+            }
+            if "succeeded" in terminal_states:
+                task.transition_to(TaskState.SUCCEEDED)
+                self._persist(task)
+                return self._result(creation, stop_reason="completed")
+            return self._fail_graph_task(creation, "no_reachable_success_terminal")
+        node_id = ordered[0]
+        node = next(item for item in graph.definition.nodes if item.node_id == node_id)
+        payload = node.payload
+        tool_graph = payload.get("tool_graph_run") if isinstance(payload, dict) else None
+        if not isinstance(tool_graph, ToolGraphRun) or self.step_runtime is None:
+            runs[node_id] = {"state": "failed", "code": "step_graph_unavailable"}
+        else:
+            strategy = task.current_strategy or StrategyDecision(
+                "react", None, "graph execution", None, (), task_id=task.task_id, trace_id=task.trace_id
+            )
+            tick = self.step_runtime.tick(
+                tool_graph,
+                task=task,
+                context=task.execution_context,
+                strategy=strategy,
+            )
+            runs[node_id] = {
+                "state": tick.step_state,
+                "tool_graph_run": tick.graph_run,
+            }
+        task.graph = TaskGraphRun(graph.definition, runs)
+        if any(
+            _graph_run_state(runs.get(item)) == "succeeded"
+            for item in graph.definition.terminal_node_ids
+        ):
+            for candidate in graph.definition.nodes:
+                if _graph_run_state(runs.get(candidate.node_id)) in {None, "pending", "ready"}:
+                    runs[candidate.node_id] = {"state": "skipped"}
+            task.graph = TaskGraphRun(graph.definition, runs)
+            task.transition_to(TaskState.SUCCEEDED)
+        self._persist(task)
+        return self._result(creation)
+
+    def _fail_graph_task(self, creation, code: str) -> TaskRuntimeResult:
+        task = creation.task
+        task.failure = {"code": code, "message": code.replace("_", " ")}
+        task.failure_reason = code
+        task.transition_to(TaskState.FAILED)
+        self._persist(task)
+        return self._result(creation, stop_reason=code, blocked=True, failure_reason=code)
 
     def _repair_violation(
         self,
@@ -667,3 +764,13 @@ class TaskRuntime:
     def _timing_dict(self, creation: TaskSessionCreation) -> dict:
         snapshot = self.timing_recorder.snapshot(creation.context.trace_id)
         return {} if snapshot is None else snapshot.to_dict()
+
+
+def _graph_run_state(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        state = value.get("state")
+    else:
+        state = getattr(value, "state", None)
+    return None if state is None else str(getattr(state, "value", state)).lower()
