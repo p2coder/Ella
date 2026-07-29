@@ -76,7 +76,7 @@ class AppRuntime:
         multimodal_provider = provider_factory.multimodal()
         camera_provider = device_factory.camera()
         timing_recorder = RuntimeTimingRecorder()
-        trace_recorder = TraceRecorder()
+        trace_recorder = TraceRecorder.for_directory(PROJECT_ROOT / "trace")
 
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")

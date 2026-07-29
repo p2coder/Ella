@@ -59,3 +59,38 @@ def test_timing_can_attach_to_matching_boundary_without_becoming_state():
 def test_subagent_has_no_fixed_trace_file_overwrite():
     source = Path("sessions/subagent.py").read_text(encoding="utf-8")
     assert 'open("trace/trace.json", "w"' not in source
+
+
+def test_directory_mode_persists_one_append_only_file_per_task(tmp_path):
+    recorder = TraceRecorder.for_directory(tmp_path)
+    recorder.record(
+        task_id="task-a", trace_id="trace-a", boundary="task",
+        event_type="created", payload={},
+    )
+    recorder.record(
+        task_id="task-b", trace_id="trace-b", boundary="task",
+        event_type="created", payload={},
+    )
+    recorder.record(
+        task_id="task-a", trace_id="trace-a", boundary="step",
+        event_type="started", payload={},
+    )
+
+    task_a_lines = (tmp_path / "task-a.jsonl").read_text(encoding="utf-8").splitlines()
+    task_b_lines = (tmp_path / "task-b.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(task_a_lines) == 2
+    assert len(task_b_lines) == 1
+
+
+def test_directory_mode_continues_sequence_after_recorder_restart(tmp_path):
+    first = TraceRecorder.for_directory(tmp_path)
+    first.record(
+        task_id="task", trace_id="trace", boundary="task",
+        event_type="created", payload={},
+    )
+    second = TraceRecorder.for_directory(tmp_path)
+    event = second.record(
+        task_id="task", trace_id="trace", boundary="task",
+        event_type="restored", payload={},
+    )
+    assert event.sequence == 2
