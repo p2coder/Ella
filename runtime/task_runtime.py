@@ -216,7 +216,14 @@ class TaskRuntime:
         previous_state = task.state
         accepted, code, message = True, "accepted", "Control command accepted."
         if command.command_type is TaskControlType.KILL:
-            if task.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.KILLED, TaskState.DELIVERED}:
+            if task.state in {
+                TaskState.SUCCEEDED,
+                TaskState.FAILED,
+                TaskState.UNCERTAIN,
+                TaskState.PAUSE_REQUESTED,
+                TaskState.KILLED,
+                TaskState.DELIVERED,
+            }:
                 accepted, code, message = False, "terminal_task", "Terminal Task cannot be killed."
             else:
                 task.control_request = command
@@ -238,11 +245,10 @@ class TaskRuntime:
             if task.state is not TaskState.PAUSED or task.paused_from_state is None:
                 accepted, code, message = False, "invalid_state", "Only a paused Task can resume."
             else:
-                destination = task.paused_from_state
                 task.control_request = command
-                task.transition_to(destination)
+                task.transition_to(TaskState.READY)
                 task.paused_from_state = None
-                if destination is TaskState.READY and self.task_queue is not None:
+                if self.task_queue is not None:
                     self.task_queue.enqueue(task.task_id)
         else:
             accepted, code, message = False, "unsupported_command", "Command is not handled by the control plane."
@@ -486,6 +492,13 @@ class TaskRuntime:
             task,
             strategy,
         )
+        if task.state in {
+            TaskState.PAUSE_REQUESTED,
+            TaskState.PAUSED,
+            TaskState.KILL_REQUESTED,
+            TaskState.KILLED,
+        }:
+            return self._result(creation, stop_reason=self._stop_reason(task))
 
         repair_violation = self._repair_violation(task, decision)
         if repair_violation is not None:
@@ -498,6 +511,13 @@ class TaskRuntime:
             creation.context,
             task,
         )
+        if task.state in {
+            TaskState.PAUSE_REQUESTED,
+            TaskState.PAUSED,
+            TaskState.KILL_REQUESTED,
+            TaskState.KILLED,
+        }:
+            return self._result(creation, stop_reason=self._stop_reason(task))
         print("[task_runtime]desicion action: ",decision.action)
         if execution.failure is not None:
             self._handle_failure(task, execution.failure)
@@ -836,6 +856,8 @@ class TaskRuntime:
     def _stop_reason(task: Task) -> str | None:
         if task.state is TaskState.WAITING:
             return "waiting"
+        if task.state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
+            return "paused"
         if task.state is TaskState.SUCCEEDED:
             return "completed"
         if task.state is TaskState.FAILED:

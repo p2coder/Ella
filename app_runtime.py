@@ -167,6 +167,31 @@ class AppRuntime:
             user_input=input_text,
         )
 
+    def run_submitted_task_with_display(
+        self,
+        task_id: str,
+        *,
+        user_input: str,
+        transcript: str | None = None,
+    ) -> AppDisplayResult:
+        task_result = self._task_runtime.run_until_complete(
+            task_id,
+            max_steps=MAX_APP_STEPS,
+        )
+        if task_result.failure_reason is not None:
+            raise RuntimeError(task_result.failure_reason)
+        if task_result.completion is None:
+            raise RuntimeError(
+                f"task did not complete: {task_result.stop_reason}"
+            )
+        if task_result.memory_result is None:
+            raise RuntimeError("task completed without a memory result")
+        return self._display_result(
+            task_result,
+            user_input=user_input,
+            transcript=transcript,
+        )
+
     def submit_text(self, input_text: str):
         signal = CLITextSignalSource().create_signal(
             text=input_text,
@@ -272,6 +297,19 @@ class AppRuntime:
         transcript: str | None = None,
     ) -> AppDisplayResult:
         task_result = self._run_signal_to_completion(signal)
+        return self._display_result(
+            task_result,
+            user_input=user_input,
+            transcript=transcript,
+        )
+
+    def _display_result(
+        self,
+        task_result: TaskRuntimeResult,
+        *,
+        user_input: str,
+        transcript: str | None = None,
+    ) -> AppDisplayResult:
         completion = task_result.completion
         memory_result = task_result.memory_result
         output = _render_output(

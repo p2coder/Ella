@@ -4,8 +4,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
 import re
+from threading import Lock, Thread
+from time import sleep
 from typing import Any, Mapping
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 from app_runtime import AppRuntime
 from demo.display_snapshot import RunDisplaySnapshot
@@ -29,6 +31,11 @@ class WebUIResponse:
 class LocalWebUI:
     def __init__(self, app_runtime: AppRuntime) -> None:
         self._app_runtime = app_runtime
+        self._lock = Lock()
+        self._snapshots: dict[str, dict[str, Any]] = {}
+        self._task_inputs: dict[str, str] = {}
+        self._running_tasks: set[str] = set()
+        self._task_errors: dict[str, str] = {}
 
     def submit_text(self, input_text: str) -> WebUIResponse:
         normalized_text = input_text.strip()
@@ -41,7 +48,13 @@ class LocalWebUI:
             )
 
         try:
-            result = self._app_runtime.run_text_with_display(normalized_text)
+            if not hasattr(self._app_runtime, "submit_text"):
+                result = self._app_runtime.run_text_with_display(normalized_text)
+                return WebUIResponse(
+                    status=200,
+                    body=render_web_ui_shell(result.snapshot),
+                )
+            handle = self._app_runtime.submit_text(normalized_text)
         except Exception as error:
             return WebUIResponse(
                 status=500,
@@ -49,10 +62,122 @@ class LocalWebUI:
                     form_error=f"Ella could not complete the task: {error}",
                 ),
             )
+        with self._lock:
+            self._task_inputs[handle.task_id] = normalized_text
+        self._start_task(handle.task_id)
+        return self.task_status(handle.task_id)
+
+    def task_status(self, task_id: str) -> WebUIResponse:
+        try:
+            task = self._app_runtime.get_task(task_id)
+        except KeyError:
+            return WebUIResponse(
+                status=404,
+                body=render_web_ui_shell(form_error="Task not found."),
+            )
+        with self._lock:
+            data = dict(self._snapshots.get(task_id, {}))
+            user_input = self._task_inputs.get(task_id, "")
+            task_error = self._task_errors.get(task_id, "")
+        data.update(
+            {
+                "user_input": data.get("user_input", user_input),
+                "task_id": task_id,
+                "task_state": task["state"],
+                "active_step_ids": task.get("active_step_ids", ()),
+                "waiting_condition": task.get("waiting_condition") or "",
+                "paused_from_state": task.get("paused_from_state") or "",
+                "terminal_outcome": task.get("terminal_outcome") or "",
+            }
+        )
         return WebUIResponse(
             status=200,
-            body=render_web_ui_shell(result.snapshot),
+            body=render_web_ui_shell(data, form_error=task_error),
         )
+
+    def control_task(self, task_id: str, action: str) -> WebUIResponse:
+        controls = {
+            "pause": self._app_runtime.pause,
+            "resume": self._app_runtime.resume,
+            "kill": self._app_runtime.kill,
+        }
+        control = controls.get(action)
+        if control is None:
+            return WebUIResponse(
+                status=400,
+                body=render_web_ui_shell(form_error="Unknown task control."),
+            )
+        try:
+            result = control(task_id, reason="requested from local web UI")
+        except KeyError:
+            return WebUIResponse(
+                status=404,
+                body=render_web_ui_shell(form_error="Task not found."),
+            )
+        if not result.accepted:
+            with self._lock:
+                self._task_errors[task_id] = result.message
+            response = self.task_status(task_id)
+            return WebUIResponse(status=409, body=response.body)
+        if action == "resume":
+            self._resume_task(task_id)
+        return self.task_status(task_id)
+
+    def _resume_task(self, task_id: str) -> None:
+        with self._lock:
+            still_finishing = task_id in self._running_tasks
+        if not still_finishing:
+            self._start_task(task_id)
+            return
+        Thread(
+            target=self._start_after_current_run,
+            args=(task_id,),
+            name=f"ella-resume-{task_id}",
+            daemon=True,
+        ).start()
+
+    def _start_after_current_run(self, task_id: str) -> None:
+        while True:
+            with self._lock:
+                if task_id not in self._running_tasks:
+                    break
+            sleep(0.01)
+        self._start_task(task_id)
+
+    def _start_task(self, task_id: str) -> None:
+        with self._lock:
+            if task_id in self._running_tasks:
+                return
+            self._running_tasks.add(task_id)
+            self._task_errors.pop(task_id, None)
+        Thread(
+            target=self._run_task,
+            args=(task_id,),
+            name=f"ella-task-{task_id}",
+            daemon=True,
+        ).start()
+
+    def _run_task(self, task_id: str) -> None:
+        with self._lock:
+            user_input = self._task_inputs.get(task_id, "")
+        try:
+            result = self._app_runtime.run_submitted_task_with_display(
+                task_id,
+                user_input=user_input,
+            )
+        except Exception as error:
+            state = self._app_runtime.get_task(task_id)["state"]
+            if state not in {"paused", "pause_requested", "killed"}:
+                with self._lock:
+                    self._task_errors[task_id] = (
+                        f"Ella could not complete the task: {error}"
+                    )
+        else:
+            with self._lock:
+                self._snapshots[task_id] = result.snapshot.to_dict()
+        finally:
+            with self._lock:
+                self._running_tasks.discard(task_id)
 
     def submit_microphone(self) -> WebUIResponse:
         try:
@@ -81,11 +206,15 @@ class LocalWebUI:
         content_type: str = "",
     ) -> WebUIResponse:
         normalized_method = method.upper()
-        if normalized_method == "GET" and path == "/":
+        parsed = urlsplit(path)
+        if normalized_method == "GET" and parsed.path == "/":
             return WebUIResponse(status=200, body=render_web_ui_shell())
-        if normalized_method == "POST" and path == "/microphone":
+        if normalized_method == "GET" and parsed.path == "/task":
+            task_id = parse_qs(parsed.query).get("task_id", [""])[0]
+            return self.task_status(task_id)
+        if normalized_method == "POST" and parsed.path == "/microphone":
             return self.submit_microphone()
-        if normalized_method == "POST" and path == "/submit":
+        if normalized_method == "POST" and parsed.path in {"/submit", "/task/control"}:
             if content_type.split(";", 1)[0] != "application/x-www-form-urlencoded":
                 return WebUIResponse(
                     status=415,
@@ -94,6 +223,11 @@ class LocalWebUI:
                     ),
                 )
             form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+            if parsed.path == "/task/control":
+                return self.control_task(
+                    form.get("task_id", [""])[0],
+                    form.get("action", [""])[0],
+                )
             return self.submit_text(form.get("user_input", [""])[0])
         return WebUIResponse(
             status=404,
@@ -115,6 +249,24 @@ def render_web_ui_shell(
     form_error: str = "",
 ) -> str:
     data = _snapshot_data(snapshot)
+    task_state = str(data.get("task_state") or "")
+    task_id = str(data.get("task_id") or "")
+    pause_enabled = task_state in {
+        "created",
+        "formulating",
+        "ready",
+        "running",
+        "waiting",
+    }
+    resume_enabled = task_state == "paused"
+    kill_enabled = bool(task_id) and task_state not in {
+        "succeeded",
+        "failed",
+        "uncertain",
+        "pause_requested",
+        "killed",
+        "delivered",
+    }
     values = {
         "user_input": _value(data, "user_input"),
         "transcript_markup": _transcript_markup(data),
@@ -149,6 +301,11 @@ def render_web_ui_shell(
         "memory_status": _value(data, "memory_status"),
         "task_id": _value(data, "task_id"),
         "task_state": _value(data, "task_state"),
+        "task_state_label": escape(task_state or "No active task"),
+        "controls_hidden": "" if task_id else "hidden",
+        "pause_disabled": "" if pause_enabled else "disabled",
+        "resume_disabled": "" if resume_enabled else "disabled",
+        "kill_disabled": "" if kill_enabled else "disabled",
         "active_step_ids": _join_items(data.get("active_step_ids", ())),
         "waiting_condition": _value(data, "waiting_condition"),
         "paused_from_state": _value(data, "paused_from_state"),
