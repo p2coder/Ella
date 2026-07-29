@@ -3,10 +3,10 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from agent.context import AgentExecutionContext
-from sessions.executor import CapabilityExecutionResult, CapabilityExecutor
-from sessions.graph import ToolGraphRun, ToolNodeDefinition
-from sessions.session import Task
-from sessions.strategy import StrategyDecision
+from runtime.executor import CapabilityExecutionResult, CapabilityExecutor
+from tasks.graph import ToolGraphRun, ToolNodeDefinition
+from tasks.task import Task
+from agent.strategy import StrategyDecision
 from tools.base import EffectiveToolExecutionMetadata
 from tools.manager import CapabilityUnavailableError
 

@@ -25,11 +25,13 @@ from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.timing import RuntimeTimingRecorder
 from runtime.trace import TraceRecorder
-from sessions.execution_state import (
+from tasks.state import (
     TaskControlCommand,
     TaskControlType,
 )
-from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
+from agent.subagent import SubAgent
+from runtime.executor import CapabilityExecutor
+from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
@@ -120,7 +122,7 @@ class AppRuntime:
             trace_recorder=trace_recorder,
         )
         task_runtime = TaskRuntime(
-            session_manager=TaskSessionManager(
+            task_factory=TaskFactory(
                 skill_manager=skill_manager,
                 tool_manager=tool_manager,
             ),
@@ -363,16 +365,16 @@ def _build_display_snapshot(
         memory_status=getattr(task_result.memory_result, "action", "unknown"),
         timing_summary=_timing_summary(task_result),
         task_id=task_result.handle.task_id,
-        task_state=task_result.session.state.value,
-        active_step_ids=task_result.session.active_step_ids,
-        waiting_condition=_display_value(task_result.session.waiting_condition),
+        task_state=task_result.task.state.value,
+        active_step_ids=task_result.task.active_step_ids,
+        waiting_condition=_display_value(task_result.task.waiting_condition),
         paused_from_state=(
             ""
-            if task_result.session.paused_from_state is None
-            else task_result.session.paused_from_state.value
+            if task_result.task.paused_from_state is None
+            else task_result.task.paused_from_state.value
         ),
-        terminal_outcome=_display_value(task_result.session.terminal_outcome),
-        delivery_status=_display_value(task_result.session.delivery),
+        terminal_outcome=_display_value(task_result.task.terminal_outcome),
+        delivery_status=_display_value(task_result.task.delivery),
     )
 
 

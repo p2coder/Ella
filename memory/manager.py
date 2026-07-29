@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from sessions.completion import TaskCompletionPackage
+from tasks.completion import TaskCompletionPackage
 
 
 @dataclass(frozen=True, slots=True)

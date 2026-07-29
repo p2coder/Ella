@@ -7,9 +7,9 @@ from agent.context import AgentExecutionContext
 from agent.final_response import FinalResponseGenerator
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
-from sessions.completion import FailureDeliveryPayload, TaskCompletionPackage
-from sessions.decision import CALL_TOOL, COMPLETE, WAIT
-from sessions.execution_state import (
+from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
+from agent.decision import CALL_TOOL, COMPLETE, WAIT
+from tasks.state import (
     StepExecutionState,
     DeliveryAttempt,
     DeliveryOutcome,
@@ -22,18 +22,13 @@ from sessions.execution_state import (
     ToolFailureObservation,
     UncertainResolutionRecord,
 )
-from sessions.executor import CapabilityExecutor
+from runtime.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
-from sessions.session import TaskSession, TaskState
-from sessions.session import Task
-from sessions.graph import TaskGraphRun, TaskGraphNodeType, ToolGraphRun
-from sessions.session_manager import (
-    TaskCreationResult,
-    TaskSessionCreation,
-    TaskSessionManager,
-)
-from sessions.strategy import StrategyDecision
-from sessions.subagent import SubAgent
+from tasks.task import Task, TaskState
+from tasks.graph import TaskGraphRun, TaskGraphNodeType, ToolGraphRun
+from tasks.factory import TaskCreationResult, TaskFactory
+from agent.strategy import StrategyDecision
+from agent.subagent import SubAgent
 from tools import ToolResult
 from .timing import (
     NoOpRuntimeTimingRecorder,
@@ -52,15 +47,10 @@ class TaskHandle:
     task_id: str
     trace_id: str
 
-    @property
-    def session_id(self) -> str:
-        return self.task_id
-
-
 @dataclass(frozen=True, slots=True)
 class TaskRuntimeResult:
     handle: TaskHandle
-    session: TaskSession
+    task: Task
     context: AgentExecutionContext
     completion: TaskCompletionPackage | None = None
     steps: int = 0
@@ -74,7 +64,7 @@ class TaskRuntimeResult:
 
 @dataclass(slots=True, init=False)
 class TaskRuntime:
-    session_manager: TaskSessionManager = field(default_factory=TaskSessionManager)
+    task_factory: TaskFactory = field(default_factory=TaskFactory)
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
     final_response_generator: FinalResponseGenerator | None = None
@@ -88,12 +78,7 @@ class TaskRuntime:
     waiting_registry: WaitingRegistry | None = None
     trace_recorder: TraceRecorder | NoOpTraceRecorder
     _memory_manager: MemoryManager = field(init=False, repr=False)
-    _tasks: dict[str, TaskSessionCreation] = field(
-        default_factory=dict,
-        init=False,
-        repr=False,
-    )
-    _sessions: dict[str, TaskSessionCreation] = field(
+    _tasks: dict[str, TaskCreationResult] = field(
         default_factory=dict,
         init=False,
         repr=False,
@@ -106,7 +91,7 @@ class TaskRuntime:
 
     def __init__(
         self,
-        session_manager: TaskSessionManager | None = None,
+        task_factory: TaskFactory | None = None,
         subagent: SubAgent | None = None,
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
@@ -123,7 +108,7 @@ class TaskRuntime:
     ) -> None:
         if max_argument_retries < 0:
             raise ValueError("max_argument_retries must be non-negative")
-        self.session_manager = session_manager or TaskSessionManager()
+        self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
         self.final_response_generator = final_response_generator
@@ -138,33 +123,30 @@ class TaskRuntime:
         self.trace_recorder = trace_recorder or NoOpTraceRecorder()
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
-        self._sessions = {}
         self._memory_results = {}
 
     def create_task(self, source_event) -> TaskHandle:
-        task_id = self.session_manager._new_task_id()
-        scope = self.session_manager._resolve_capability_scope()
+        task_id = self.task_factory._new_task_id()
+        scope = self.task_factory._resolve_capability_scope()
         context = AgentExecutionContext(
-            agent_id=self.session_manager.agent_id,
-            agent_role=self.session_manager.agent_role,
-            parent_agent_id=self.session_manager.parent_agent_id,
+            agent_id=self.task_factory.agent_id,
+            agent_role=self.task_factory.agent_role,
+            parent_agent_id=self.task_factory.parent_agent_id,
             task_id=task_id,
             trace_id=source_event.trace_id,
             handoff_goal="",
-            memory_scope=self.session_manager.memory_scope,
-            permissions=self.session_manager.permissions,
+            memory_scope=self.task_factory.memory_scope,
+            permissions=self.task_factory.permissions,
             capability_scope=scope,
         )
         task = Task(
-            task_id,
-            task_id,
+            task_id=task_id,
             trace_id=source_event.trace_id,
             source_event=source_event,
             execution_context=context,
         )
         creation = TaskCreationResult(task)
         self._tasks[task_id] = creation
-        self._sessions[task_id] = creation
         self._persist(task)
         self._trace_task(task, "task", "created")
         return TaskHandle(task_id, source_event.trace_id)
@@ -407,17 +389,16 @@ class TaskRuntime:
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
-        creation = self.session_manager.create_session(handoff)
-        creation.session.current_step = replace(
-            creation.session.current_step,
+        creation = self.task_factory.create_task(handoff)
+        creation.task.current_step = replace(
+            creation.task.current_step,
             max_argument_retries=self.max_argument_retries,
         )
-        task_id = creation.session.task_id
+        task_id = creation.task.task_id
         print("[task_runtime.py]submit:submit event ",task_id)
         if task_id in self._tasks:
             raise ValueError(f"duplicate task_id: {task_id}")
         self._tasks[task_id] = creation
-        self._sessions[task_id] = creation
         self.timing_recorder.record_task_submitted(
             creation.context.trace_id,
             task_id=task_id,
@@ -427,15 +408,15 @@ class TaskRuntime:
             trace_id=creation.context.trace_id,
         )
 
-    def get_session(self, task_id: str) -> TaskSession:
-        return self._tasks[task_id].session
+    def get_task(self, task_id: str) -> Task:
+        return self._tasks[task_id].task
 
     def get_context(self, task_id: str) -> AgentExecutionContext:
         return self._tasks[task_id].context
 
     def step(self, task_id: str) -> TaskRuntimeResult:
         creation = self._tasks[task_id]
-        session = creation.session
+        session = creation.task
         if session.graph is not None and session.state is TaskState.RUNNING:
             return self._step_task_graph(creation)
         self.timing_recorder.record_task_processing_started(
@@ -654,7 +635,7 @@ class TaskRuntime:
 
     def _repair_violation(
         self,
-        session: TaskSession,
+        session: Task,
         decision,
     ) -> ToolFailureObservation | None:
         active_tool = session.current_step.active_tool_name
@@ -683,7 +664,7 @@ class TaskRuntime:
 
     def _handle_failure(
         self,
-        session: TaskSession,
+        session: Task,
         failure: ToolFailureObservation,
     ) -> None:
         step = session.current_step
@@ -743,7 +724,7 @@ class TaskRuntime:
         self._archive_and_advance(session)
 
     @staticmethod
-    def _archive_and_advance(session: TaskSession) -> None:
+    def _archive_and_advance(session: Task) -> None:
         archived = session.current_step
         session.step_history += (archived,)
         session.current_step = StepExecutionState(
@@ -760,7 +741,7 @@ class TaskRuntime:
             raise ValueError("max_steps must be non-negative")
 
         creation = self._tasks[task_id]
-        stop_reason = self._stop_reason(creation.session)
+        stop_reason = self._stop_reason(creation.task)
         print("[task_runtime]stop reason: ",stop_reason)
         if stop_reason is not None:
             return self._result(
@@ -771,7 +752,7 @@ class TaskRuntime:
 
         for steps in range(1, max_steps + 1):
             self.step(task_id)
-            stop_reason = self._stop_reason(creation.session)
+            stop_reason = self._stop_reason(creation.task)
             print("[task_runtime] stop_reason: ",stop_reason)
             if stop_reason is not None:
                 return self._result(
@@ -796,7 +777,7 @@ class TaskRuntime:
         runtime_result = self.run_until_blocked(task_id, max_steps)
         completion = runtime_result.completion
         if (
-            runtime_result.session.state is not TaskState.COMPLETED
+            runtime_result.task.state is not TaskState.COMPLETED
             or completion is None
         ):
             return runtime_result
@@ -831,7 +812,7 @@ class TaskRuntime:
         return self.subagent, self.executor
 
     @staticmethod
-    def _stop_reason(session: TaskSession) -> str | None:
+    def _stop_reason(session: Task) -> str | None:
         if session.state is TaskState.WAITING:
             return "waiting"
         if session.state is TaskState.COMPLETED:
@@ -848,9 +829,9 @@ class TaskRuntime:
 
     def _build_completion(
         self,
-        creation: TaskSessionCreation,
+        creation: TaskCreationResult,
     ) -> TaskCompletionPackage:
-        session = creation.session
+        session = creation.task
         user_input = session.handoff.trigger_event.payload.get("text", "")
         if not isinstance(user_input, str):
             user_input = str(user_input)
@@ -904,10 +885,10 @@ class TaskRuntime:
 
     def _generate_final_response(
         self,
-        creation: TaskSessionCreation,
+        creation: TaskCreationResult,
         tool_results: tuple[ToolResult, ...],
     ) -> tuple[str, str]:
-        session = creation.session
+        session = creation.task
         handoff = session.handoff
         trigger_payload = handoff.trigger_event.payload
         user_input = trigger_payload.get("text", "")
@@ -942,7 +923,7 @@ class TaskRuntime:
 
     @staticmethod
     def _execution_failures(
-        session: TaskSession,
+        session: Task,
     ) -> tuple[ToolFailureObservation, ...]:
         historical = tuple(
             failure
@@ -988,7 +969,7 @@ class TaskRuntime:
 
     def _result(
         self,
-        creation: TaskSessionCreation,
+        creation: TaskCreationResult,
         steps: int = 0,
         stop_reason: str | None = None,
         blocked: bool = False,
@@ -1008,18 +989,18 @@ class TaskRuntime:
         )
         return TaskRuntimeResult(
             handle=TaskHandle(
-                task_id=creation.session.task_id,
+                task_id=creation.task.task_id,
                 trace_id=creation.context.trace_id,
             ),
-            session=creation.session,
+            task=creation.task,
             context=creation.context,
-            completion=creation.session.completion,
+            completion=creation.task.completion,
             steps=steps,
             stop_reason=stop_reason,
             blocked=blocked,
             memory_result=memory_result,
             failure_reason=failure_reason,
-            logical_steps=len(creation.session.step_history),
+            logical_steps=len(creation.task.step_history),
             timing=timing,
         )
 
@@ -1038,7 +1019,7 @@ class TaskRuntime:
             payload=payload or {},
         )
 
-    def _timing_dict(self, creation: TaskSessionCreation) -> dict:
+    def _timing_dict(self, creation: TaskCreationResult) -> dict:
         snapshot = self.timing_recorder.snapshot(creation.context.trace_id)
         return {} if snapshot is None else snapshot.to_dict()
 

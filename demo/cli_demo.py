@@ -21,7 +21,9 @@ from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime
-from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
+from agent.subagent import SubAgent
+from runtime.executor import CapabilityExecutor
+from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
@@ -114,7 +116,7 @@ class DemoRuntime:
             llm_provider=llm_provider,
         )
         task_runtime = TaskRuntime(
-            session_manager=TaskSessionManager(
+            task_factory=TaskFactory(
                 allowed_tools=tool_manager.list_names_for_role("main_agent"),
                 skill_manager=skill_manager,
                 tool_manager=tool_manager,

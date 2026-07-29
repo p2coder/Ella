@@ -6,7 +6,7 @@ from typing import Any, Iterable, Mapping
 from prompts.engine import PromptEngine, PromptType, redact_prompt_text
 from providers.llm import LLMProvider
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
-from sessions.execution_state import ToolFailureObservation
+from tasks.state import ToolFailureObservation
 from tools.base import ToolResult
 
 
