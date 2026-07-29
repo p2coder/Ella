@@ -191,6 +191,6 @@ def test_complete_archives_current_step_without_executing_tool():
 
     runtime.step(handle.task_id)
 
-    assert session.state is TaskState.COMPLETED
+    assert session.state is TaskState.SUCCEEDED
     assert len(session.step_history) == 1
     assert executor.calls == [complete]

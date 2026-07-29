@@ -398,7 +398,12 @@ class TaskRuntime:
         print("[task_runtime.py]submit:submit event ",task_id)
         if task_id in self._tasks:
             raise ValueError(f"duplicate task_id: {task_id}")
+        creation.task.transition_to(TaskState.READY)
         self._tasks[task_id] = creation
+        self._persist(creation.task)
+        if self.task_queue is not None:
+            self.task_queue.enqueue(task_id)
+        self._trace_task(creation.task, "task", "submitted")
         self.timing_recorder.record_task_submitted(
             creation.context.trace_id,
             task_id=task_id,
@@ -416,96 +421,112 @@ class TaskRuntime:
 
     def step(self, task_id: str) -> TaskRuntimeResult:
         creation = self._tasks[task_id]
-        session = creation.task
-        if session.graph is not None and session.state is TaskState.RUNNING:
+        task = creation.task
+        if task.graph is not None and task.state is TaskState.RUNNING:
             return self._step_task_graph(creation)
         self.timing_recorder.record_task_processing_started(
             creation.context.trace_id
         )
 
-        if session.state in {
-            TaskState.COMPLETED,
+        if task.state in {
+            TaskState.SUCCEEDED,
             TaskState.FAILED,
-            TaskState.CANCELLED,
+            TaskState.KILLED,
+            TaskState.DELIVERED,
         }:
-            raise ValueError(f"cannot step terminal task: {session.state.value}")
-        if session.state is TaskState.CREATED:
-            session.transition_to(TaskState.PLANNING)
-            return self._result(creation)
-        if session.state is TaskState.READY:
-            session.transition_to(TaskState.PLANNING)
-            return self._result(creation)
+            raise ValueError(f"cannot step terminal task: {task.state.value}")
+        if task.state is TaskState.CREATED:
+            raise ValueError("CREATED task must be formulated before execution")
 
         subagent, executor = self._execution_components()
 
-        if session.state is TaskState.PLANNING:
-            session.current_strategy = subagent.select_strategy(
-                session.handoff,
+        if task.state is TaskState.READY:
+            task.current_strategy = subagent.select_strategy(
+                task.handoff,
                 creation.context,
-                session,
+                task,
             )
-            session.transition_to(TaskState.RUNNING)
+            task.transition_to(TaskState.RUNNING)
+            self._trace_task(
+                task,
+                "reasoning.strategy_selection",
+                "completed",
+                {"mode": task.current_strategy.mode},
+            )
             return self._result(creation)
 
-        if session.state is TaskState.REPLANNING:
+        if task.state is TaskState.RUNNING and task.current_strategy is None:
             subagent.skill_manager.refresh()
             executor.tool_manager.list_names()
-            session.current_strategy = subagent.select_strategy(
-                session.handoff,
+            task.current_strategy = subagent.select_strategy(
+                task.handoff,
                 creation.context,
-                session,
+                task,
             )
-            session.transition_to(TaskState.RUNNING)
+            task.task_local_state.pop("replan_requested", None)
+            self._trace_task(
+                task,
+                "reasoning.strategy_selection",
+                "refreshed",
+                {"mode": task.current_strategy.mode},
+            )
             return self._result(creation)
 
-        if session.state is TaskState.WAITING:
+        if task.state is TaskState.WAITING:
             raise ValueError("cannot step waiting task without a resume signal")
 
-        strategy = session.current_strategy
+        strategy = task.current_strategy
         if not isinstance(strategy, StrategyDecision):
             raise ValueError("running task requires a current strategy")
 
         self.timing_recorder.record_execution_started(creation.context.trace_id)
         decision = subagent.decide_next_action(
-            session.handoff,
+            task.handoff,
             creation.context,
-            session,
+            task,
             strategy,
         )
 
-        repair_violation = self._repair_violation(session, decision)
+        repair_violation = self._repair_violation(task, decision)
         if repair_violation is not None:
-            self._handle_failure(session, repair_violation)
+            self._handle_failure(task, repair_violation)
             return self._result(creation)
 
         execution = executor.execute(
             decision,
             strategy,
             creation.context,
-            session,
+            task,
         )
         print("[task_runtime]desicion action: ",decision.action)
         if execution.failure is not None:
-            self._handle_failure(session, execution.failure)
+            self._handle_failure(task, execution.failure)
             return self._result(creation)
 
         if execution.tool_result is not None:
-            session.tool_trace += (execution.tool_result.to_dict(),)
-            self._archive_and_advance(session)
+            task.tool_trace += (execution.tool_result.to_dict(),)
+            self._archive_and_advance(task)
 
         if execution.replan_required:
-            session.transition_to(TaskState.REPLANNING)
+            task.current_strategy = None
+            task.task_local_state["replan_requested"] = True
+            self._trace_task(
+                task,
+                "reasoning.execution_decision",
+                "replan_requested",
+                {"reason": decision.reason},
+            )
         elif decision.action == WAIT:
-            self._archive_and_advance(session)
-            session.transition_to(TaskState.WAITING)
+            self._archive_and_advance(task)
+            task.transition_to(TaskState.WAITING)
         elif decision.action == COMPLETE:
-            self._archive_and_advance(session)
+            self._archive_and_advance(task)
             self.timing_recorder.record_execution_completed(
                 creation.context.trace_id
             )
-            session.completion = self._build_completion(creation)
+            task.completion = self._build_completion(creation)
             self.timing_recorder.record_task_completed(creation.context.trace_id)
-            session.transition_to(TaskState.COMPLETED)
+            task.transition_to(TaskState.SUCCEEDED)
             return self._result(creation, stop_reason="completed")
 
         return self._result(creation)
@@ -777,7 +798,7 @@ class TaskRuntime:
         runtime_result = self.run_until_blocked(task_id, max_steps)
         completion = runtime_result.completion
         if (
-            runtime_result.task.state is not TaskState.COMPLETED
+            runtime_result.task.state is not TaskState.SUCCEEDED
             or completion is None
         ):
             return runtime_result
@@ -812,15 +833,19 @@ class TaskRuntime:
         return self.subagent, self.executor
 
     @staticmethod
-    def _stop_reason(session: Task) -> str | None:
-        if session.state is TaskState.WAITING:
+    def _stop_reason(task: Task) -> str | None:
+        if task.state is TaskState.WAITING:
             return "waiting"
-        if session.state is TaskState.COMPLETED:
+        if task.state is TaskState.SUCCEEDED:
             return "completed"
-        if session.state is TaskState.FAILED:
+        if task.state is TaskState.FAILED:
             return "failed"
-        if session.state is TaskState.CANCELLED:
-            return "cancelled"
+        if task.state is TaskState.KILLED:
+            return "killed"
+        if task.state is TaskState.UNCERTAIN:
+            return "uncertain"
+        if task.state is TaskState.DELIVERED:
+            return "delivered"
         return None
 
     @staticmethod

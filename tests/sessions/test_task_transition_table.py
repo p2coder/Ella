@@ -44,8 +44,8 @@ def test_uncertain_only_resolves_to_failed():
     )
 
 
-def test_legacy_states_remain_distinct_during_runtime_migration():
-    assert TaskState.PLANNING is not TaskState.FORMULATING
-    assert TaskState.REPLANNING is not TaskState.RUNNING
-    assert TaskState.COMPLETED is not TaskState.SUCCEEDED
-    assert TaskState.CANCELLED is not TaskState.KILLED
+def test_legacy_states_are_not_part_of_the_canonical_lifecycle():
+    assert "PLANNING" not in TaskState.__members__
+    assert "REPLANNING" not in TaskState.__members__
+    assert "COMPLETED" not in TaskState.__members__
+    assert "CANCELLED" not in TaskState.__members__

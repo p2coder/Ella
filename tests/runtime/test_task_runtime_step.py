@@ -139,21 +139,20 @@ def make_runtime(
 
 def advance_to_running(runtime: TaskRuntime, task_id: str) -> None:
     runtime.step(task_id)
-    runtime.step(task_id)
 
 
-def test_created_step_only_transitions_to_planning():
+def test_ready_step_selects_strategy_and_transitions_to_running():
     runtime, handle, subagent, executor = make_runtime()
 
     result = runtime.step(handle.task_id)
 
-    assert result.session.state is TaskState.PLANNING
-    assert subagent.select_count == 0
+    assert result.session.state is TaskState.RUNNING
+    assert subagent.select_count == 1
     assert subagent.decide_count == 0
     assert executor.execute_count == 0
 
 
-def test_planning_step_selects_strategy_and_moves_to_running():
+def test_running_step_executes_after_strategy_selection():
     runtime, handle, subagent, executor = make_runtime()
     runtime.step(handle.task_id)
 
@@ -162,8 +161,8 @@ def test_planning_step_selects_strategy_and_moves_to_running():
     assert result.session.state is TaskState.RUNNING
     assert result.session.current_strategy == make_strategy()
     assert subagent.select_count == 1
-    assert subagent.decide_count == 0
-    assert executor.execute_count == 0
+    assert subagent.decide_count == 1
+    assert executor.execute_count == 1
 
 
 def test_running_step_executes_exactly_one_decision_and_appends_tool_result():
@@ -185,13 +184,15 @@ def test_running_step_executes_exactly_one_decision_and_appends_tool_result():
     assert result.session.tool_trace == (tool_result.to_dict(),)
 
 
-def test_executor_replan_required_moves_task_to_replanning():
+def test_executor_replan_required_keeps_task_running_and_requests_refresh():
     runtime, handle, subagent, executor = make_runtime(replan_required=True)
     advance_to_running(runtime, handle.task_id)
 
     result = runtime.step(handle.task_id)
 
-    assert result.session.state is TaskState.REPLANNING
+    assert result.session.state is TaskState.RUNNING
+    assert result.session.current_strategy is None
+    assert result.session.task_local_state["replan_requested"] is True
     assert subagent.decide_count == 1
     assert executor.execute_count == 1
 
@@ -229,14 +230,14 @@ def test_complete_decision_finalizes_task():
 
     result = runtime.step(handle.task_id)
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert result.session.completion is result.completion
     assert result.completion is not None
 
 
 @pytest.mark.parametrize(
     "terminal_state",
-    (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED),
+    (TaskState.SUCCEEDED, TaskState.FAILED, TaskState.KILLED, TaskState.DELIVERED),
 )
 def test_terminal_states_reject_step(terminal_state: TaskState):
     runtime, handle, subagent, executor = make_runtime()

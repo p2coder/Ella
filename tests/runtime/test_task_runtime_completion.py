@@ -155,7 +155,7 @@ def test_complete_decision_transitions_session_to_completed():
 
     result = runtime.step(handle.task_id)
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert result.stop_reason == "completed"
     assert result.blocked is False
 

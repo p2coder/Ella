@@ -26,20 +26,12 @@ class TaskState(StrEnum):
     KILLED = "killed"
     DELIVERED = "delivered"
 
-    # Deprecated compatibility states used by the pre-Task aggregate runtime.
-    # They remain distinct until that runtime is migrated so its branch checks
-    # keep their original meaning.
-    PLANNING = "planning"
-    REPLANNING = "replanning"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-
 
 ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CREATED: frozenset(
         {
             TaskState.FORMULATING,
-            TaskState.PLANNING,
+            TaskState.READY,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
         }
@@ -47,7 +39,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.FORMULATING: frozenset(
         {
             TaskState.READY,
-            TaskState.RUNNING,
             TaskState.WAITING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
@@ -64,15 +55,12 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.RUNNING: frozenset(
         {
             TaskState.RUNNING,
-            TaskState.REPLANNING,
             TaskState.WAITING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
             TaskState.SUCCEEDED,
-            TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.UNCERTAIN,
-            TaskState.CANCELLED,
         }
     ),
     TaskState.WAITING: frozenset(
@@ -82,8 +70,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.RUNNING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
-            TaskState.PLANNING,
-            TaskState.CANCELLED,
         }
     ),
     TaskState.PAUSE_REQUESTED: frozenset(
@@ -108,29 +94,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.UNCERTAIN: frozenset({TaskState.FAILED}),
     TaskState.KILLED: frozenset(),
     TaskState.DELIVERED: frozenset(),
-    # Legacy lifecycle states remain until the graph runtime fully replaces the
-    # above; these entries only keep the current runtime runnable during staged
-    # migration.
-    TaskState.PLANNING: frozenset(
-        {
-            TaskState.RUNNING,
-            TaskState.REPLANNING,
-            TaskState.WAITING,
-            TaskState.FAILED,
-            TaskState.CANCELLED,
-        }
-    ),
-    TaskState.REPLANNING: frozenset(
-        {
-            TaskState.RUNNING,
-            TaskState.WAITING,
-            TaskState.COMPLETED,
-            TaskState.FAILED,
-            TaskState.CANCELLED,
-        }
-    ),
-    TaskState.COMPLETED: frozenset(),
-    TaskState.CANCELLED: frozenset(),
 }
 
 
