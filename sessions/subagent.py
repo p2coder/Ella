@@ -82,7 +82,6 @@ class SubAgent:
             reason=reason,
             initial_plan=initial_plan,
             completion_criteria=handoff.completion_criteria,
-            session_id=context.session_id,
             task_id=task_session.task_id,
             trace_id=context.trace_id,
         )
@@ -675,7 +674,6 @@ class SubAgent:
             return dict(examples[0])
         return {
             "task_goal": handoff.task_goal,
-            "session_id": context.session_id,
         }
 
     @staticmethod
@@ -761,7 +759,6 @@ class SubAgent:
             "screen_scene",
             {
                 "max_screenshots": 1,
-                "session_id": context.session_id,
                 "task_goal": handoff.task_goal,
             },
             (

@@ -63,10 +63,6 @@ class CameraSceneTool:
                         "type": "string",
                         "description": "Current task goal supplied by execution.",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "Current task session identifier.",
-                    },
                     "max_frames": {
                         "type": "number",
                         "description": "Maximum bounded frames to capture.",
@@ -163,7 +159,6 @@ class CameraSceneTool:
             {
                 "frames": tuple(frames),
                 "task_id": context.task_id,
-                "session_id": context.session_id,
                 "handoff_goal": context.handoff_goal,
             },
             trace_id=context.trace_id,
@@ -197,7 +192,6 @@ class CameraSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload=payload,
         )
@@ -247,7 +241,6 @@ class CameraSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={
                 "status": "unavailable",

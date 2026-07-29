@@ -91,19 +91,34 @@ class EffectiveToolExecutionMetadata:
     overridden_fields: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ToolResult:
     tool_name: str
     task_id: str
-    session_id: str
     trace_id: str
     payload: dict[str, Any]
+
+    def __init__(
+        self,
+        tool_name: str,
+        task_id: str,
+        trace_id: str,
+        payload: dict[str, Any],
+        session_id: str | None = None,
+    ) -> None:
+        object.__setattr__(self, "tool_name", tool_name)
+        object.__setattr__(self, "task_id", task_id)
+        object.__setattr__(self, "trace_id", trace_id)
+        object.__setattr__(self, "payload", payload)
+
+    @property
+    def session_id(self) -> str:
+        return self.task_id
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "task_id": self.task_id,
-            "session_id": self.session_id,
             "trace_id": self.trace_id,
             "payload": self.payload,
         }

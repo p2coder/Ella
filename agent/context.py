@@ -25,7 +25,6 @@ class AgentExecutionContext:
     agent_id: str
     agent_role: str
     parent_agent_id: str | None
-    session_id: str
     task_id: str
     trace_id: str
     handoff_goal: str
@@ -38,7 +37,6 @@ class AgentExecutionContext:
         agent_id: str,
         agent_role: str,
         parent_agent_id: str | None,
-        session_id: str,
         task_id: str,
         trace_id: str,
         handoff_goal: str,
@@ -46,6 +44,7 @@ class AgentExecutionContext:
         allowed_tools: tuple[str, ...] = (),
         permissions: tuple[str, ...] = (),
         capability_scope: CapabilityScope | None = None,
+        session_id: str | None = None,
     ) -> None:
         if capability_scope is None:
             capability_scope = CapabilityScope(
@@ -63,7 +62,6 @@ class AgentExecutionContext:
         object.__setattr__(self, "agent_id", agent_id)
         object.__setattr__(self, "agent_role", agent_role)
         object.__setattr__(self, "parent_agent_id", parent_agent_id)
-        object.__setattr__(self, "session_id", session_id)
         object.__setattr__(self, "task_id", task_id)
         object.__setattr__(self, "trace_id", trace_id)
         object.__setattr__(self, "handoff_goal", handoff_goal)
@@ -75,12 +73,16 @@ class AgentExecutionContext:
     def allowed_tools(self) -> tuple[str, ...]:
         return self.capability_scope.allowed_tools
 
+    @property
+    def session_id(self) -> str:
+        """Read-only compatibility view; task_id is the sole runtime identity."""
+        return self.task_id
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "agent_id": self.agent_id,
             "agent_role": self.agent_role,
             "parent_agent_id": self.parent_agent_id,
-            "session_id": self.session_id,
             "task_id": self.task_id,
             "trace_id": self.trace_id,
             "handoff_goal": self.handoff_goal,

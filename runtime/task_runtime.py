@@ -28,8 +28,11 @@ from .timing import (
 @dataclass(frozen=True, slots=True)
 class TaskHandle:
     task_id: str
-    session_id: str
     trace_id: str
+
+    @property
+    def session_id(self) -> str:
+        return self.task_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,23 +106,17 @@ class TaskRuntime:
             max_argument_retries=self.max_argument_retries,
         )
         task_id = creation.session.task_id
-        session_id = creation.session.session_id
         print("[task_runtime.py]submit:submit event ",task_id)
         if task_id in self._tasks:
             raise ValueError(f"duplicate task_id: {task_id}")
-        if session_id in self._sessions:
-            raise ValueError(f"duplicate session_id: {session_id}")
-
         self._tasks[task_id] = creation
-        self._sessions[session_id] = creation
+        self._sessions[task_id] = creation
         self.timing_recorder.record_task_submitted(
             creation.context.trace_id,
             task_id=task_id,
-            session_id=session_id,
         )
         return TaskHandle(
             task_id=task_id,
-            session_id=session_id,
             trace_id=creation.context.trace_id,
         )
 
@@ -425,7 +422,6 @@ class TaskRuntime:
             ToolResult(
                 tool_name=entry["tool_name"],
                 task_id=entry["task_id"],
-                session_id=entry["session_id"],
                 trace_id=entry["trace_id"],
                 payload=entry["payload"],
             )
@@ -566,7 +562,6 @@ class TaskRuntime:
         return TaskRuntimeResult(
             handle=TaskHandle(
                 task_id=creation.session.task_id,
-                session_id=creation.session.session_id,
                 trace_id=creation.context.trace_id,
             ),
             session=creation.session,

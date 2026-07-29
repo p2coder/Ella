@@ -60,29 +60,59 @@ class RouteDestinationRegistry:
         return tuple(self._destinations.values())
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class EventRouteResult:
     event: StandardizedEvent
     destination: RouteDestination
     reason: str
-    target_session_id: str | None = None
+    target_task_id: str | None = None
+
+    def __init__(
+        self,
+        event: StandardizedEvent,
+        destination: RouteDestination,
+        reason: str,
+        target_task_id: str | None = None,
+        target_session_id: str | None = None,
+    ) -> None:
+        object.__setattr__(self, "event", event)
+        object.__setattr__(self, "destination", destination)
+        object.__setattr__(self, "reason", reason)
+        object.__setattr__(
+            self, "target_task_id", target_task_id or target_session_id
+        )
+
+    @property
+    def target_session_id(self) -> str | None:
+        return self.target_task_id
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class SessionAwareEventRouter:
-    active_session_ids: set[str] | None = None
+    active_task_ids: set[str] | None = None
     destination_registry: RouteDestinationRegistry | None = None
 
-    def route(self, event: StandardizedEvent) -> EventRouteResult:
-        active_session_ids = self.active_session_ids or set()
+    def __init__(
+        self,
+        active_task_ids: set[str] | None = None,
+        destination_registry: RouteDestinationRegistry | None = None,
+        active_session_ids: set[str] | None = None,
+    ) -> None:
+        object.__setattr__(
+            self, "active_task_ids", active_task_ids or active_session_ids
+        )
+        object.__setattr__(self, "destination_registry", destination_registry)
 
-        session_id = self._session_id_for(event)
-        if session_id in active_session_ids:
+    def route(self, event: StandardizedEvent) -> EventRouteResult:
+        active_task_ids = self.active_task_ids or set()
+
+        task_id = self._task_id_for(event)
+        if task_id in active_task_ids:
             return EventRouteResult(
                 event=event,
                 destination=self._destination("SESSION_INBOX"),
                 reason="event targets an active task session",
-                target_session_id=session_id,
+                target_task_id=task_id,
             )
 
         if event.metadata.get("suppress") is True or event.event_type.endswith("_NOISE"):
@@ -119,8 +149,8 @@ class SessionAwareEventRouter:
             reason="event has no routeable session, ambient, or user-initiated signal",
         )
 
-    def _session_id_for(self, event: StandardizedEvent) -> str | None:
-        return event.target_session_id or event.caused_by_task_id
+    def _task_id_for(self, event: StandardizedEvent) -> str | None:
+        return event.caused_by_task_id or getattr(event, "target_task_id", None)
 
     def _destination(self, destination_name: str) -> RouteDestination:
         registry = self.destination_registry or RouteDestinationRegistry()

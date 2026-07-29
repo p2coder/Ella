@@ -55,7 +55,6 @@ class ToolTimingEntry:
 class RuntimeTimingSnapshot:
     trace_id: str
     task_id: str | None = None
-    session_id: str | None = None
     input_received_at: str | None = None
     task_submitted_at: str | None = None
     task_execution_started_at: str | None = None
@@ -82,7 +81,6 @@ class RuntimeTimingSnapshot:
         return {
             "trace_id": self.trace_id,
             "task_id": self.task_id,
-            "session_id": self.session_id,
             "input_received_at": self.input_received_at,
             "task_submitted_at": self.task_submitted_at,
             "task_execution_started_at": self.task_execution_started_at,
@@ -105,7 +103,6 @@ class RuntimeTimingSnapshot:
 class _RuntimeTimingTrace:
     trace_id: str
     task_id: str | None = None
-    session_id: str | None = None
     input_received_at: str | None = None
     task_submitted_at: str | None = None
     task_execution_started_at: str | None = None
@@ -128,7 +125,6 @@ class _RuntimeTimingTrace:
         return RuntimeTimingSnapshot(
             trace_id=self.trace_id,
             task_id=self.task_id,
-            session_id=self.session_id,
             input_received_at=self.input_received_at,
             task_submitted_at=self.task_submitted_at,
             task_execution_started_at=self.task_execution_started_at,
@@ -173,12 +169,10 @@ class RuntimeTimingRecorder:
         trace_id: str,
         *,
         task_id: str,
-        session_id: str,
     ) -> None:
         trace = self._trace(trace_id)
         submitted = perf_counter()
         trace.task_id = task_id
-        trace.session_id = session_id
         trace.task_submitted_at = _utc_now_iso()
         trace.task_submitted_perf = submitted
         self._task_to_trace[task_id] = trace_id
@@ -295,7 +289,6 @@ class NoOpRuntimeTimingRecorder:
         trace_id: str,
         *,
         task_id: str,
-        session_id: str,
     ) -> None:
         return None
 

@@ -20,10 +20,6 @@ class MemoryManagementRequest:
         return self.completion.context.task_id
 
     @property
-    def session_id(self) -> str:
-        return self.completion.context.session_id
-
-    @property
     def trace_id(self) -> str:
         return self.completion.context.trace_id
 
@@ -73,7 +69,6 @@ class MemoryManager:
         )
         return (
             f"## Task {request.task_id}\n"
-            f"- session_id: {request.session_id}\n"
             f"- trace_id: {request.trace_id}\n"
             f"{user_input_record}"
             f"- summary: {completion.summary}\n"
