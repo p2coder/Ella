@@ -1,19 +1,26 @@
 from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from agent.context import AgentExecutionContext
 from agent.final_response import FinalResponseGenerator
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
-from sessions.completion import TaskCompletionPackage
+from sessions.completion import FailureDeliveryPayload, TaskCompletionPackage
 from sessions.decision import CALL_TOOL, COMPLETE, WAIT
 from sessions.execution_state import (
     StepExecutionState,
+    DeliveryAttempt,
+    DeliveryOutcome,
+    DeliveryPayloadType,
+    TaskDeliveryRecord,
     TaskControlCommand,
     TaskControlResult,
     TaskControlType,
     ToolFailureKind,
     ToolFailureObservation,
+    UncertainResolutionRecord,
 )
 from sessions.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
@@ -35,7 +42,7 @@ from .timing import (
 )
 from .task_queue import TaskQueue
 from .task_store import TaskStore
-from .step_runtime import StepRuntime
+from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
 from .waiting import WaitingRegistry
 
 
@@ -288,6 +295,95 @@ class TaskRuntime:
         self._persist(task)
         return True
 
+    def resolve_uncertain_as_failed(self, task_id: str, reason: str) -> None:
+        task = self._tasks[task_id].task
+        if task.state is not TaskState.UNCERTAIN:
+            raise ValueError("only an UNCERTAIN Task can be resolved")
+        attempt = task.task_local_state.get("uncertain_attempt", {})
+        task.uncertain_resolution = UncertainResolutionRecord(
+            resolution="treated_as_failed",
+            tool_name=str(attempt.get("tool_name", "unknown_tool")),
+            arguments=dict(attempt.get("arguments", {})),
+            invoked_at=attempt.get("invoked_at"),
+            reason=reason,
+            possible_side_effects=tuple(
+                attempt.get("possible_side_effects", ("external outcome unknown",))
+            ),
+            resolved_at=datetime.now(timezone.utc),
+        )
+        task.failure = {
+            "code": "uncertain_outcome_treated_as_failed",
+            "message": reason,
+            "external_outcome_unknown": True,
+        }
+        task.failure_reason = reason
+        task.transition_to(TaskState.FAILED)
+        self._persist(task)
+
+    def deliver(self, task_id: str, sender) -> bool:
+        task = self._tasks[task_id].task
+        if task.state not in {TaskState.SUCCEEDED, TaskState.FAILED}:
+            raise ValueError("only SUCCEEDED or FAILED Tasks can be delivered")
+        delivery = task.delivery
+        if delivery is None:
+            delivery = self._new_delivery_record(task)
+        attempted_at = datetime.now(timezone.utc)
+        failure_code = None
+        try:
+            sender(delivery.payload)
+            succeeded = True
+        except Exception as error:
+            succeeded = False
+            failure_code = type(error).__name__
+        attempt = DeliveryAttempt(
+            attempt_id=f"delivery-{uuid4().hex}",
+            succeeded=succeeded,
+            attempted_at=attempted_at,
+            failure_code=failure_code,
+        )
+        task.delivery = replace(
+            delivery,
+            attempts=(*delivery.attempts, attempt),
+            delivered_at=attempted_at if succeeded else None,
+        )
+        if succeeded:
+            task.transition_to(TaskState.DELIVERED)
+        self._persist(task)
+        return succeeded
+
+    @staticmethod
+    def _new_delivery_record(task: Task) -> TaskDeliveryRecord:
+        if task.state is TaskState.SUCCEEDED:
+            payload = (
+                task.completion.to_dict()
+                if task.completion is not None
+                else {"task_goal": task.handoff.task_goal, "outcome": "succeeded"}
+            )
+            return TaskDeliveryRecord(
+                DeliveryOutcome.SUCCEEDED,
+                DeliveryPayloadType.SUCCESS_RESULT,
+                payload,
+            )
+        failure = task.failure if isinstance(task.failure, Mapping) else {}
+        unknown = ()
+        payload_type = DeliveryPayloadType.FAILURE_REPORT
+        if failure.get("external_outcome_unknown"):
+            payload_type = DeliveryPayloadType.UNCERTAIN_FAILURE_REPORT
+            unknown = tuple(
+                getattr(task.uncertain_resolution, "possible_side_effects", ())
+            )
+        payload = FailureDeliveryPayload(
+            task_goal=task.handoff.task_goal if task.handoff is not None else "",
+            reason=task.failure_reason or str(failure.get("message", "task failed")),
+            unknown_side_effects=unknown,
+        ).to_dict()
+        payload["message"] = FinalResponseGenerator.failure_report_text(payload)
+        return TaskDeliveryRecord(
+            DeliveryOutcome.FAILED,
+            payload_type,
+            payload,
+        )
+
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
         creation = self.session_manager.create_session(handoff)
@@ -469,6 +565,47 @@ class TaskRuntime:
                 context=task.execution_context,
                 strategy=strategy,
             )
+            if tick.execution_result is not None and tick.execution_result.uncertain:
+                tool_runs = dict(tick.graph_run.node_runs)
+                selected_tool_node = tick.selected_node_id
+                if selected_tool_node is not None:
+                    current_tool_run = tool_runs.get(selected_tool_node)
+                    if isinstance(current_tool_run, ToolNodeRun):
+                        tool_runs[selected_tool_node] = replace(
+                            current_tool_run,
+                            state=ToolNodeRunState.UNCERTAIN,
+                        )
+                uncertain_tool_graph = ToolGraphRun(
+                    tick.graph_run.definition,
+                    tool_runs,
+                )
+                runs[node_id] = {
+                    "state": "uncertain",
+                    "tool_graph_run": uncertain_tool_graph,
+                }
+                task.graph = TaskGraphRun(graph.definition, runs)
+                failure = tick.execution_result.failure
+                task.task_local_state["uncertain_attempt"] = {
+                    "tool_name": tick.execution_result.decision.tool_name,
+                    "arguments": tick.execution_result.decision.tool_input or {},
+                    "invoked_at": datetime.now(timezone.utc),
+                    "possible_side_effects": (
+                        "The Tool may have changed external state, but no result "
+                        "was confirmed.",
+                    ),
+                    "failure": None if failure is None else failure.to_dict(),
+                }
+                task.transition_to(TaskState.UNCERTAIN)
+                self._persist(task)
+                return self._result(
+                    creation,
+                    stop_reason="uncertain",
+                    blocked=True,
+                    failure_reason=(
+                        "Tool execution outcome is unknown; ordinary scheduling "
+                        "has stopped."
+                    ),
+                )
             runs[node_id] = {
                 "state": tick.step_state,
                 "tool_graph_run": tick.graph_run,

@@ -7,7 +7,7 @@ from agent.handoff import HandoffRequest
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from skill import SkillManager
 from tools import ToolManager, ToolResult
-from tools.base import invoke_tool
+from tools.base import ToolUncertainPolicy, invoke_tool
 
 from .decision import CALL_TOOL, REPLAN, ExecutionDecision
 from .execution_state import ToolFailureKind, ToolFailureObservation
@@ -26,6 +26,7 @@ class CapabilityExecutionResult:
     unavailable_tool: str | None = None
     failure: ToolFailureObservation | None = None
     raw_result: Any | None = field(default=None, repr=False, compare=False)
+    uncertain: bool = False
 
     def __post_init__(self) -> None:
         if self.tool_result is not None and self.failure is not None:
@@ -208,22 +209,46 @@ class CapabilityExecutor:
             )
         except Exception:
             duration_ms = round((perf_counter() - tool_started) * 1000, 3)
+            uncertain = _may_have_unconfirmed_side_effect(tool)
+            failure_code = (
+                "uncertain_tool_outcome"
+                if uncertain
+                else "tool_execution_failed"
+            )
             self.timing_recorder.record_tool_call(
                 context.trace_id,
                 tool_name=tool_name,
                 duration_ms=duration_ms,
                 success=False,
                 failure_kind=ToolFailureKind.TOOL_EXECUTION_FAILED.value,
-                failure_code="tool_execution_failed",
+                failure_code=failure_code,
             )
-            return self._failure(
+            result = self._failure(
                 decision=decision,
                 strategy=strategy,
                 task_session=task_session,
-                reason=f"tool {tool_name} execution failed",
+                reason=(
+                    f"tool {tool_name} was dispatched but its external outcome "
+                    "could not be confirmed"
+                    if uncertain
+                    else f"tool {tool_name} execution failed"
+                ),
                 kind=ToolFailureKind.TOOL_EXECUTION_FAILED,
-                code="tool_execution_failed",
+                code=failure_code,
                 unavailable_tool=tool_name,
+            )
+            if not uncertain:
+                return result
+            return CapabilityExecutionResult(
+                decision=result.decision,
+                strategy=result.strategy,
+                tool_result=None,
+                replan_required=False,
+                failure_reason=result.failure_reason,
+                unavailable_tool=result.unavailable_tool,
+                failure=result.failure,
+                raw_result=result.raw_result,
+                uncertain=True,
             )
         tool_duration_ms = round((perf_counter() - tool_started) * 1000, 3)
         output_schema = _tool_schema(tool, "output_schema")
@@ -453,6 +478,16 @@ def _failure_from_tool_result(
         message=message,
         arguments=arguments,
         retryable=False,
+    )
+
+
+def _may_have_unconfirmed_side_effect(tool: Any) -> bool:
+    definition = getattr(tool, "definition", None)
+    return bool(
+        definition is not None
+        and getattr(definition, "side_effecting", False)
+        and getattr(definition, "uncertain_policy", None)
+        is ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH
     )
 
 

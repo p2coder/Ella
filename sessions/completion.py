@@ -7,6 +7,27 @@ from tools import ToolResult
 
 
 @dataclass(frozen=True, slots=True)
+class FailureDeliveryPayload:
+    task_goal: str
+    reason: str
+    trustworthy_observations: tuple[str, ...] = ()
+    failed_nodes: tuple[str, ...] = ()
+    user_fixable_causes: tuple[str, ...] = ()
+    unknown_side_effects: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_goal": self.task_goal,
+            "outcome": "failed",
+            "reason": self.reason,
+            "trustworthy_observations": self.trustworthy_observations,
+            "failed_nodes": self.failed_nodes,
+            "user_fixable_causes": self.user_fixable_causes,
+            "unknown_side_effects": self.unknown_side_effects,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class TaskCompletionPackage:
     context: AgentExecutionContext
     summary: str

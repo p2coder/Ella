@@ -31,6 +31,16 @@ class FinalResponseGenerator:
         default_factory=NoOpRuntimeTimingRecorder
     )
 
+    @staticmethod
+    def failure_report_text(payload: Mapping[str, Any]) -> str:
+        """Render an already-decided failure without another model call."""
+        reason = str(payload.get("reason", "任务未能完成"))
+        unknown = tuple(payload.get("unknown_side_effects", ()))
+        suffix = ""
+        if unknown:
+            suffix = " 外部操作结果仍未知：" + "；".join(map(str, unknown))
+        return f"任务未能完成：{reason}。{suffix}".strip()
+
     def generate(
         self,
         *,
