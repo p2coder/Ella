@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import StrEnum
 import inspect
 from typing import Any, Protocol, Sequence
 import warnings
@@ -16,6 +17,22 @@ def _require_object_schema(field_name: str, value: dict[str, Any]) -> None:
         raise ValueError(f"{field_name} must be an object schema")
 
 
+class ToolIdempotency(StrEnum):
+    IDEMPOTENT = "idempotent"
+    NON_IDEMPOTENT = "non_idempotent"
+    UNKNOWN = "unknown"
+
+
+class ToolUncertainPolicy(StrEnum):
+    NEVER = "never"
+    POSSIBLE_AFTER_DISPATCH = "possible_after_dispatch"
+
+
+_OVERRIDABLE_EXECUTION_FIELDS = frozenset(
+    {"idempotency", "side_effecting", "uncertain_policy"}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
     name: str
@@ -24,14 +41,34 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     input_examples: Sequence[dict[str, Any]]
     output_schema: dict[str, Any]
+    version: str = "1"
+    idempotency: ToolIdempotency = ToolIdempotency.UNKNOWN
+    side_effecting: bool = False
+    uncertain_policy: ToolUncertainPolicy = ToolUncertainPolicy.NEVER
+    overridable_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_non_empty_string("name", self.name)
         _require_non_empty_string("description", self.description)
         _require_non_empty_string("schema_version", self.schema_version)
+        _require_non_empty_string("version", self.version)
         _require_object_schema("input_schema", self.input_schema)
         _require_object_schema("output_schema", self.output_schema)
+        if not isinstance(self.idempotency, ToolIdempotency):
+            raise TypeError("idempotency must be a ToolIdempotency")
+        if not isinstance(self.side_effecting, bool):
+            raise TypeError("side_effecting must be a boolean")
+        if not isinstance(self.uncertain_policy, ToolUncertainPolicy):
+            raise TypeError("uncertain_policy must be a ToolUncertainPolicy")
+        overridable_fields = tuple(dict.fromkeys(self.overridable_fields))
+        unknown_fields = set(overridable_fields) - _OVERRIDABLE_EXECUTION_FIELDS
+        if unknown_fields:
+            raise ValueError(
+                "unsupported overridable fields: "
+                + ", ".join(sorted(unknown_fields))
+            )
         object.__setattr__(self, "input_examples", tuple(self.input_examples))
+        object.__setattr__(self, "overridable_fields", overridable_fields)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +79,16 @@ class ToolDefinition:
             "input_examples": self.input_examples,
             "output_schema": self.output_schema,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveToolExecutionMetadata:
+    name: str
+    version: str
+    idempotency: ToolIdempotency
+    side_effecting: bool
+    uncertain_policy: ToolUncertainPolicy
+    overridden_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

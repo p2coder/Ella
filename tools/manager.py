@@ -3,7 +3,15 @@ from dataclasses import dataclass, field
 from agent.context import AgentExecutionContext
 from registries.tool_registry import ToolRegistry
 
-from .base import Tool, ToolDefinition, ToolResult, invoke_tool
+from .base import (
+    EffectiveToolExecutionMetadata,
+    Tool,
+    ToolDefinition,
+    ToolIdempotency,
+    ToolResult,
+    ToolUncertainPolicy,
+    invoke_tool,
+)
 
 
 class CapabilityUnavailableError(RuntimeError):
@@ -32,6 +40,53 @@ class ToolManager:
 
     def get_tool(self, tool_name: str) -> Tool | None:
         return self.registry.get(tool_name)
+
+    def resolve_execution_metadata(
+        self,
+        tool_name: str,
+        tool_version: str,
+        execution_override: dict[str, object] | None = None,
+    ) -> EffectiveToolExecutionMetadata:
+        tool = self.registry.get(tool_name)
+        if tool is None:
+            raise CapabilityUnavailableError(tool_name, "not registered")
+        definition = tool.definition
+        if definition.version != tool_version:
+            raise CapabilityUnavailableError(
+                tool_name,
+                f"version {tool_version} is not registered",
+            )
+
+        override = dict(execution_override or {})
+        forbidden = set(override) - set(definition.overridable_fields)
+        if forbidden:
+            raise ValueError(
+                "tool execution override is not allowed for: "
+                + ", ".join(sorted(forbidden))
+            )
+
+        values: dict[str, object] = {
+            "idempotency": definition.idempotency,
+            "side_effecting": definition.side_effecting,
+            "uncertain_policy": definition.uncertain_policy,
+        }
+        values.update(override)
+        try:
+            idempotency = ToolIdempotency(values["idempotency"])
+            uncertain_policy = ToolUncertainPolicy(values["uncertain_policy"])
+        except ValueError as exc:
+            raise ValueError("invalid tool execution override value") from exc
+        if not isinstance(values["side_effecting"], bool):
+            raise ValueError("side_effecting override must be a boolean")
+
+        return EffectiveToolExecutionMetadata(
+            name=definition.name,
+            version=definition.version,
+            idempotency=idempotency,
+            side_effecting=values["side_effecting"],
+            uncertain_policy=uncertain_policy,
+            overridden_fields=tuple(sorted(override)),
+        )
 
     def list_definitions(
         self, context: AgentExecutionContext
