@@ -45,6 +45,13 @@ class TaskScheduler:
             }:
                 self.recovery_queue.enqueue(record.task.task_id)
 
+    def waiting_tasks(self) -> tuple[Task, ...]:
+        return tuple(
+            record.task
+            for record in self.store.list()
+            if record.task.state is TaskState.WAITING
+        )
+
     def next_recovery(self) -> StoredTask | None:
         task_id = self.recovery_queue.dequeue()
         if task_id is None:

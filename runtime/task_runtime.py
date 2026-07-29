@@ -36,6 +36,7 @@ from .timing import (
 from .task_queue import TaskQueue
 from .task_store import TaskStore
 from .step_runtime import StepRuntime
+from .waiting import WaitingRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class TaskRuntime:
     step_runtime: StepRuntime | None = None
     max_runtime_ticks: int = 100
     max_steps: int = 20
+    waiting_registry: WaitingRegistry | None = None
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskSessionCreation] = field(
         default_factory=dict,
@@ -107,6 +109,7 @@ class TaskRuntime:
         step_runtime: StepRuntime | None = None,
         max_runtime_ticks: int = 100,
         max_steps: int = 20,
+        waiting_registry: WaitingRegistry | None = None,
     ) -> None:
         if max_argument_retries < 0:
             raise ValueError("max_argument_retries must be non-negative")
@@ -121,6 +124,7 @@ class TaskRuntime:
         self.step_runtime = step_runtime
         self.max_runtime_ticks = max_runtime_ticks
         self.max_steps = max_steps
+        self.waiting_registry = waiting_registry
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._sessions = {}
@@ -254,6 +258,35 @@ class TaskRuntime:
         if accepted:
             self._persist(task)
         return result
+
+    def enter_waiting(self, task_id: str, condition) -> None:
+        task = self._tasks[task_id].task
+        if task.state is not TaskState.RUNNING:
+            raise ValueError("only RUNNING Task may enter WAITING")
+        task.waiting_condition = condition
+        task.transition_to(TaskState.WAITING)
+        if self.waiting_registry is not None:
+            self.waiting_registry.register(task_id, condition)
+        self._persist(task)
+
+    def wake_waiting(
+        self, task_id: str, *, correlation_key: str | None = None, now=None
+    ) -> bool:
+        task = self._tasks[task_id].task
+        if task.state is not TaskState.WAITING or task.waiting_condition is None:
+            return False
+        registry = self.waiting_registry or WaitingRegistry()
+        if self.waiting_registry is None:
+            registry.register(task_id, task.waiting_condition)
+        if not registry.should_wake(task_id, correlation_key=correlation_key, now=now):
+            return False
+        task.waiting_condition = None
+        task.transition_to(TaskState.READY)
+        registry.remove(task_id)
+        if self.task_queue is not None:
+            self.task_queue.enqueue(task_id)
+        self._persist(task)
+        return True
 
     def submit(self, handoff: HandoffRequest) -> TaskHandle:
         
