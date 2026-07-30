@@ -1,51 +1,57 @@
-def myformat(s):
-    result=[]
-    # current 当前行
-    current=[]
-    instring=False
-    escape=False
-    left=0
-    right=0
-    # print(len(s))
-    for k in range(len(s)):
-        # 字符串内部与结尾
-        i=s[k]
-        # print(i)
-        if instring:
-            current.append(i)
-            if escape:
-                escape=False
-            elif i=='\\':
-                escape=True
-            elif i=='"':
-                instring=False
-            continue
-        # 字符串起始
-        if i=='"':
-            instring=True
-            current.append(i)
-        elif i=='{':
-            # 非字符串内的{,是一个对象的开始，重点判断要不要换行
-            # 换行交给}判断
-            left+=1
-            current.append(i)
-        elif i=='}':
-            right+=1
-            current.append(i)
-            if left==right:
-                # 换行
-                current.append('\n')
-                # 添加到result，current重置
-                # result.append(current)
-                # current=""
-        else:
-            current.append(i)
-    return current
-    
-s="{\"a\\\"\": [{\"a\": 1}, {\"b\": 2}]}{\"a\": {\"b\": 1}}{}"
-ss="{\"\\a\": \"\\a\"}{\"a\": {\"b\": 1}}{}"
-a=myformat(s)
-print("".join(a))
+import sys
+name=['Helm','Gloves','Boots','Sword']
+reinforce_avaliable=[1,1,1,1]
+reinforce_coin_cost=[[30],[40],[10],[50]]
+reinforce_strength_get=[[20],[30],[10],[50]]
+coins=100
+def get_max(name,reinforce_avaliable,reinforce_coin_cost,reinforce_strength_get,coins):
+    # name[i]:第i件装备名称
+    # reinforce_avaliable[i]:装备i剩余可强化次数
+    # reinforce_coin_cost[i][j]:装备i第j+1次强化消耗的金币
+    # reinforce_strength_get[i][j]:装备i第j+1次强化获得的战力
+    # coins:金币数量
 
 
-        
+    # 记录强化结果
+    reinforce=[0]*len(reinforce_avaliable)
+    final_strength=0
+    reinforce_total=reinforce_avaliable.copy()
+    n=len(name)
+
+    def backtrace(strength,current_coin,n):
+        # 回溯，每次尝试强化一次装备，记录当次战力，如果钱不够或者所有装备强化完成，那么返回
+        # 利用一个available_reinforce列表来记录强化次数，availabl_reinforce[i]表示装备i剩余可强化次数
+        if current_coin<0 or sum(reinforce_avaliable)<1e-6:
+            nonlocal final_strength,reinforce
+            if strength>final_strength:
+                final_strength=strength
+                for i in range(len(reinforce)):
+                    reinforce[i]=reinforce_total[i]-reinforce_avaliable[i]
+            return
+        for i in range(n):
+            # 对第i件装备操作
+            if reinforce_avaliable[i]==0:
+                # 当前装备不可强化了
+                continue
+            # 强化一次当前装备
+            times=reinforce_total[i]-reinforce_avaliable[i]
+            reinforce_avaliable[i]-=1
+            strength+=reinforce_strength_get[i][times]
+            current_coin-=reinforce_coin_cost[i][times]
+
+            backtrace(strength,current_coin,n)
+
+            current_coin+=reinforce_coin_cost[i][times]
+            strength-=reinforce_strength_get[i][times]
+            reinforce_avaliable[i]+=1
+        return
+    backtrace(0,coins,n)
+
+
+
+    return reinforce,final_strength
+a,b=get_max(name,reinforce_avaliable,reinforce_coin_cost,reinforce_strength_get,coins)
+print(a,b)
+# for line in sys.stdin:
+#     a = line.split()
+#     print(int(a[0]) + int(a[1]))

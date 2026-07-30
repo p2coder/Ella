@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from config.config import MEMORY_PATH
 from tasks.completion import TaskCompletionPackage
 
 
@@ -39,7 +40,7 @@ class MemoryQueryResult:
 
 @dataclass(frozen=True, slots=True)
 class MemoryManager:
-    memory_path: Path = Path("memory/memory.md")
+    memory_path: Path = MEMORY_PATH
 
     def handle(self, request: MemoryManagementRequest) -> MemoryWriteResult:
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)

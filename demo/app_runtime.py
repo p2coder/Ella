@@ -9,7 +9,7 @@ class AppRuntime:
         self._demo_runtime = demo_runtime
 
     @classmethod
-    def create_default(cls, memory_path: Path) -> "AppRuntime":
+    def create_default(cls, memory_path: Path | None = None) -> "AppRuntime":
         from demo.cli_demo import DemoRuntime
 
         return cls(DemoRuntime.create_default(memory_path))

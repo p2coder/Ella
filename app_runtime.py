@@ -5,6 +5,7 @@ from typing import Callable
 from uuid import uuid4
 
 from agent.final_response import FinalResponseGenerator
+from config.config import PROJECT_ROOT
 from config.settings import load_settings
 from devices.factory import DeviceFactory
 from demo.display_snapshot import (
@@ -45,8 +46,6 @@ from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 from tools.plan import PlanUpdateTool, PlanWrittenTool
 
-DEFAULT_MEMORY_PATH = Path("/Users/wx/ella-runtime-memory.md")
-PROJECT_ROOT = Path(__file__).resolve().parent
 MAX_APP_STEPS = 20
 
 
@@ -67,7 +66,7 @@ class AppRuntime:
     @classmethod
     def create_default(
         cls,
-        memory_path: Path = DEFAULT_MEMORY_PATH,
+        memory_path: Path | None = None,
     ) -> "AppRuntime":
         settings = load_settings()
         provider_factory = ProviderFactory()
@@ -76,7 +75,7 @@ class AppRuntime:
         multimodal_provider = provider_factory.multimodal()
         camera_provider = device_factory.camera()
         timing_recorder = RuntimeTimingRecorder()
-        trace_recorder = TraceRecorder.for_directory(PROJECT_ROOT / "trace")
+        trace_recorder = TraceRecorder.for_directory(settings.trace_directory)
 
         skill_manager = SkillManager(
             loader=SkillLoader(PROJECT_ROOT / "skill" / "skills")
@@ -109,7 +108,7 @@ class AppRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
-        plan_store = PlanStore(PROJECT_ROOT / "output" / "plans")
+        plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
         tool_manager.register(PlanUpdateTool(plan_store))
 
@@ -133,7 +132,7 @@ class AppRuntime:
                 tool_manager=tool_manager,
                 timing_recorder=timing_recorder,
             ),
-            memory_manager=MemoryManager(memory_path),
+            memory_manager=MemoryManager(memory_path or settings.memory_path),
             final_response_generator=FinalResponseGenerator(
                 prompt_engine=PromptEngine(),
                 llm_provider=llm_provider,
@@ -451,19 +450,48 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     lines = []
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
-        ("task_formulation", snapshot.task_formulation_duration_ms),
+        ("task_formulation_stage", snapshot.task_formulation_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("llm_total", snapshot.total_llm_duration_ms),
-        ("tool_total", snapshot.total_tool_duration_ms),
-        ("final_response", snapshot.final_response_generation_duration_ms),
-        ("total_execution", snapshot.total_execution_duration_ms),
+        ("planning", snapshot.planning_duration_ms),
+        ("runtime_execution", snapshot.total_execution_duration_ms),
+        ("final_response_stage", snapshot.final_response_generation_duration_ms),
+        ("end_to_end", snapshot.end_to_end_duration_ms),
     )
     for label, value in values:
+        if value is not None:
+            lines.append(f"{label}: {value}ms")
+
+    llm_by_boundary = _llm_timing_by_boundary(snapshot)
+    for boundary in (
+        "task_formulation",
+        "strategy_selection",
+        "execution_decision",
+        "final_response",
+    ):
+        value = llm_by_boundary.get(boundary)
+        if value is not None:
+            lines.append(f"llm:{boundary}: {value}ms")
+
+    totals = (
+        ("llm_total_all_boundaries", snapshot.total_llm_duration_ms),
+        ("tool_total", snapshot.total_tool_duration_ms),
+    )
+    for label, value in totals:
         if value is not None:
             lines.append(f"{label}: {value}ms")
     for entry in snapshot.tool_calls:
         lines.append(f"tool:{entry.tool_name}: {entry.duration_ms}ms")
     return "\n".join(lines)
+
+
+def _llm_timing_by_boundary(task_timing) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for entry in task_timing.llm_calls:
+        totals[entry.boundary] = round(
+            totals.get(entry.boundary, 0.0) + entry.duration_ms,
+            3,
+        )
+    return totals
 
 
 def _find_tool_result(
