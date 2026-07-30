@@ -49,75 +49,17 @@ def test_new_task_session_starts_created_with_empty_task_local_results():
 @pytest.mark.parametrize(
     ("path", "expected"),
     (
-        ((TaskState.PLANNING,), TaskState.PLANNING),
-        ((TaskState.PLANNING, TaskState.RUNNING), TaskState.RUNNING),
-        ((TaskState.PLANNING, TaskState.WAITING), TaskState.WAITING),
-        ((TaskState.PLANNING, TaskState.FAILED), TaskState.FAILED),
-        ((TaskState.PLANNING, TaskState.CANCELLED), TaskState.CANCELLED),
-        (
-            (TaskState.PLANNING, TaskState.RUNNING, TaskState.REPLANNING),
-            TaskState.REPLANNING,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.RUNNING, TaskState.WAITING),
-            TaskState.WAITING,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.RUNNING, TaskState.COMPLETED),
-            TaskState.COMPLETED,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.RUNNING, TaskState.FAILED),
-            TaskState.FAILED,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.RUNNING, TaskState.CANCELLED),
-            TaskState.CANCELLED,
-        ),
-        (
-            (
-                TaskState.PLANNING,
-                TaskState.RUNNING,
-                TaskState.REPLANNING,
-                TaskState.RUNNING,
-            ),
-            TaskState.RUNNING,
-        ),
-        (
-            (
-                TaskState.PLANNING,
-                TaskState.RUNNING,
-                TaskState.REPLANNING,
-                TaskState.WAITING,
-            ),
-            TaskState.WAITING,
-        ),
-        (
-            (
-                TaskState.PLANNING,
-                TaskState.RUNNING,
-                TaskState.REPLANNING,
-                TaskState.FAILED,
-            ),
-            TaskState.FAILED,
-        ),
-        (
-            (
-                TaskState.PLANNING,
-                TaskState.RUNNING,
-                TaskState.REPLANNING,
-                TaskState.CANCELLED,
-            ),
-            TaskState.CANCELLED,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.WAITING, TaskState.PLANNING),
-            TaskState.PLANNING,
-        ),
-        (
-            (TaskState.PLANNING, TaskState.WAITING, TaskState.CANCELLED),
-            TaskState.CANCELLED,
-        ),
+        ((TaskState.FORMULATING,), TaskState.FORMULATING),
+        ((TaskState.FORMULATING, TaskState.READY), TaskState.READY),
+        ((TaskState.READY, TaskState.RUNNING), TaskState.RUNNING),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.WAITING), TaskState.WAITING),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.SUCCEEDED), TaskState.SUCCEEDED),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.FAILED), TaskState.FAILED),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.UNCERTAIN), TaskState.UNCERTAIN),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.WAITING, TaskState.RUNNING), TaskState.RUNNING),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.SUCCEEDED, TaskState.DELIVERED), TaskState.DELIVERED),
+        ((TaskState.READY, TaskState.RUNNING, TaskState.FAILED, TaskState.DELIVERED), TaskState.DELIVERED),
+        ((TaskState.READY, TaskState.KILL_REQUESTED, TaskState.KILLED), TaskState.KILLED),
     ),
 )
 def test_valid_state_transitions_succeed(path, expected):
@@ -132,11 +74,11 @@ def test_valid_state_transitions_succeed(path, expected):
     "next_state",
     (
         TaskState.RUNNING,
-        TaskState.REPLANNING,
         TaskState.WAITING,
-        TaskState.COMPLETED,
+        TaskState.SUCCEEDED,
         TaskState.FAILED,
-        TaskState.CANCELLED,
+        TaskState.KILLED,
+        TaskState.DELIVERED,
     ),
 )
 def test_invalid_transition_raises_clear_error(next_state):
@@ -153,18 +95,23 @@ def test_invalid_transition_raises_clear_error(next_state):
 
 @pytest.mark.parametrize(
     "terminal_state",
-    (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED),
+    (TaskState.KILLED, TaskState.DELIVERED),
 )
 def test_terminal_states_cannot_transition(terminal_state):
     session = make_session()
-    transition_path(session, TaskState.PLANNING, TaskState.RUNNING)
-    if terminal_state == TaskState.COMPLETED:
-        session.transition_to(terminal_state)
+    if terminal_state is TaskState.KILLED:
+        transition_path(session, TaskState.KILL_REQUESTED, TaskState.KILLED)
     else:
-        session.transition_to(terminal_state)
+        transition_path(
+            session,
+            TaskState.READY,
+            TaskState.RUNNING,
+            TaskState.SUCCEEDED,
+            TaskState.DELIVERED,
+        )
 
     with pytest.raises(ValueError, match="invalid task state transition"):
-        session.transition_to(TaskState.PLANNING)
+        session.transition_to(TaskState.READY)
 
 
 def test_strategy_completion_and_failure_are_task_local():

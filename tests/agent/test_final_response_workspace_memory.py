@@ -135,7 +135,8 @@ def test_fallback_does_not_use_old_task_completed_template():
     result = generate(provider)
 
     assert not result.final_response.startswith("Task completed:")
-    assert "根据当前信息" in result.final_response
+    assert result.final_response.startswith("我已经根据当前可用信息完成了处理")
+    assert "Identify what the user is holding" not in result.final_response
 
 
 def test_final_response_generator_does_not_execute_tools_or_write_memory():

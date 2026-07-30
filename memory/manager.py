@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from sessions.completion import TaskCompletionPackage
+from config.config import MEMORY_PATH
+from tasks.completion import TaskCompletionPackage
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,10 +19,6 @@ class MemoryManagementRequest:
     @property
     def task_id(self) -> str:
         return self.completion.context.task_id
-
-    @property
-    def session_id(self) -> str:
-        return self.completion.context.session_id
 
     @property
     def trace_id(self) -> str:
@@ -43,7 +40,7 @@ class MemoryQueryResult:
 
 @dataclass(frozen=True, slots=True)
 class MemoryManager:
-    memory_path: Path = Path("memory/memory.md")
+    memory_path: Path = MEMORY_PATH
 
     def handle(self, request: MemoryManagementRequest) -> MemoryWriteResult:
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +70,6 @@ class MemoryManager:
         )
         return (
             f"## Task {request.task_id}\n"
-            f"- session_id: {request.session_id}\n"
             f"- trace_id: {request.trace_id}\n"
             f"{user_input_record}"
             f"- summary: {completion.summary}\n"

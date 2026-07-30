@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 from agent.final_response import FinalResponseGenerator
+from config.config import PROJECT_ROOT
 from config.settings import load_settings
 from devices.factory import DeviceFactory
 from demo.display_snapshot import (
@@ -19,8 +20,11 @@ from memory import MemoryManager
 from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
+from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime
-from sessions import CapabilityExecutor, SubAgent, TaskSessionManager
+from agent.subagent import SubAgent
+from runtime.executor import CapabilityExecutor
+from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
@@ -32,11 +36,10 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
+from tools.plan import PlanUpdateTool, PlanWrittenTool
 
 
 DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
-DEFAULT_MEMORY_PATH = Path("/tmp/ella-runtime-mvp-memory.md")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_DEMO_STEPS = 20
 
 
@@ -56,7 +59,7 @@ class DemoRuntime:
     @classmethod
     def create_default(
         cls,
-        memory_path: Path = DEFAULT_MEMORY_PATH,
+        memory_path: Path | None = None,
     ) -> "DemoRuntime":
         settings = load_settings()
         provider_factory = ProviderFactory()
@@ -98,6 +101,9 @@ class DemoRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        plan_store = PlanStore(settings.plan_directory)
+        tool_manager.register(PlanWrittenTool(plan_store))
+        tool_manager.register(PlanUpdateTool(plan_store))
 
         subagent = SubAgent(
             skill_manager,
@@ -109,7 +115,7 @@ class DemoRuntime:
             llm_provider=llm_provider,
         )
         task_runtime = TaskRuntime(
-            session_manager=TaskSessionManager(
+            task_factory=TaskFactory(
                 allowed_tools=tool_manager.list_names_for_role("main_agent"),
                 skill_manager=skill_manager,
                 tool_manager=tool_manager,
@@ -120,7 +126,7 @@ class DemoRuntime:
                 skill_manager=skill_manager,
                 tool_manager=tool_manager,
             ),
-            memory_manager=MemoryManager(memory_path),
+            memory_manager=MemoryManager(memory_path or settings.memory_path),
             final_response_generator=final_response_generator,
         )
         event_runtime = EventRuntime(
@@ -351,7 +357,7 @@ class DemoRuntime:
 
 def run_demo(
     input_text: str = DEFAULT_INPUT,
-    memory_path: Path = DEFAULT_MEMORY_PATH,
+    memory_path: Path | None = None,
     runtime: DemoRuntime | None = None,
 ) -> str:
     if runtime is not None:

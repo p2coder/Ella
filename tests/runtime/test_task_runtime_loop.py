@@ -132,9 +132,9 @@ def test_run_until_blocked_repeatedly_calls_step_until_waiting():
 @pytest.mark.parametrize(
     ("terminal_state", "stop_reason"),
     (
-        (TaskState.COMPLETED, "completed"),
+        (TaskState.SUCCEEDED, "completed"),
         (TaskState.FAILED, "failed"),
-        (TaskState.CANCELLED, "cancelled"),
+        (TaskState.KILLED, "killed"),
     ),
 )
 def test_run_until_blocked_stops_on_existing_terminal_state(
@@ -158,7 +158,7 @@ def test_run_until_blocked_stops_when_task_completes():
 
     result = runtime.run_until_blocked(handle.task_id, max_steps=10)
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert result.completion is not None
     assert result.steps == 3
     assert result.stop_reason == "completed"

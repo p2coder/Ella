@@ -1,6 +1,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from . import config as user_config
@@ -35,6 +36,12 @@ CONFIG_NAMES = {
     "ELLA_CAMERA_TASK_FPS": "CAMERA_TASK_FPS",
     "ELLA_USE_REAL_PROVIDERS": "USE_REAL_PROVIDERS",
     "ELLA_DEBUG_STORE_RAW_MEDIA": "DEBUG_STORE_RAW_MEDIA",
+    "ELLA_MEMORY_PATH": "MEMORY_PATH",
+    "ELLA_TRACE_DIRECTORY": "TRACE_DIRECTORY",
+    "ELLA_PLAN_DIRECTORY": "PLAN_DIRECTORY",
+    "ELLA_TASK_CHECKPOINT_DIRECTORY": "TASK_CHECKPOINT_DIRECTORY",
+    "ELLA_DISPLAY_DIRECTORY": "DISPLAY_DIRECTORY",
+    "ELLA_RAW_MEDIA_DIRECTORY": "RAW_MEDIA_DIRECTORY",
 }
 
 SAFE_DEFAULTS = {
@@ -55,6 +62,16 @@ SAFE_DEFAULTS = {
     "ELLA_CAMERA_TASK_FPS": 1,
     "ELLA_USE_REAL_PROVIDERS": False,
     "ELLA_DEBUG_STORE_RAW_MEDIA": False,
+    "ELLA_MEMORY_PATH": user_config.PROJECT_ROOT / "memory" / "memory.md",
+    "ELLA_TRACE_DIRECTORY": user_config.PROJECT_ROOT / "trace",
+    "ELLA_PLAN_DIRECTORY": user_config.PROJECT_ROOT / "output" / "plans",
+    "ELLA_TASK_CHECKPOINT_DIRECTORY": (
+        user_config.PROJECT_ROOT / "output" / "tasks"
+    ),
+    "ELLA_DISPLAY_DIRECTORY": user_config.PROJECT_ROOT / "output" / "display",
+    "ELLA_RAW_MEDIA_DIRECTORY": (
+        user_config.PROJECT_ROOT / "output" / "raw_media"
+    ),
 }
 
 
@@ -77,6 +94,16 @@ class EllaSettings:
     mic_capture_duration_seconds: int = 5
     mic_sample_rate: int = 16_000
     mic_channels: int = 1
+    memory_path: Path = user_config.PROJECT_ROOT / "memory" / "memory.md"
+    trace_directory: Path = user_config.PROJECT_ROOT / "trace"
+    plan_directory: Path = user_config.PROJECT_ROOT / "output" / "plans"
+    task_checkpoint_directory: Path = (
+        user_config.PROJECT_ROOT / "output" / "tasks"
+    )
+    display_directory: Path = user_config.PROJECT_ROOT / "output" / "display"
+    raw_media_directory: Path = (
+        user_config.PROJECT_ROOT / "output" / "raw_media"
+    )
 
 
 def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
@@ -134,6 +161,15 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
             "ELLA_MIC_CHANNELS",
             1,
         ),
+        memory_path=_path(values, "ELLA_MEMORY_PATH"),
+        trace_directory=_path(values, "ELLA_TRACE_DIRECTORY"),
+        plan_directory=_path(values, "ELLA_PLAN_DIRECTORY"),
+        task_checkpoint_directory=_path(
+            values,
+            "ELLA_TASK_CHECKPOINT_DIRECTORY",
+        ),
+        display_directory=_path(values, "ELLA_DISPLAY_DIRECTORY"),
+        raw_media_directory=_path(values, "ELLA_RAW_MEDIA_DIRECTORY"),
     )
 
 
@@ -172,6 +208,13 @@ def _optional_string(env: Mapping[str, Any], name: str) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _path(values: Mapping[str, Any], name: str) -> Path:
+    value = values.get(name)
+    if value is None or str(value).strip() == "":
+        raise ValueError(f"path value for {name} must not be empty")
+    return Path(value).expanduser().resolve()
 
 
 def _boolean(

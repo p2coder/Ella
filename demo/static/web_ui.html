@@ -160,6 +160,52 @@
       color: #eef1f4;
     }
 
+    .task-state-board {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-muted);
+    }
+
+    .task-state-value {
+      display: inline-flex;
+      width: fit-content;
+      min-height: 30px;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #dcefe9;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .task-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .task-controls[hidden] {
+      display: none;
+    }
+
+    .task-controls button {
+      min-width: 88px;
+      height: 38px;
+    }
+
+    .task-controls .danger {
+      background: #b42318;
+    }
+
+    .task-controls .danger:disabled {
+      background: #9ba7b3;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -391,6 +437,33 @@
                 <span class="field-label">Timing</span>
                 <p class="field-value">{{timing_summary}}</p>
               </div>
+              <div class="field">
+                <span class="field-label">Task state</span>
+                <div class="task-state-board" data-task-id="{{task_id}}" data-task-state="{{task_state}}">
+                  <span class="task-state-value">{{task_state_label}}</span>
+                  <div class="task-controls" aria-label="Task controls" {{controls_hidden}}>
+                    <button type="button" data-task-action="pause" {{pause_disabled}}>Pause</button>
+                    <button type="button" data-task-action="resume" {{resume_disabled}}>Resume</button>
+                    <button type="button" class="danger" data-task-action="kill" {{kill_disabled}}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Task ID</span>
+                <p class="field-value">{{task_id}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Active steps</span>
+                <p class="field-value">{{active_step_ids}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Waiting / paused origin</span>
+                <p class="field-value">{{waiting_condition}} {{paused_from_state}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Outcome / delivery</span>
+                <p class="field-value">{{terminal_outcome}} {{delivery_status}}</p>
+              </div>
             </div>
           </section>
 
@@ -518,6 +591,53 @@
             "Microphone request failed. Text input remains available.";
         }
       });
+
+      document.querySelectorAll("[data-task-action]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const board = button.closest("[data-task-id]");
+          const taskId = board ? board.dataset.taskId : "";
+          if (!taskId || button.disabled) {
+            return;
+          }
+          document.querySelectorAll("[data-task-action]").forEach(
+            (control) => { control.disabled = true; },
+          );
+          const response = await fetch("/task/control", {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: new URLSearchParams({
+              task_id: taskId,
+              action: button.dataset.taskAction,
+            }),
+          });
+          await replacePage(response);
+        });
+      });
+
+      scheduleTaskRefresh();
+    }
+
+    function scheduleTaskRefresh() {
+      const board = document.querySelector("[data-task-id]");
+      if (!board || !board.dataset.taskId) {
+        return;
+      }
+      const terminalOrBlocked = new Set([
+        "paused", "succeeded", "failed", "uncertain", "killed", "delivered",
+      ]);
+      if (terminalOrBlocked.has(board.dataset.taskState)) {
+        return;
+      }
+      window.setTimeout(async () => {
+        try {
+          const response = await fetch(
+            `/task?task_id=${encodeURIComponent(board.dataset.taskId)}`,
+          );
+          await replacePage(response);
+        } catch (error) {
+          scheduleTaskRefresh();
+        }
+      }, 500);
     }
 
     bindWebUIInteractions();

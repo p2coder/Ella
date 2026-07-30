@@ -4,6 +4,24 @@ API keys may be set here for local development, but environment variables are
 recommended for secrets. Runtime parsing and validation remain in settings.py.
 """
 
+from pathlib import Path
+
+
+# Storage paths
+#
+# All default paths are derived from this repository root, so moving or cloning
+# the project does not require editing machine-specific absolute paths. Change
+# STORAGE_ROOT only when runtime data should live outside the repository.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STORAGE_ROOT = PROJECT_ROOT
+OUTPUT_DIRECTORY = STORAGE_ROOT / "output"
+MEMORY_PATH = STORAGE_ROOT / "memory" / "memory.md"
+TRACE_DIRECTORY = STORAGE_ROOT / "trace"
+PLAN_DIRECTORY = OUTPUT_DIRECTORY / "plans"
+TASK_CHECKPOINT_DIRECTORY = OUTPUT_DIRECTORY / "tasks"
+DISPLAY_DIRECTORY = OUTPUT_DIRECTORY / "display"
+RAW_MEDIA_DIRECTORY = OUTPUT_DIRECTORY / "raw_media"
+
 MODEL_PROVIDER = "qwen"
 
 QWEN_API_KEY = None

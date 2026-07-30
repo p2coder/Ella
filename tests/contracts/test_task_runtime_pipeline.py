@@ -86,12 +86,10 @@ def test_event_runtime_is_raw_signal_entrypoint_and_task_runtime_orchestrates(
     assert publication.task_handle.task_id == "task-contract"
     session = task_runtime.get_session(publication.task_handle.task_id)
     context = task_runtime.get_context(publication.task_handle.task_id)
-    assert session.state is TaskState.CREATED
+    assert session.state is TaskState.READY
     assert session.handoff.trigger_event is publication.event
     assert context.trace_id == "trace-contract"
 
-    task_runtime.step(publication.task_handle.task_id)
-    assert session.state is TaskState.PLANNING
     task_runtime.step(publication.task_handle.task_id)
     assert session.state is TaskState.RUNNING
     assert session.current_strategy.skill_name == "going_out"
@@ -108,7 +106,7 @@ def test_task_runtime_generates_completion_and_is_memory_path(tmp_path: Path):
         max_steps=20,
     )
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert isinstance(result.completion, TaskCompletionPackage)
     assert result.completion.context is result.context
     assert tuple(item.tool_name for item in result.completion.tool_results) == (
@@ -134,13 +132,13 @@ def test_task_runtime_observes_skill_and_tool_hot_plug_during_current_session(
     task_id = publication.task_handle.task_id
 
     task_runtime.step(task_id)
-    task_runtime.step(task_id)
     session = task_runtime.get_session(task_id)
     assert session.current_strategy.skill_name == "going_out"
 
     tool_manager.unregister("mock_vision_summary")
     task_runtime.step(task_id)
-    assert session.state is TaskState.REPLANNING
+    assert session.state is TaskState.RUNNING
+    assert session.current_strategy is None
 
     tool_manager.register(MockVisionSummaryTool())
     skill_manager.unregister("going_out")

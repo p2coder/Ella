@@ -129,7 +129,7 @@ def test_completed_task_is_submitted_to_memory_manager(tmp_path: Path):
 
     result = runtime.run_until_complete(handle.task_id, max_steps=10)
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert result.completion is not None
     assert result.memory_result == MemoryWriteResult(
         action="recorded",
@@ -181,7 +181,7 @@ def test_memory_failure_preserves_completion_and_returns_reason():
 
     result = runtime.run_until_complete(handle.task_id, max_steps=10)
 
-    assert result.session.state is TaskState.COMPLETED
+    assert result.session.state is TaskState.SUCCEEDED
     assert result.completion is result.session.completion
     assert result.completion is not None
     assert result.completion.user_visible_output.final_response

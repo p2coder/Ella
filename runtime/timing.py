@@ -55,9 +55,9 @@ class ToolTimingEntry:
 class RuntimeTimingSnapshot:
     trace_id: str
     task_id: str | None = None
-    session_id: str | None = None
     input_received_at: str | None = None
     task_submitted_at: str | None = None
+    task_processing_started_at: str | None = None
     task_execution_started_at: str | None = None
     trigger_pipeline_duration_ms: float | None = None
     routing_duration_ms: float | None = None
@@ -65,7 +65,9 @@ class RuntimeTimingSnapshot:
     task_formulation_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
+    planning_duration_ms: float | None = None
     total_execution_duration_ms: float | None = None
+    end_to_end_duration_ms: float | None = None
     final_response_generation_duration_ms: float | None = None
     llm_calls: tuple[LLMTimingEntry, ...] = ()
     tool_calls: tuple[ToolTimingEntry, ...] = ()
@@ -82,9 +84,9 @@ class RuntimeTimingSnapshot:
         return {
             "trace_id": self.trace_id,
             "task_id": self.task_id,
-            "session_id": self.session_id,
             "input_received_at": self.input_received_at,
             "task_submitted_at": self.task_submitted_at,
+            "task_processing_started_at": self.task_processing_started_at,
             "task_execution_started_at": self.task_execution_started_at,
             "trigger_pipeline_duration_ms": self.trigger_pipeline_duration_ms,
             "routing_duration_ms": self.routing_duration_ms,
@@ -92,7 +94,9 @@ class RuntimeTimingSnapshot:
             "task_formulation_duration_ms": self.task_formulation_duration_ms,
             "input_to_task_submitted_duration_ms": self.input_to_task_submitted_duration_ms,
             "queue_wait_duration_ms": self.queue_wait_duration_ms,
+            "planning_duration_ms": self.planning_duration_ms,
             "total_execution_duration_ms": self.total_execution_duration_ms,
+            "end_to_end_duration_ms": self.end_to_end_duration_ms,
             "final_response_generation_duration_ms": self.final_response_generation_duration_ms,
             "total_llm_duration_ms": self.total_llm_duration_ms,
             "total_tool_duration_ms": self.total_tool_duration_ms,
@@ -105,12 +109,13 @@ class RuntimeTimingSnapshot:
 class _RuntimeTimingTrace:
     trace_id: str
     task_id: str | None = None
-    session_id: str | None = None
     input_received_at: str | None = None
     task_submitted_at: str | None = None
+    task_processing_started_at: str | None = None
     task_execution_started_at: str | None = None
     input_started_perf: float | None = None
     task_submitted_perf: float | None = None
+    task_processing_started_perf: float | None = None
     execution_started_perf: float | None = None
     execution_completed_perf: float | None = None
     trigger_pipeline_duration_ms: float | None = None
@@ -119,7 +124,9 @@ class _RuntimeTimingTrace:
     task_formulation_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
+    planning_duration_ms: float | None = None
     total_execution_duration_ms: float | None = None
+    end_to_end_duration_ms: float | None = None
     final_response_generation_duration_ms: float | None = None
     llm_calls: list[LLMTimingEntry] = field(default_factory=list)
     tool_calls: list[ToolTimingEntry] = field(default_factory=list)
@@ -128,9 +135,9 @@ class _RuntimeTimingTrace:
         return RuntimeTimingSnapshot(
             trace_id=self.trace_id,
             task_id=self.task_id,
-            session_id=self.session_id,
             input_received_at=self.input_received_at,
             task_submitted_at=self.task_submitted_at,
+            task_processing_started_at=self.task_processing_started_at,
             task_execution_started_at=self.task_execution_started_at,
             trigger_pipeline_duration_ms=self.trigger_pipeline_duration_ms,
             routing_duration_ms=self.routing_duration_ms,
@@ -138,7 +145,9 @@ class _RuntimeTimingTrace:
             task_formulation_duration_ms=self.task_formulation_duration_ms,
             input_to_task_submitted_duration_ms=self.input_to_task_submitted_duration_ms,
             queue_wait_duration_ms=self.queue_wait_duration_ms,
+            planning_duration_ms=self.planning_duration_ms,
             total_execution_duration_ms=self.total_execution_duration_ms,
+            end_to_end_duration_ms=self.end_to_end_duration_ms,
             final_response_generation_duration_ms=self.final_response_generation_duration_ms,
             llm_calls=tuple(self.llm_calls),
             tool_calls=tuple(self.tool_calls),
@@ -173,12 +182,10 @@ class RuntimeTimingRecorder:
         trace_id: str,
         *,
         task_id: str,
-        session_id: str,
     ) -> None:
         trace = self._trace(trace_id)
         submitted = perf_counter()
         trace.task_id = task_id
-        trace.session_id = session_id
         trace.task_submitted_at = _utc_now_iso()
         trace.task_submitted_perf = submitted
         self._task_to_trace[task_id] = trace_id
@@ -191,6 +198,19 @@ class RuntimeTimingRecorder:
             trace.input_started_perf
         )
 
+    def record_task_processing_started(self, trace_id: str) -> None:
+        trace = self._trace(trace_id)
+        if trace.task_processing_started_perf is not None:
+            return
+        started = perf_counter()
+        trace.task_processing_started_perf = started
+        trace.task_processing_started_at = _utc_now_iso()
+        if trace.task_submitted_perf is not None:
+            trace.queue_wait_duration_ms = _duration_ms(
+                trace.task_submitted_perf,
+                started,
+            )
+
     def record_execution_started(self, trace_id: str) -> None:
         trace = self._trace(trace_id)
         if trace.execution_started_perf is not None:
@@ -198,9 +218,9 @@ class RuntimeTimingRecorder:
         started = perf_counter()
         trace.execution_started_perf = started
         trace.task_execution_started_at = _utc_now_iso()
-        if trace.task_submitted_perf is not None:
-            trace.queue_wait_duration_ms = _duration_ms(
-                trace.task_submitted_perf,
+        if trace.task_processing_started_perf is not None:
+            trace.planning_duration_ms = _duration_ms(
+                trace.task_processing_started_perf,
                 started,
             )
 
@@ -214,6 +234,12 @@ class RuntimeTimingRecorder:
             trace.execution_started_perf,
             completed,
         )
+
+    def record_task_completed(self, trace_id: str) -> None:
+        trace = self._trace(trace_id)
+        if trace.input_started_perf is None:
+            return
+        trace.end_to_end_duration_ms = _duration_ms(trace.input_started_perf)
 
     def record_llm_call(
         self,
@@ -295,17 +321,22 @@ class NoOpRuntimeTimingRecorder:
         trace_id: str,
         *,
         task_id: str,
-        session_id: str,
     ) -> None:
         return None
 
     def record_input_to_task_submitted(self, trace_id: str) -> None:
         return None
 
+    def record_task_processing_started(self, trace_id: str) -> None:
+        return None
+
     def record_execution_started(self, trace_id: str) -> None:
         return None
 
     def record_execution_completed(self, trace_id: str) -> None:
+        return None
+
+    def record_task_completed(self, trace_id: str) -> None:
         return None
 
     def record_llm_call(self, trace_id: str, **kwargs: Any) -> None:

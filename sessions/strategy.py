@@ -1,13 +1,5 @@
-from dataclasses import dataclass
+"""Deprecated compatibility alias for agent strategy decisions."""
 
+from agent.strategy import StrategyDecision
 
-@dataclass(frozen=True, slots=True)
-class StrategyDecision:
-    mode: str
-    skill_name: str | None
-    reason: str
-    initial_plan: tuple[str, ...] | None
-    completion_criteria: tuple[str, ...]
-    session_id: str | None = None
-    task_id: str | None = None
-    trace_id: str | None = None
+__all__ = ["StrategyDecision"]

@@ -155,18 +155,33 @@ class EventRuntime:
                 reason="presence runtime did not allow event",
             )
 
+        task_handle = self.task_runtime.create_task(event)
+        self.task_runtime.begin_formulation(task_handle.task_id)
         stage_started = perf_counter()
-        handoff = self.main_agent.create_handoff(
-            trigger_event=event,
-            user_preference_summary=self.user_preference_summary,
-            environment_summary=self.environment_summary,
-        )
+        try:
+            handoff = self.main_agent.create_handoff(
+                trigger_event=event,
+                user_preference_summary=self.user_preference_summary,
+                environment_summary=self.environment_summary,
+                task_id=task_handle.task_id,
+            )
+        except Exception as exc:
+            self.task_runtime.fail_formulation(task_handle.task_id, str(exc))
+            return EventRuntimeResult(
+                event=event,
+                route=route,
+                submitted=False,
+                task_handle=task_handle,
+                reason="task formulation failed",
+            )
         self.timing_recorder.record_stage_duration(
             event.trace_id,
             "task_formulation_duration_ms",
             stage_started,
         )
-        task_handle = self.task_runtime.submit(handoff)
+        task_handle = self.task_runtime.submit_formulated(
+            task_handle.task_id, handoff
+        )
         self.timing_recorder.record_input_to_task_submitted(event.trace_id)
         return EventRuntimeResult(
             event=event,

@@ -10,10 +10,6 @@ TASK_CONTEXT_INPUT_PROPERTIES = {
         "type": "string",
         "description": "Current task goal supplied by the execution boundary.",
     },
-    "session_id": {
-        "type": "string",
-        "description": "Current task session identifier.",
-    },
 }
 
 
@@ -66,7 +62,6 @@ class MockWeatherTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={
                 "summary": "Light rain is possible later today.",
@@ -117,7 +112,6 @@ class MockVisionSummaryTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={
                 "summary": "Desk contains a laptop, headphones, and a water bottle.",
@@ -167,7 +161,6 @@ class MockChecklistTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={
                 "items": ("phone", "keys", "wallet", "umbrella"),

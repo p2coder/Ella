@@ -33,3 +33,27 @@ def test_main_module_exposes_web_entrypoint(monkeypatch):
     assert callable(module.main)
     assert module.main() == 0
     assert calls == [runtime]
+
+
+def test_final_ownership_modules_importable():
+    from agent.decision import ExecutionDecision
+    from agent.strategy import StrategyDecision
+    from agent.subagent import SubAgent
+    from runtime.executor import CapabilityExecutor
+    from tasks.factory import TaskFactory
+    from tasks.graph import TaskGraphDefinition
+    from tasks.state import StepState
+    from tasks.task import Task
+
+    assert all(
+        (
+            ExecutionDecision,
+            StrategyDecision,
+            SubAgent,
+            CapabilityExecutor,
+            TaskFactory,
+            TaskGraphDefinition,
+            StepState,
+            Task,
+        )
+    )

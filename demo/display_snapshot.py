@@ -50,6 +50,13 @@ class RunDisplaySnapshot:
     strategy_selection_prompt_text: str = ""
     execution_decision_prompt_text: str = ""
     timing_summary: str = ""
+    task_id: str = ""
+    task_state: str = ""
+    active_step_ids: tuple[str, ...] = ()
+    waiting_condition: str = ""
+    paused_from_state: str = ""
+    terminal_outcome: str = ""
+    delivery_status: str = ""
 
     prompt_display_fields: ClassVar[tuple[str, ...]] = (
         "task_formulation_prompt_text",
@@ -104,6 +111,13 @@ class RunDisplaySnapshot:
             "final_response": self.final_response,
             "memory_status": self.memory_status,
             "timing_summary": self.timing_summary,
+            "task_id": self.task_id,
+            "task_state": self.task_state,
+            "active_step_ids": self.active_step_ids,
+            "waiting_condition": self.waiting_condition,
+            "paused_from_state": self.paused_from_state,
+            "terminal_outcome": self.terminal_outcome,
+            "delivery_status": self.delivery_status,
             "prompt_display_fields": self.prompt_display_fields,
         }
 

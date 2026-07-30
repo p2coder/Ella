@@ -83,7 +83,7 @@ def test_archived_step_is_not_changed_when_current_step_is_replaced():
 def test_existing_task_state_transitions_remain_compatible():
     session = make_session("state")
 
-    session.transition_to(TaskState.PLANNING)
+    session.transition_to(TaskState.READY)
     session.transition_to(TaskState.RUNNING)
 
     assert session.state is TaskState.RUNNING

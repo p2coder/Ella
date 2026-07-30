@@ -43,10 +43,6 @@ class ScreenSceneTool:
                         "type": "string",
                         "description": "Current task goal supplied by execution.",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "Current task session identifier.",
-                    },
                     "max_screenshots": {
                         "type": "number",
                         "description": "Maximum bounded screenshots to capture.",
@@ -120,7 +116,6 @@ class ScreenSceneTool:
             {
                 "frames": tuple(frames),
                 "task_id": context.task_id,
-                "session_id": context.session_id,
                 "handoff_goal": context.handoff_goal,
             },
             trace_id=context.trace_id,
@@ -154,7 +149,6 @@ class ScreenSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload=payload,
         )
@@ -202,7 +196,6 @@ class ScreenSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={
                 "status": "unavailable",

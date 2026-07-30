@@ -117,12 +117,21 @@ def test_runtime_timing_records_publish_queue_llm_tool_and_final_response(tmp_pa
     assert snapshot.session_id == "session-timing"
     assert snapshot.input_received_at is not None
     assert snapshot.task_submitted_at is not None
+    assert snapshot.task_processing_started_at is not None
     assert snapshot.task_execution_started_at is not None
     assert snapshot.input_to_task_submitted_duration_ms is not None
     assert snapshot.task_formulation_duration_ms is not None
     assert snapshot.queue_wait_duration_ms is not None
+    assert snapshot.planning_duration_ms is not None
     assert snapshot.final_response_generation_duration_ms is not None
     assert snapshot.total_execution_duration_ms is not None
+    assert snapshot.end_to_end_duration_ms is not None
+    assert snapshot.planning_duration_ms >= next(
+        entry.duration_ms
+        for entry in snapshot.llm_calls
+        if entry.boundary == "strategy_selection"
+    )
+    assert snapshot.queue_wait_duration_ms >= 0
     assert {entry.boundary for entry in snapshot.llm_calls} >= {
         "task_formulation",
         "strategy_selection",
