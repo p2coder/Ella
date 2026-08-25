@@ -143,6 +143,9 @@ class SubAgent:
                     "visible_tools": serialized,
                     "observations": observations,
                     "current_step": self._step_context(task),
+                    "decision_repair": task.task_local_state.get(
+                        "decision_repair"
+                    ),
                 },
             },
         )
@@ -323,9 +326,9 @@ class SubAgent:
         observations: tuple[dict[str, Any], ...],
     ) -> ExecutionDecision:
         action = payload.get("action")
-        decision_reason = payload.get("decision_reason")
+        decision_reason = payload.get("decision_reason", payload.get("reason"))
         if not isinstance(decision_reason, str) or not decision_reason.strip():
-            raise DecisionValidationError("decision_reason is required")
+            decision_reason = f"Model selected {action or 'an unspecified action'}."
         if action == SUBMIT_RESULT:
             summary = payload.get("completion_summary")
             refs = payload.get("evidence_refs", ())

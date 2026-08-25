@@ -6,6 +6,7 @@ from agent.decision import (
     ExecutionDecision,
     SUPPORTED_EXECUTION_ACTIONS,
 )
+from agent.subagent import SubAgent
 
 
 def test_action_protocol_contains_only_call_tool_and_submit_result() -> None:
@@ -36,3 +37,34 @@ def test_removed_complete_action_is_rejected() -> None:
             "Legacy result.",
             (),
         )
+
+
+def test_submit_result_does_not_fail_when_explanatory_reason_is_missing() -> None:
+    decision = SubAgent._decision_from_payload(
+        {
+            "action": "SUBMIT_RESULT",
+            "completion_summary": "The requested report is ready.",
+            "evidence_refs": [],
+        },
+        (),
+        (),
+    )
+
+    assert decision.action == SUBMIT_RESULT
+    assert decision.completion_summary == "The requested report is ready."
+    assert decision.decision_reason == "Model selected SUBMIT_RESULT."
+
+
+def test_reason_alias_is_normalized_for_submit_result() -> None:
+    decision = SubAgent._decision_from_payload(
+        {
+            "action": "SUBMIT_RESULT",
+            "reason": "The evidence is sufficient.",
+            "completion_summary": "The requested report is ready.",
+            "evidence_refs": [],
+        },
+        (),
+        (),
+    )
+
+    assert decision.decision_reason == "The evidence is sufficient."
