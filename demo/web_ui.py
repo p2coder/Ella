@@ -5,6 +5,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 import json
 import re
+import sys
 from threading import Lock
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
@@ -26,6 +27,14 @@ class WebUIResponse:
     status: int
     body: str
     content_type: str = "text/html; charset=utf-8"
+
+
+class _QuietClientDisconnectMixin:
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        error = sys.exception()
+        if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 
 class LocalWebUI:
@@ -343,6 +352,12 @@ def create_server(
 ) -> ThreadingHTTPServer:
     web_ui = LocalWebUI(app_runtime)
 
+    class LocalThreadingHTTPServer(
+        _QuietClientDisconnectMixin,
+        ThreadingHTTPServer,
+    ):
+        pass
+
     class RequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if urlsplit(self.path).path == "/task-events":
@@ -408,7 +423,7 @@ def create_server(
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-    server = ThreadingHTTPServer((host, port), RequestHandler)
+    server = LocalThreadingHTTPServer((host, port), RequestHandler)
     server.daemon_threads = True
     return server
 
