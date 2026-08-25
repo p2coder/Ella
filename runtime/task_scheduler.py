@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from sessions.session import Task, TaskState
+from tasks.task import Task, TaskState
 
 from .task_queue import TaskQueue
 from .task_store import StoredTask, TaskStore, TaskVersionConflict
@@ -23,7 +23,7 @@ class TaskScheduler:
             record = self.store.load(task_id)
             if record is None or record.task.state is not TaskState.READY:
                 continue
-            record.task.transition_to(TaskState.RUNNING)
+            record.task.transition_to(TaskState.REASONING)
             try:
                 self.store.save(record.task, expected_version=record.version)
             except TaskVersionConflict:
@@ -39,18 +39,12 @@ class TaskScheduler:
             if state is TaskState.READY:
                 self.queue.enqueue(record.task.task_id)
             elif state in {
-                TaskState.RUNNING,
+                TaskState.REASONING,
+                TaskState.TOOL_EXECUTION,
                 TaskState.PAUSE_REQUESTED,
                 TaskState.KILL_REQUESTED,
             }:
                 self.recovery_queue.enqueue(record.task.task_id)
-
-    def waiting_tasks(self) -> tuple[Task, ...]:
-        return tuple(
-            record.task
-            for record in self.store.list()
-            if record.task.state is TaskState.WAITING
-        )
 
     def next_recovery(self) -> StoredTask | None:
         task_id = self.recovery_queue.dequeue()

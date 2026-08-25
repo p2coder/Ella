@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from time import perf_counter
 
 from agent.main_agent import MainAgent
+from agent.handoff import HandoffRequest
 from events import RawSignal, StandardizedEvent
 from events.trigger_pipeline import (
     CliTextToStandardizedEventStage,
@@ -90,12 +91,18 @@ class EventRuntime:
         self.main_agent = active_agent
         self.llm_provider = active_agent.llm_provider
         self.task_runtime = task_runtime or TaskRuntime()
+        configure_formulation = getattr(
+            self.task_runtime,
+            "configure_formulation",
+            None,
+        )
+        if callable(configure_formulation):
+            configure_formulation(self._formulate_task)
         self.timing_recorder = recorder
         self.user_preference_summary = user_preference_summary
         self.environment_summary = environment_summary
 
     def publish(self, raw_signal: RawSignal) -> EventRuntimeResult:
-        print("[event_runtime.py]line89: publish")
         self.timing_recorder.start_input(raw_signal.trace_id)
         stage_started = perf_counter()
         event = self.trigger_pipeline.run(raw_signal)
@@ -155,7 +162,39 @@ class EventRuntime:
                 reason="presence runtime did not allow event",
             )
 
-        task_handle = self.task_runtime.create_task(event)
+        create_task = getattr(self.task_runtime, "create_task", None)
+        if not callable(create_task):
+            stage_started = perf_counter()
+            handoff = self.main_agent.create_handoff(
+                trigger_event=event,
+                user_preference_summary=self.user_preference_summary,
+                environment_summary=self.environment_summary,
+            )
+            self.timing_recorder.record_stage_duration(
+                event.trace_id,
+                "task_formulation_duration_ms",
+                stage_started,
+            )
+            task_handle = self.task_runtime.submit(handoff)
+            self.timing_recorder.record_input_to_task_submitted(event.trace_id)
+            return EventRuntimeResult(
+                event=event,
+                route=route,
+                submitted=True,
+                task_handle=task_handle,
+                reason="event submitted to task runtime",
+            )
+
+        task_handle = create_task(event)
+        if bool(getattr(self.task_runtime, "is_running", False)):
+            self.timing_recorder.record_input_to_task_submitted(event.trace_id)
+            return EventRuntimeResult(
+                event=event,
+                route=route,
+                submitted=True,
+                task_handle=task_handle,
+                reason="event accepted for asynchronous task formulation",
+            )
         self.task_runtime.begin_formulation(task_handle.task_id)
         stage_started = perf_counter()
         try:
@@ -190,3 +229,22 @@ class EventRuntime:
             task_handle=task_handle,
             reason="event submitted to task runtime",
         )
+
+    def _formulate_task(self, task) -> HandoffRequest:
+        event = task.source_event
+        if event is None:
+            raise ValueError("Task formulation requires a source event")
+        stage_started = perf_counter()
+        try:
+            return self.main_agent.create_handoff(
+                trigger_event=event,
+                user_preference_summary=self.user_preference_summary,
+                environment_summary=self.environment_summary,
+                task_id=task.task_id,
+            )
+        finally:
+            self.timing_recorder.record_stage_duration(
+                event.trace_id,
+                "task_formulation_duration_ms",
+                stage_started,
+            )

@@ -81,7 +81,9 @@ class DashScopeOpenAITransport:
             ) from None
 
         try:
-            response_payload = json.loads(body.decode("utf-8"))
+            temp=body.decode("utf-8")
+            print("\n\n\n\n\nLLM output: \n\n\n",temp,"\n\n\n\n\n")
+            response_payload = json.loads(temp)
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise QwenTransportError(
                 "malformed_response",
@@ -444,7 +446,7 @@ def qwen_tool_call_to_decision(
         "action": "CALL_TOOL",
         "tool_name": tool_name,
         "arguments": arguments,
-        "reason": f"Qwen requested tool {tool_name}.",
+        "decision_reason": f"Qwen requested tool {tool_name}.",
     }
 
 
@@ -478,8 +480,6 @@ def _first_tool_call(response: Any) -> dict[str, Any] | None:
 
 def _tool_decision_error(*, code: str, message: str) -> dict[str, Any]:
     return {
-        "action": "REPLAN",
-        "reason": message,
         "error": {
             "code": code,
             "message": message,
@@ -567,6 +567,7 @@ class QwenLLMProvider(_QwenProviderBase):
                     "metadata": dict(metadata or {}),
                 }
             )
+            print("\n\n\n\n\n\nLLM output: ",raw_output,"\n\n\n\n\n")
             output = qwen_tool_call_to_decision(
                 raw_output,
                 known_tool_names=known_tool_names,

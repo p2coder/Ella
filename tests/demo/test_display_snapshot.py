@@ -54,12 +54,21 @@ def test_snapshot_serialization_is_deterministic():
         "visible_items": ("wallet", "phone"),
         "task_goal": "Answer the user.",
         "task_formulation_prompt_text": "formulation prompt",
+        "execution_decision_prompt_text": "",
         "final_response_prompt_text": "final prompt",
         "tool_results_summary": "",
         "final_response": "Done.",
         "memory_status": "not recorded",
+        "timing_summary": "",
+        "task_id": "",
+        "task_state": "",
+        "active_step_ids": (),
+        "paused_from_state": "",
+        "terminal_outcome": "",
+        "delivery_status": "",
         "prompt_display_fields": (
             "task_formulation_prompt_text",
+            "execution_decision_prompt_text",
             "final_response_prompt_text",
         ),
     }
@@ -98,6 +107,7 @@ def test_prompt_fields_are_present_and_redacted():
     assert "abcdef1234567890abcdef1234567890" not in str(serialized)
     assert serialized["prompt_display_fields"] == (
         "task_formulation_prompt_text",
+        "execution_decision_prompt_text",
         "final_response_prompt_text",
     )
 

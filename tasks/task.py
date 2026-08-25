@@ -15,8 +15,8 @@ class TaskState(StrEnum):
     CREATED = "created"
     FORMULATING = "formulating"
     READY = "ready"
-    RUNNING = "running"
-    WAITING = "waiting"
+    REASONING = "reasoning"
+    TOOL_EXECUTION = "tool_execution"
     PAUSE_REQUESTED = "pause_requested"
     PAUSED = "paused"
     KILL_REQUESTED = "kill_requested"
@@ -39,7 +39,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.FORMULATING: frozenset(
         {
             TaskState.READY,
-            TaskState.WAITING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
             TaskState.FAILED,
@@ -47,15 +46,14 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.READY: frozenset(
         {
-            TaskState.RUNNING,
+            TaskState.REASONING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
         }
     ),
-    TaskState.RUNNING: frozenset(
+    TaskState.REASONING: frozenset(
         {
-            TaskState.RUNNING,
-            TaskState.WAITING,
+            TaskState.TOOL_EXECUTION,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
             TaskState.SUCCEEDED,
@@ -63,13 +61,13 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.UNCERTAIN,
         }
     ),
-    TaskState.WAITING: frozenset(
+    TaskState.TOOL_EXECUTION: frozenset(
         {
-            TaskState.FORMULATING,
-            TaskState.READY,
-            TaskState.RUNNING,
+            TaskState.REASONING,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
+            TaskState.FAILED,
+            TaskState.UNCERTAIN,
         }
     ),
     TaskState.PAUSE_REQUESTED: frozenset(
@@ -83,8 +81,8 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.CREATED,
             TaskState.FORMULATING,
             TaskState.READY,
-            TaskState.RUNNING,
-            TaskState.WAITING,
+            TaskState.REASONING,
+            TaskState.TOOL_EXECUTION,
             TaskState.KILL_REQUESTED,
         }
     ),
@@ -106,7 +104,6 @@ class Task:
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
     tool_trace: tuple[dict[str, Any], ...] = ()
-    current_strategy: Any | None = None
     completion: Any | None = None
     failure_reason: str | None = None
     current_step: StepExecutionState = field(default_factory=StepExecutionState)
@@ -115,7 +112,6 @@ class Task:
     source_event: StandardizedEvent | None = None
     execution_context: AgentExecutionContext | None = None
     graph: TaskGraphRun | None = None
-    waiting_condition: Any | None = None
     paused_from_state: TaskState | None = None
     terminal_outcome: Any | None = None
     failure: Any | None = None

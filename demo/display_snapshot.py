@@ -47,20 +47,17 @@ class RunDisplaySnapshot:
     tool_results_summary: str
     final_response: str
     memory_status: str
-    strategy_selection_prompt_text: str = ""
     execution_decision_prompt_text: str = ""
     timing_summary: str = ""
     task_id: str = ""
     task_state: str = ""
     active_step_ids: tuple[str, ...] = ()
-    waiting_condition: str = ""
     paused_from_state: str = ""
     terminal_outcome: str = ""
     delivery_status: str = ""
 
     prompt_display_fields: ClassVar[tuple[str, ...]] = (
         "task_formulation_prompt_text",
-        "strategy_selection_prompt_text",
         "execution_decision_prompt_text",
         "final_response_prompt_text",
     )
@@ -85,11 +82,6 @@ class RunDisplaySnapshot:
         )
         object.__setattr__(
             self,
-            "strategy_selection_prompt_text",
-            redact_prompt_text(self.strategy_selection_prompt_text),
-        )
-        object.__setattr__(
-            self,
             "execution_decision_prompt_text",
             redact_prompt_text(self.execution_decision_prompt_text),
         )
@@ -104,7 +96,6 @@ class RunDisplaySnapshot:
             "visible_items": self.visible_items,
             "task_goal": self.task_goal,
             "task_formulation_prompt_text": self.task_formulation_prompt_text,
-            "strategy_selection_prompt_text": self.strategy_selection_prompt_text,
             "execution_decision_prompt_text": self.execution_decision_prompt_text,
             "final_response_prompt_text": self.final_response_prompt_text,
             "tool_results_summary": self.tool_results_summary,
@@ -114,7 +105,6 @@ class RunDisplaySnapshot:
             "task_id": self.task_id,
             "task_state": self.task_state,
             "active_step_ids": self.active_step_ids,
-            "waiting_condition": self.waiting_condition,
             "paused_from_state": self.paused_from_state,
             "terminal_outcome": self.terminal_outcome,
             "delivery_status": self.delivery_status,

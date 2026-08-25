@@ -24,7 +24,6 @@ SENSITIVE_FIELD_MARKERS = (
 class PromptType:
     TASK_FORMULATION = "TASK_FORMULATION"
     FINAL_RESPONSE = "FINAL_RESPONSE"
-    STRATEGY_SELECTION = "STRATEGY_SELECTION"
     EXECUTION_DECISION = "EXECUTION_DECISION"
 
 
@@ -94,7 +93,6 @@ class PromptEngine:
         prompt = redact_prompt_text(
             self._compose_prompt(template=template, context=safe_context)
         )
-        print("[prompts/engine.py]:prompt_type: ",prompt_type,"\nprompt: ",prompt)
         return PromptBuildResult(
             prompt=prompt,
             prompt_type=prompt_type,

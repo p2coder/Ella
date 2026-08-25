@@ -28,15 +28,18 @@ from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
+    DocumentWriteTool,
     MockChecklistTool,
     MockVisionSummaryTool,
     MockWeatherTool,
     ToolManager,
     ToolResult,
+    WebPageReadTool,
+    WebSearchTool,
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
-from tools.plan import PlanUpdateTool, PlanWrittenTool
+from tools.plan import PlanWrittenTool
 
 
 DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
@@ -101,9 +104,11 @@ class DemoRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        tool_manager.register(WebSearchTool())
+        tool_manager.register(WebPageReadTool())
+        tool_manager.register(DocumentWriteTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
-        tool_manager.register(PlanUpdateTool(plan_store))
 
         subagent = SubAgent(
             skill_manager,
@@ -415,9 +420,6 @@ def _build_display_snapshot(
         task_goal=str(process.get("task_goal", "")),
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
-        ),
-        strategy_selection_prompt_text=str(
-            process.get("strategy_selection_prompt_text", "")
         ),
         execution_decision_prompt_text=str(
             process.get("execution_decision_prompt_text", "")

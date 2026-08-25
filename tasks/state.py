@@ -47,12 +47,6 @@ class StepToolAvailabilityState(StrEnum):
     BLOCKED = "blocked"
 
 
-class WaitingKind(StrEnum):
-    USER_INPUT = "user_input"
-    EXTERNAL_EVENT = "external_event"
-    TIME = "time"
-
-
 class TaskControlType(StrEnum):
     PAUSE = "pause"
     RESUME = "resume"
@@ -120,25 +114,6 @@ class ToolFailureObservation:
             "arguments": _thaw(self.arguments),
             "retryable": self.retryable,
         }
-
-
-@dataclass(frozen=True, slots=True)
-class WaitingCondition:
-    kind: WaitingKind
-    correlation_key: str
-    reason: str
-    wake_at: datetime | None
-    created_at: datetime
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, WaitingKind):
-            raise TypeError("kind must be a WaitingKind")
-        for field_name in ("correlation_key", "reason"):
-            value = getattr(self, field_name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{field_name} must be a non-empty string")
-        if self.kind is WaitingKind.TIME and self.wake_at is None:
-            raise ValueError("TIME waiting condition requires wake_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,7 +230,7 @@ def any_terminal_succeeded(
 class StepExecutionState:
     step_number: int = 1
     retry_index: int = 0
-    max_argument_retries: int = 2
+    max_step_retries: int = 2
     active_tool_name: str | None = None
     blacklisted_tools: tuple[str, ...] = ()
     failures: tuple[ToolFailureObservation, ...] = ()
@@ -265,10 +240,10 @@ class StepExecutionState:
             raise ValueError("step_number must be at least 1")
         if self.retry_index < 0:
             raise ValueError("retry_index must be non-negative")
-        if self.max_argument_retries < 0:
-            raise ValueError("max_argument_retries must be non-negative")
-        if self.retry_index > self.max_argument_retries:
-            raise ValueError("retry_index must not exceed max_argument_retries")
+        if self.max_step_retries < 0:
+            raise ValueError("max_step_retries must be non-negative")
+        if self.retry_index > self.max_step_retries:
+            raise ValueError("retry_index must not exceed max_step_retries")
         if self.active_tool_name is not None and not self.active_tool_name.strip():
             raise ValueError("active_tool_name must be non-empty when provided")
         object.__setattr__(
@@ -286,13 +261,13 @@ class StepExecutionState:
 
     @property
     def retries_remaining(self) -> int:
-        return self.max_argument_retries - self.retry_index
+        return self.max_step_retries - self.retry_index
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "step_number": self.step_number,
             "retry_index": self.retry_index,
-            "max_argument_retries": self.max_argument_retries,
+            "max_step_retries": self.max_step_retries,
             "attempt_id": self.attempt_id,
             "active_tool_name": self.active_tool_name,
             "blacklisted_tools": self.blacklisted_tools,

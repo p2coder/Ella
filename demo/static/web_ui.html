@@ -206,6 +206,53 @@
       background: #9ba7b3;
     }
 
+    .task-lists {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .task-list {
+      display: grid;
+      gap: 8px;
+      min-height: 72px;
+    }
+
+    .task-list-empty {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .task-item {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-muted);
+    }
+
+    .task-item-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .task-item p {
+      margin: 6px 0;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+    }
+
+    .task-item .task-timing {
+      padding-top: 6px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -353,6 +400,7 @@
       }
 
       .composer,
+      .task-lists,
       .grid {
         grid-template-columns: 1fr;
       }
@@ -392,6 +440,21 @@
           <p class="form-error" role="alert">{{form_error}}</p>
           <p id="pending-status" class="pending-status" role="status"></p>
         </form>
+
+        <div class="task-lists" aria-label="Task lists">
+          <section class="panel">
+            <header class="panel-header"><h2>Active tasks</h2></header>
+            <div id="active-task-list" class="panel-body task-list">
+              <p class="task-list-empty">No active tasks.</p>
+            </div>
+          </section>
+          <section class="panel">
+            <header class="panel-header"><h2>Finished tasks</h2></header>
+            <div id="terminal-task-list" class="panel-body task-list">
+              <p class="task-list-empty">No finished tasks.</p>
+            </div>
+          </section>
+        </div>
 
         <div class="grid">
           <section class="panel">
@@ -435,7 +498,7 @@
               </div>
               <div class="field">
                 <span class="field-label">Timing</span>
-                <p class="field-value">{{timing_summary}}</p>
+                <p id="timing-summary" class="field-value">{{timing_summary}}</p>
               </div>
               <div class="field">
                 <span class="field-label">Task state</span>
@@ -457,8 +520,8 @@
                 <p class="field-value">{{active_step_ids}}</p>
               </div>
               <div class="field">
-                <span class="field-label">Waiting / paused origin</span>
-                <p class="field-value">{{waiting_condition}} {{paused_from_state}}</p>
+                <span class="field-label">Paused origin</span>
+                <p class="field-value">{{paused_from_state}}</p>
               </div>
               <div class="field">
                 <span class="field-label">Outcome / delivery</span>
@@ -475,10 +538,6 @@
               <details class="prompt-details">
                 <summary>Task formulation prompt</summary>
                 <pre class="prompt-text">{{task_formulation_prompt_text}}</pre>
-              </details>
-              <details class="prompt-details">
-                <summary>Strategy selection prompt</summary>
-                <pre class="prompt-text">{{strategy_selection_prompt_text}}</pre>
               </details>
               <details class="prompt-details">
                 <summary>Execution decision prompt</summary>
@@ -553,18 +612,14 @@
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const controls = currentControls();
-        if (controls.form.getAttribute("aria-busy") === "true") {
-          return;
-        }
-        beginRequest("Running...");
-        controls.submitButton.textContent = "Running...";
-
+        if (controls.form.getAttribute("aria-busy") === "true") return;
+        beginRequest("Submitting...");
+        controls.submitButton.textContent = "Submitting...";
         try {
-          const form = controls.form;
-          const response = await fetch(form.action, {
+          const response = await fetch(controls.form.action, {
             method: "POST",
             headers: {"Content-Type": "application/x-www-form-urlencoded"},
-            body: new URLSearchParams(new FormData(form)),
+            body: new URLSearchParams(new FormData(controls.form)),
           });
           await replacePage(response);
         } catch (error) {
@@ -576,12 +631,8 @@
 
       microphoneButton.addEventListener("click", async () => {
         const controls = currentControls();
-        if (controls.form.getAttribute("aria-busy") === "true") {
-          return;
-        }
+        if (controls.form.getAttribute("aria-busy") === "true") return;
         beginRequest("Listening...");
-        controls.pendingStatus.textContent = "Listening...";
-
         try {
           const response = await fetch("/microphone", {method: "POST"});
           await replacePage(response);
@@ -592,17 +643,38 @@
         }
       });
 
+      bindTaskButtons();
+      connectTaskEvents();
+    }
+
+    function bindTaskButtons() {
       document.querySelectorAll("[data-task-action]").forEach((button) => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "true";
         button.addEventListener("click", async () => {
           const board = button.closest("[data-task-id]");
           const taskId = board ? board.dataset.taskId : "";
-          if (!taskId || button.disabled) {
+          if (!taskId || button.disabled) return;
+          if (button.dataset.taskAction === "provide-input") {
+            const input = board.querySelector("[data-task-input]");
+            const value = input ? input.value.trim() : "";
+            const task = taskCache.get(taskId) || {};
+            const question = (task.pending_questions || [])[0] || {};
+            if (!value) return;
+            button.disabled = true;
+            await fetch("/tasks/input", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({
+                task_id: taskId,
+                correlation_key: question.question_id || "",
+                value,
+              }),
+            });
             return;
           }
-          document.querySelectorAll("[data-task-action]").forEach(
-            (control) => { control.disabled = true; },
-          );
-          const response = await fetch("/task/control", {
+          button.disabled = true;
+          await fetch("/task/control", {
             method: "POST",
             headers: {"Content-Type": "application/x-www-form-urlencoded"},
             body: new URLSearchParams({
@@ -610,34 +682,164 @@
               action: button.dataset.taskAction,
             }),
           });
-          await replacePage(response);
         });
       });
-
-      scheduleTaskRefresh();
     }
 
-    function scheduleTaskRefresh() {
-      const board = document.querySelector("[data-task-id]");
-      if (!board || !board.dataset.taskId) {
-        return;
+    function createTaskItem(task, terminal) {
+      const item = document.createElement("article");
+      item.className = "task-item";
+      item.dataset.taskId = task.task_id || "";
+      item.dataset.taskState = task.state || "";
+
+      const head = document.createElement("div");
+      head.className = "task-item-head";
+      const id = document.createElement("span");
+      id.textContent = task.task_id || "Unknown task";
+      const state = document.createElement("span");
+      state.textContent = task.state || "unknown";
+      head.append(id, state);
+      item.append(head);
+
+      const summary = document.createElement("p");
+      summary.textContent = task.user_input_summary || "No input summary";
+      item.append(summary);
+
+      const detail = document.createElement("p");
+      detail.textContent = terminal
+        ? (task.final_response || failureMessage(task) || "Task ended.")
+        : `Stage: ${task.execution_stage || "unknown"}`;
+      item.append(detail);
+
+      const metadata = document.createElement("p");
+      const activeSteps = (task.active_step_ids || []).join(", ") || "none";
+      metadata.textContent = terminal
+        ? `Finished: ${task.finished_at || "unknown"}`
+        : `Steps: ${activeSteps} · Updated: ${task.updated_at || "unknown"}`;
+      item.append(metadata);
+
+      if (terminal && task.timing_summary) {
+        const timing = document.createElement("p");
+        timing.className = "task-timing";
+        timing.textContent = task.timing_summary;
+        item.append(timing);
       }
-      const terminalOrBlocked = new Set([
-        "paused", "succeeded", "failed", "uncertain", "killed", "delivered",
-      ]);
-      if (terminalOrBlocked.has(board.dataset.taskState)) {
-        return;
-      }
-      window.setTimeout(async () => {
-        try {
-          const response = await fetch(
-            `/task?task_id=${encodeURIComponent(board.dataset.taskId)}`,
-          );
-          await replacePage(response);
-        } catch (error) {
-          scheduleTaskRefresh();
+
+      if (!terminal) {
+        if ((task.pending_questions || []).length) {
+          const interaction = document.createElement("div");
+          interaction.className = "task-controls";
+          const input = document.createElement("input");
+          input.type = "text";
+          input.placeholder = "Provide the requested information";
+          const question = task.pending_questions[0];
+          if (question && question.question) {
+            input.placeholder = question.question;
+          }
+          input.dataset.taskInput = "true";
+          const send = taskButton("Send", "provide-input", false);
+          interaction.append(input, send);
+          item.append(interaction);
         }
-      }, 500);
+        const controls = document.createElement("div");
+        controls.className = "task-controls";
+        controls.append(
+          taskButton("Pause", "pause", ["pause_requested", "paused"].includes(task.state)),
+          taskButton("Resume", "resume", task.state !== "paused"),
+          taskButton("Cancel", "kill", ["pause_requested", "kill_requested"].includes(task.state), true),
+        );
+        item.append(controls);
+      }
+      return item;
+    }
+
+    function taskButton(label, action, disabled, danger = false) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.dataset.taskAction = action;
+      button.disabled = disabled;
+      if (danger) button.className = "danger";
+      return button;
+    }
+
+    function failureMessage(task) {
+      return task.failure && task.failure.message
+        ? task.failure.message
+        : "";
+    }
+
+    const taskCache = new Map();
+    function renderTaskLists(snapshot) {
+      taskCache.clear();
+      [...(snapshot.active_tasks || []), ...(snapshot.terminal_tasks || [])]
+        .forEach((task) => taskCache.set(task.task_id, task));
+      renderTaskList("active-task-list", snapshot.active_tasks || [], false);
+      renderTaskList("terminal-task-list", snapshot.terminal_tasks || [], true);
+      bindTaskButtons();
+    }
+
+    function renderTaskList(id, tasks, terminal) {
+      const container = document.getElementById(id);
+      if (!container) return;
+      container.replaceChildren();
+      if (!tasks.length) {
+        const empty = document.createElement("p");
+        empty.className = "task-list-empty";
+        empty.textContent = terminal ? "No finished tasks." : "No active tasks.";
+        container.append(empty);
+        return;
+      }
+      tasks.forEach((task) => container.append(createTaskItem(task, terminal)));
+    }
+
+    function updateTask(task) {
+      if (!task || !task.task_id) return;
+      taskCache.set(task.task_id, task);
+      updateDisplayedTaskTiming(task);
+      const terminalStates = new Set([
+        "succeeded", "failed", "uncertain", "killed", "delivered",
+      ]);
+      const activeTasks = [];
+      const terminalTasks = [];
+      taskCache.forEach((value) => {
+        (terminalStates.has(value.state) ? terminalTasks : activeTasks).push(value);
+      });
+      renderTaskList("active-task-list", activeTasks, false);
+      renderTaskList("terminal-task-list", terminalTasks, true);
+      bindTaskButtons();
+    }
+
+    function updateDisplayedTaskTiming(task) {
+      const board = document.querySelector(".task-state-board[data-task-id]");
+      if (!board || board.dataset.taskId !== task.task_id) return;
+      const timing = document.getElementById("timing-summary");
+      if (!timing) return;
+      const display = task.display_snapshot || {};
+      timing.textContent = task.timing_summary || display.timing_summary || "";
+    }
+
+    let taskEventSource = null;
+    function connectTaskEvents() {
+      if (taskEventSource) taskEventSource.close();
+      taskEventSource = new EventSource("/task-events");
+      taskEventSource.addEventListener("task_snapshot", (event) => {
+        const message = JSON.parse(event.data);
+        renderTaskLists(message.payload || {});
+      });
+      [
+        "task_created",
+        "task_state_changed",
+        "task_progress",
+        "task_interaction_required",
+        "task_terminal",
+      ]
+        .forEach((eventName) => {
+          taskEventSource.addEventListener(eventName, (event) => {
+            const message = JSON.parse(event.data);
+            updateTask(message.payload ? message.payload.task : null);
+          });
+        });
     }
 
     bindWebUIInteractions();

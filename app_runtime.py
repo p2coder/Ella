@@ -1,7 +1,9 @@
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from enum import Enum
+from time import monotonic, sleep
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from agent.final_response import FinalResponseGenerator
@@ -24,8 +26,11 @@ from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.plan_store import PlanStore
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
+from runtime.task_queue import TaskQueue
+from runtime.task_store import TaskStore
 from runtime.timing import RuntimeTimingRecorder
 from runtime.trace import TraceRecorder
+from runtime.task_events import TERMINAL_TASK_STATES
 from tasks.state import (
     TaskControlCommand,
     TaskControlType,
@@ -36,17 +41,23 @@ from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
+    DocumentWriteTool,
     MockChecklistTool,
     MockVisionSummaryTool,
     MockWeatherTool,
     ToolManager,
     ToolResult,
+    WebPageReadTool,
+    WebSearchTool,
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
-from tools.plan import PlanUpdateTool, PlanWrittenTool
+from tools.plan import PlanWrittenTool
+from tools.ask_user_question import AskUserQuestionTool
+from runtime.interactions import InteractionBroker
 
 MAX_APP_STEPS = 20
+APP_TASK_TIMEOUT_SECONDS = 120.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +119,13 @@ class AppRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        tool_manager.register(WebSearchTool())
+        tool_manager.register(WebPageReadTool())
+        tool_manager.register(DocumentWriteTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
-        tool_manager.register(PlanUpdateTool(plan_store))
+        interaction_broker = InteractionBroker()
+        tool_manager.register(AskUserQuestionTool(interaction_broker))
 
 
         subagent = SubAgent(
@@ -140,6 +155,15 @@ class AppRuntime:
             ),
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
+            task_store=TaskStore(settings.task_checkpoint_directory),
+            task_queue=TaskQueue(),
+        )
+        interaction_broker.set_question_handler(
+            lambda question: task_runtime.event_publisher.publish(
+                "task_interaction_required",
+                question.task_id,
+                {"question": question.to_dict()},
+            )
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
@@ -150,11 +174,17 @@ class AppRuntime:
             device_factory=device_factory,
             provider_factory=provider_factory,
         )
-        return cls(
+        runtime = cls(
             event_runtime,
             task_runtime,
             microphone_source=microphone_source,
         )
+        task_runtime.start()
+        return runtime
+
+    def close(self, timeout: float | None = 5.0) -> bool:
+        self._task_runtime.stop()
+        return self._task_runtime.join(timeout)
 
     def run_text_with_display(self, input_text: str) -> AppDisplayResult:
         signal = CLITextSignalSource().create_signal(
@@ -202,26 +232,135 @@ class AppRuntime:
         return result.task_handle
 
     def get_task(self, task_id: str) -> dict[str, object]:
-        creation = self._task_runtime._tasks.get(task_id)
-        if creation is None:
-            raise KeyError(task_id)
-        task = creation.task
-        trace = self._task_runtime.trace_recorder.snapshot(task_id)
+        task = self._task_runtime.get_task(task_id)
+        return self._task_projection(task)
+
+    def list_active_tasks(self) -> tuple[dict[str, object], ...]:
+        return tuple(
+            self._task_projection(task, include_trace=False)
+            for task in self._task_runtime.list_tasks()
+            if task.state not in TERMINAL_TASK_STATES
+        )
+
+    def list_terminal_tasks(self) -> tuple[dict[str, object], ...]:
+        return tuple(
+            self._task_projection(task, include_trace=False)
+            for task in self._task_runtime.list_tasks()
+            if task.state in TERMINAL_TASK_STATES
+        )
+
+    def task_snapshot(self) -> dict[str, object]:
         return {
+            "active_tasks": self.list_active_tasks(),
+            "terminal_tasks": self.list_terminal_tasks(),
+        }
+
+    def subscribe_task_events(self, last_event_id: int | None = None):
+        publisher = self._task_runtime.event_publisher
+        cursor = publisher.latest_event_id
+        yield {
+            "event_id": cursor,
+            "event_type": "task_snapshot",
+            "task_id": "",
+            "payload": self.task_snapshot(),
+        }
+        if last_event_id is not None and last_event_id > cursor:
+            cursor = last_event_id
+        while self._task_runtime.is_running:
+            events = publisher.wait_after(cursor, timeout=15.0)
+            if not events:
+                yield {
+                    "event_id": cursor,
+                    "event_type": "heartbeat",
+                    "task_id": "",
+                    "payload": {},
+                }
+                continue
+            for event in events:
+                cursor = event.event_id
+                document = event.to_dict()
+                try:
+                    document["payload"] = {
+                        **dict(event.payload),
+                        "task": self._task_projection(
+                            self._task_runtime.get_task(event.task_id),
+                            include_trace=False,
+                        ),
+                    }
+                except KeyError:
+                    pass
+                yield document
+
+    def provide_input(
+        self,
+        task_id: str,
+        correlation_key: str,
+        value: str,
+    ) -> bool:
+        return self._task_runtime.provide_input(
+            task_id,
+            correlation_key=correlation_key,
+            value=value,
+        )
+
+    def _task_projection(
+        self,
+        task,
+        *,
+        include_trace: bool = True,
+    ) -> dict[str, object]:
+        trace = (
+            self._task_runtime.trace_recorder.snapshot(task.task_id)
+            if include_trace
+            else None
+        )
+        projection = {
             "task_id": task.task_id,
+            "trace_id": task.trace_id,
+            "user_input_summary": _task_user_input(task),
             "state": task.state.value,
+            "execution_stage": _execution_stage(task),
             "active_step_ids": task.active_step_ids,
-            "waiting_condition": task.waiting_condition,
+            "pending_questions": tuple(
+                item.to_dict()
+                for item in self._task_runtime.pending_questions(task.task_id)
+            ),
             "paused_from_state": (
                 None if task.paused_from_state is None else task.paused_from_state.value
             ),
-            "terminal_outcome": task.terminal_outcome,
-            "failure": task.failure,
-            "uncertain_resolution": task.uncertain_resolution,
-            "delivery": task.delivery,
-            "graph": task.graph,
+            "terminal_outcome": _public_value(task.terminal_outcome),
+            "failure": _public_value(task.failure),
+            "uncertain_resolution": _public_value(task.uncertain_resolution),
+            "delivery": _public_value(task.delivery),
             "trace": None if trace is None else trace.to_dict(),
+            "trace_url": f"/task?task_id={task.task_id}",
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+            "finished_at": (
+                task.updated_at.isoformat()
+                if task.state in TERMINAL_TASK_STATES
+                else None
+            ),
+            "final_response": None,
         }
+        result = self._task_runtime.result_for(task.task_id)
+        projection["timing"] = (
+            None if result.timing is None else result.timing.to_dict()
+        )
+        projection["timing_summary"] = _timing_summary(result)
+        if result.completion is not None:
+            user_input = ""
+            source_event = task.source_event
+            if source_event is not None:
+                user_input = str(source_event.payload.get("text", ""))
+            projection["display_snapshot"] = _build_display_snapshot(
+                user_input,
+                result,
+            ).to_dict()
+            projection["final_response"] = (
+                result.completion.user_visible_output.final_response
+            )
+        return projection
 
     def pause(self, task_id: str, reason: str = ""):
         return self._control(task_id, TaskControlType.PAUSE, reason)
@@ -269,7 +408,6 @@ class AppRuntime:
             return _microphone_failure_result(
                 "Microphone input failed. Text input remains available."
             )
-        print("[appruntime.py]line156:before asr")
         transcript = signal.payload.get("text")
         if not isinstance(transcript, str) or not transcript.strip():
             return _microphone_failure_result(
@@ -287,6 +425,34 @@ class AppRuntime:
             user_input=normalized_transcript,
             transcript=normalized_transcript,
         )
+
+    def submit_microphone(
+        self,
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ):
+        report_status = status_callback or (lambda _status: None)
+        report_status("Listening...")
+        source = self.microphone_source or MicrophoneSource.from_factories()
+        source_result = source.capture_transcript(
+            trace_id=f"trace-web-microphone-{uuid4().hex}",
+        )
+        signal = source_result.raw_signal
+        if signal is None:
+            raise RuntimeError("Microphone input failed.")
+        transcript = signal.payload.get("text")
+        if not isinstance(transcript, str) or not transcript.strip():
+            raise RuntimeError("No speech was detected.")
+        normalized = transcript.strip()
+        report_status("Transcription complete.")
+        text_signal = CLITextSignalSource().create_signal(
+            text=normalized,
+            trace_id=f"trace-web-microphone-text-{uuid4().hex}",
+        )
+        result = self._event_runtime.publish(text_signal)
+        if not result.submitted or result.task_handle is None:
+            raise RuntimeError(result.reason)
+        return result.task_handle, normalized
 
     def _run_signal_with_display(
         self,
@@ -329,11 +495,16 @@ class AppRuntime:
         event_result = self._event_runtime.publish(signal)
         if not event_result.submitted or event_result.task_handle is None:
             raise RuntimeError(event_result.reason)
-        print("[app_runtime]:_run_signal_to_completion")
-        task_result = self._task_runtime.run_until_complete(
-            event_result.task_handle.task_id,
-            max_steps=MAX_APP_STEPS,
-        )
+        task_id = event_result.task_handle.task_id
+        deadline = monotonic() + APP_TASK_TIMEOUT_SECONDS
+        terminal = {
+            "succeeded", "failed", "uncertain", "killed", "delivered"
+        }
+        while self._task_runtime.get_task(task_id).state.value not in terminal:
+            if monotonic() >= deadline:
+                raise TimeoutError(f"task {task_id} did not finish in time")
+            sleep(0.01)
+        task_result = self._task_runtime.result_for(task_id)
         if task_result.failure_reason is not None:
             raise RuntimeError(task_result.failure_reason)
         if task_result.completion is None:
@@ -366,6 +537,44 @@ def _render_output(
     )
 
 
+def _task_user_input(task, maximum: int = 120) -> str:
+    if task.source_event is None:
+        return ""
+    text = str(task.source_event.payload.get("text", "")).strip()
+    return text if len(text) <= maximum else f"{text[: maximum - 1]}…"
+
+
+def _execution_stage(task) -> str:
+    in_flight = task.task_local_state.get("in_flight_action")
+    if isinstance(in_flight, Mapping):
+        return "tool_execution"
+    return {
+        "created": "created",
+        "formulating": "task_formulation",
+        "ready": "queued",
+        "reasoning": "reasoning",
+        "tool_execution": "tool_execution",
+        "pause_requested": "pause_requested",
+        "paused": "paused",
+        "kill_requested": "kill_requested",
+    }.get(task.state.value, "terminal")
+
+def _public_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _public_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_public_value(item) for item in value]
+    if is_dataclass(value):
+        return _public_value(asdict(value))
+    return str(value)
+
+
 def _build_display_snapshot(
     user_input: str,
     task_result: TaskRuntimeResult,
@@ -388,9 +597,6 @@ def _build_display_snapshot(
         task_formulation_prompt_text=str(
             process.get("task_formulation_prompt_text", "")
         ),
-        strategy_selection_prompt_text=str(
-            process.get("strategy_selection_prompt_text", "")
-        ),
         execution_decision_prompt_text=str(
             process.get("execution_decision_prompt_text", "")
         ),
@@ -404,7 +610,6 @@ def _build_display_snapshot(
         task_id=task_result.handle.task_id,
         task_state=task_result.task.state.value,
         active_step_ids=task_result.task.active_step_ids,
-        waiting_condition=_display_value(task_result.task.waiting_condition),
         paused_from_state=(
             ""
             if task_result.task.paused_from_state is None
@@ -464,7 +669,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     llm_by_boundary = _llm_timing_by_boundary(snapshot)
     for boundary in (
         "task_formulation",
-        "strategy_selection",
         "execution_decision",
         "final_response",
     ):

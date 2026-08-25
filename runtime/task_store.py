@@ -12,19 +12,27 @@ from typing import Any, Mapping
 from agent.context import AgentExecutionContext, CapabilityScope
 from agent.handoff import HandoffRequest
 from events import StandardizedEvent
-from sessions.graph import (
+from tasks.graph import (
     GraphEdge,
     TaskGraphDefinition,
     TaskGraphNodeDefinition,
     TaskGraphNodeType,
     TaskGraphRun,
+    ToolGraphDefinition,
+    ToolGraphRun,
+    ToolNodeDefinition,
 )
-from sessions.session import Task, TaskState
+from tasks.task import Task, TaskState
+from sessions.output import UserVisibleAgentOutput
+from tasks.state import StepExecutionState, ToolFailureKind, ToolFailureObservation
+from tasks.completion import TaskCompletionPackage
+from tools import ToolResult
 
 
-CHECKPOINT_SCHEMA_VERSION = 1
-_FORBIDDEN_KEYS = frozenset(
-    {"api_key", "authorization", "credentials", "prompt_text", "raw_media"}
+CHECKPOINT_SCHEMA_VERSION = 2
+_FORBIDDEN_KEYS = frozenset({"api_key", "authorization", "credentials"})
+_OMITTED_KEY_PARTS = frozenset(
+    {"prompt_text", "captured_frame", "display_frame", "raw_media"}
 )
 
 
@@ -92,7 +100,7 @@ class TaskStore:
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
             if document["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-                raise ValueError("unsupported checkpoint schema")
+                return None
             return StoredTask(
                 task=_decode_task(document["task"]),
                 version=int(document["version"]),
@@ -116,10 +124,11 @@ class TaskStore:
 
     @staticmethod
     def recovery_classification(task: Task) -> str:
-        if task.state in {TaskState.READY, TaskState.PAUSED, TaskState.WAITING}:
+        if task.state in {TaskState.READY, TaskState.PAUSED}:
             return "restorable"
         if task.state in {
-            TaskState.RUNNING,
+            TaskState.REASONING,
+            TaskState.TOOL_EXECUTION,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
         }:
@@ -150,7 +159,6 @@ def _encode_task(task: Task) -> dict[str, Any]:
             else None,
             "state": task.state.value,
             "graph": _encode_graph(task.graph),
-            "waiting_condition": _json_safe(task.waiting_condition),
             "paused_from_state": task.paused_from_state.value
             if task.paused_from_state
             else None,
@@ -159,10 +167,13 @@ def _encode_task(task: Task) -> dict[str, Any]:
             "uncertain_resolution": _json_safe(task.uncertain_resolution),
             "delivery": _json_safe(task.delivery),
             "control_request": _json_safe(task.control_request),
-            "completion": _json_safe(task.completion),
-            "task_local_state": _json_safe(task.task_local_state),
+            "completion": _encode_completion(task.completion),
+            "current_step": task.current_step.to_dict(),
+            "step_history": [step.to_dict() for step in task.step_history],
+            "failure_reason": task.failure_reason,
+            "task_local_state": _checkpoint_safe(task.task_local_state),
             "message_history": _json_safe(task.message_history),
-            "tool_trace": _json_safe(task.tool_trace),
+            "tool_trace": _checkpoint_safe(task.tool_trace),
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
         }
@@ -183,7 +194,6 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
         execution_context=context,
         graph=_decode_graph(data.get("graph")),
         state=TaskState(data["state"]),
-        waiting_condition=data.get("waiting_condition"),
         paused_from_state=TaskState(data["paused_from_state"])
         if data.get("paused_from_state")
         else None,
@@ -192,7 +202,12 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
         uncertain_resolution=data.get("uncertain_resolution"),
         delivery=data.get("delivery"),
         control_request=data.get("control_request"),
-        completion=data.get("completion"),
+        completion=_decode_completion(data.get("completion"), context),
+        current_step=_decode_step(data.get("current_step")),
+        step_history=tuple(
+            _decode_step(item) for item in data.get("step_history", ())
+        ),
+        failure_reason=data.get("failure_reason"),
         task_local_state=dict(data.get("task_local_state", {})),
         message_history=tuple(data.get("message_history", ())),
         tool_trace=tuple(data.get("tool_trace", ())),
@@ -200,6 +215,69 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
         updated_at=datetime.fromisoformat(data["updated_at"]),
     )
     return task
+
+
+def _decode_step(data: Mapping[str, Any] | None) -> StepExecutionState:
+    if data is None:
+        return StepExecutionState()
+    failures = tuple(
+        ToolFailureObservation(
+            attempt_id=str(item["attempt_id"]),
+            tool_name=str(item["tool_name"]),
+            kind=ToolFailureKind(item["kind"]),
+            code=str(item["code"]),
+            message=str(item["message"]),
+            arguments=dict(item.get("arguments", {})),
+            retryable=bool(item.get("retryable", False)),
+        )
+        for item in data.get("failures", ())
+    )
+    return StepExecutionState(
+        step_number=int(data.get("step_number", 1)),
+        retry_index=int(data.get("retry_index", 0)),
+        max_step_retries=int(data.get("max_step_retries", 2)),
+        active_tool_name=data.get("active_tool_name"),
+        blacklisted_tools=tuple(data.get("blacklisted_tools", ())),
+        failures=failures,
+    )
+
+
+def _encode_completion(completion: Any | None) -> dict[str, Any] | None:
+    if completion is None:
+        return None
+    if not isinstance(completion, TaskCompletionPackage):
+        raise TypeError("checkpoint only supports TaskCompletionPackage")
+    return _checkpoint_safe(completion.to_dict())
+
+
+def _decode_completion(
+    data: Mapping[str, Any] | None,
+    context: AgentExecutionContext | None,
+) -> TaskCompletionPackage | None:
+    if data is None:
+        return None
+    if context is None:
+        raise ValueError("completion checkpoint requires execution context")
+    output = data["user_visible_output"]
+    return TaskCompletionPackage(
+        context=context,
+        summary=str(data["summary"]),
+        user_visible_output=UserVisibleAgentOutput(
+            process=dict(output.get("process", {})),
+            final_response=str(output.get("final_response", "")),
+            show_process=bool(output.get("show_process", True)),
+            process_collapsed=bool(output.get("process_collapsed", False)),
+        ),
+        tool_results=tuple(
+            ToolResult(
+                tool_name=str(item["tool_name"]),
+                task_id=str(item["task_id"]),
+                trace_id=str(item["trace_id"]),
+                payload=dict(item.get("payload", {})),
+            )
+            for item in data.get("tool_results", ())
+        ),
+    )
 
 
 def _encode_event(event: StandardizedEvent | None) -> dict[str, Any] | None:
@@ -281,7 +359,11 @@ def _encode_graph(run: TaskGraphRun | None) -> dict[str, Any] | None:
             "graph_id": definition.graph_id,
             "version": definition.version,
             "nodes": [
-                {"node_id": node.node_id, "node_type": node.node_type.value, "payload": _json_safe(node.payload)}
+                {
+                    "node_id": node.node_id,
+                    "node_type": node.node_type.value,
+                    "payload": _encode_graph_value(node.payload),
+                }
                 for node in definition.nodes
             ],
             "edges": [
@@ -291,7 +373,7 @@ def _encode_graph(run: TaskGraphRun | None) -> dict[str, Any] | None:
             "entry_node_ids": definition.entry_node_ids,
             "terminal_node_ids": definition.terminal_node_ids,
         },
-        "node_runs": _json_safe(run.node_runs),
+        "node_runs": _encode_graph_value(run.node_runs),
     }
 
 
@@ -302,12 +384,90 @@ def _decode_graph(data: Mapping[str, Any] | None) -> TaskGraphRun | None:
     definition = TaskGraphDefinition(
         graph_id=raw["graph_id"],
         version=raw["version"],
-        nodes=tuple(TaskGraphNodeDefinition(node["node_id"], TaskGraphNodeType(node["node_type"]), node["payload"]) for node in raw["nodes"]),
+        nodes=tuple(
+            TaskGraphNodeDefinition(
+                node["node_id"],
+                TaskGraphNodeType(node["node_type"]),
+                _decode_graph_value(node["payload"]),
+            )
+            for node in raw["nodes"]
+        ),
         edges=tuple(GraphEdge(**edge) for edge in raw["edges"]),
         entry_node_ids=tuple(raw["entry_node_ids"]),
         terminal_node_ids=tuple(raw["terminal_node_ids"]),
     )
-    return TaskGraphRun(definition, data["node_runs"])
+    return TaskGraphRun(definition, _decode_graph_value(data["node_runs"]))
+
+
+def _encode_graph_value(value: Any) -> Any:
+    if isinstance(value, ToolGraphRun):
+        definition = value.definition
+        return {
+            "__type__": "ToolGraphRun",
+            "definition": {
+                "graph_id": definition.graph_id,
+                "nodes": [
+                    {
+                        "node_id": node.node_id,
+                        "tool_name": node.tool_name,
+                        "tool_version": node.tool_version,
+                        "input_binding": _json_safe(node.input_binding),
+                        "success_condition": _json_safe(
+                            node.success_condition
+                        ),
+                        "execution_override": _json_safe(
+                            node.execution_override
+                        ),
+                    }
+                    for node in definition.nodes
+                ],
+                "edges": [
+                    {
+                        "from_node_id": edge.from_node_id,
+                        "to_node_id": edge.to_node_id,
+                        "condition": _json_safe(edge.condition),
+                        "priority": edge.priority,
+                    }
+                    for edge in definition.edges
+                ],
+                "entry_node_ids": definition.entry_node_ids,
+                "terminal_node_ids": definition.terminal_node_ids,
+            },
+            "node_runs": _json_safe(value.node_runs),
+        }
+    if isinstance(value, Mapping):
+        return {str(key): _encode_graph_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_encode_graph_value(item) for item in value]
+    return _json_safe(value)
+
+
+def _decode_graph_value(value: Any) -> Any:
+    if isinstance(value, Mapping) and value.get("__type__") == "ToolGraphRun":
+        raw = value["definition"]
+        definition = ToolGraphDefinition(
+            graph_id=str(raw["graph_id"]),
+            nodes=tuple(
+                ToolNodeDefinition(
+                    node_id=str(node["node_id"]),
+                    tool_name=str(node["tool_name"]),
+                    tool_version=str(node["tool_version"]),
+                    input_binding=dict(node.get("input_binding", {})),
+                    success_condition=node.get("success_condition"),
+                    execution_override=node.get("execution_override"),
+                )
+                for node in raw["nodes"]
+            ),
+            edges=tuple(GraphEdge(**edge) for edge in raw["edges"]),
+            entry_node_ids=tuple(raw["entry_node_ids"]),
+            terminal_node_ids=tuple(raw["terminal_node_ids"]),
+        )
+        return ToolGraphRun(definition, value.get("node_runs", {}))
+    if isinstance(value, Mapping):
+        return {str(key): _decode_graph_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return tuple(_decode_graph_value(item) for item in value)
+    return value
 
 
 def _json_safe(value: Any) -> Any:
@@ -324,6 +484,26 @@ def _json_safe(value: Any) -> Any:
     if is_dataclass(value):
         return _json_safe(asdict(value))
     raise TypeError(f"checkpoint cannot serialize runtime resource {type(value).__name__}")
+
+
+def _checkpoint_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _checkpoint_safe(item)
+            for key, item in value.items()
+            if not any(part in str(key).lower() for part in _OMITTED_KEY_PARTS)
+        }
+    if isinstance(value, (tuple, list)):
+        return [_checkpoint_safe(item) for item in value]
+    if isinstance(value, bytes):
+        return "[RAW_MEDIA_OMITTED]"
+    if is_dataclass(value):
+        return _checkpoint_safe(asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def _reject_secrets(value: Any, path: str = "task") -> Any:

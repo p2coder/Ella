@@ -23,10 +23,6 @@ def render_snapshot_html(snapshot: RunDisplaySnapshot | Mapping[str, Any]) -> st
             data,
             "task_formulation_prompt_text",
         ),
-        "strategy_selection_prompt_text": _value(
-            data,
-            "strategy_selection_prompt_text",
-        ),
         "execution_decision_prompt_text": _value(
             data,
             "execution_decision_prompt_text",

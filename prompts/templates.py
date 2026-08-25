@@ -44,8 +44,9 @@ TOOL_POLICY_PROMPT = (
     "Tool policy: Tool is an optional capability, not a mandatory step. "
     "Call a Tool only when it is visible in the current WorkSpace and its "
     "description and schema match the current need. If no suitable Tool is "
-    "available, answer directly, ask for missing information, WAIT, or "
-    "COMPLETE as appropriate. Treat Tool results as observations; update the "
+    "available, answer directly or use the visible ask_user_question "
+    "interaction capability when user input is required. Treat Tool results "
+    "as observations; update the "
     "next decision from those observations. Tool failures are not successful "
     "facts. Invalid parameters, missing permissions, unavailable tools, and "
     "unexpected tool results should be reported or used to choose a safer "
@@ -61,8 +62,8 @@ DECISION_POLICY_PROMPT = (
     f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT} One execution decision may "
     "choose at most one action. CALL_TOOL may use exactly one visible tool. "
     "COMPLETE is valid when current information is enough, even if no Tool "
-    "was used. WAIT is valid when user input or external state is needed. "
-    "REPLAN is valid when the current approach no longer fits."
+    "was used. Planning and user interaction are expressed through visible "
+    "runtime capabilities, not separate actions."
 )
 
 
@@ -96,49 +97,18 @@ FINAL_RESPONSE_TEMPLATE = PromptTemplate(
 )
 
 
-STRATEGY_SELECTION_TEMPLATE = PromptTemplate(
-    name="strategy_selection",
-    system_prompt=ELLA_SYSTEM_PROMPT,
-    instruction=(
-        "Return one strict JSON object for execution mode selection only. "
-        "STRATEGY_SELECTION must decide only whether the task needs decomposition. "
-        "It must not decide whether to ask the user, call a tool, wait, or "
-        "complete. It must not make execution-policy recommendations such as "
-        "\"ask for clarification\", \"do not attempt tool use\", or "
-        "\"cannot verify\". If the user request may require an external "
-        "capability, simply mention \"external capability may be needed in "
-        "execution phase\" without deciding availability or next action. "
-        "Allowed fields are mode, reason, needs_decomposition, "
-        "estimated_logical_steps, and plan_summary. mode must be react or "
-        "plan_and_execute. estimated_logical_steps must be a positive integer. Do not return "
-        "skill_name. Do not select a Skill in this phase. Do not call Tool or "
-        "produce executable Tool calls. plan_and_execute is a future mode; "
-        "if runtime support is absent, the caller must safely continue with "
-        "react.do not make claims about tool availability unless visible_tools "
-        "are provided in the context. If the task requires external capability, "
-        "state the capability needed, not whether it is available."
-        "Important:"
-        "The absence of visible_tools in this prompt does not mean tools are unavailable."
-        "STRATEGY_SELECTION may not receive visible_tools by design."
-        "Therefore, never write claims such as:"
-        "- no tool is available"
-        "- no camera is available"
-        "- I cannot access the camera"
-        "- no runtime support exists"
-        "- no external sensing interface is provided"
-        "unless the context explicitly contains a field saying that capability is unavailable."
-    ),
-)
-
-
 EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     name="execution_decision",
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
         f"{DECISION_POLICY_PROMPT} Return one strict JSON object. The action "
-        "must be CALL_TOOL, COMPLETE, WAIT, or REPLAN. CALL_TOOL must include "
+        "must be CALL_TOOL or COMPLETE. CALL_TOOL must include "
         "a visible tool_name and an arguments object matching that tool's "
-        "schema. Read concrete visible Skill summaries, visible ToolDefinition "
+        "schema. Include decision_reason for every action. COMPLETE must also "
+        "include a non-empty completion_summary and evidence_refs containing "
+        "only observation IDs from WorkSpace; evidence_refs may be empty only "
+        "when the task does not depend on a capability result. Read concrete "
+        "visible Skill summaries, visible CapabilityDefinition "
         "summaries, and observations only from WorkSpace. Other actions must "
         "not include a tool name. Use the provided "
         "tool_results observations before choosing another tool call. If an "
@@ -153,21 +123,27 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "forbids camera capture. When the user says 屏幕, screen, on my "
         "screen, 窗口, 页面, or web page, prefer screen_scene. When the user "
         "says 摄像头, 房间, 面前, 周围, 看到我, or physical environment, "
-        "prefer camera_scene. Do not choose WAIT merely because no visual "
-        "observation exists yet when a suitable visible visual tool can "
+        "prefer camera_scene. Do not stop merely because no visual observation "
+        "exists yet when a suitable visible visual tool can "
         "obtain that observation. The absence of an observation is a reason "
         "to call the matching visible tool, not a reason to ask the user to "
-        "describe the scene. If "
-        "an observation is insufficient, choose COMPLETE or WAIT and clearly "
-        "state what information is missing rather than repeating the same "
-        "tool call in a loop. If observations already contain camera_scene "
+        "describe the scene. If an observation is insufficient, do not repeat "
+        "the same tool call with materially identical arguments. If the "
+        "missing information can still be obtained through a refined tool "
+        "call, another visible tool, or user input, continue execution. "
+        "Choose COMPLETE only when the task can be reasonably concluded with "
+        "the available information. Do not choose COMPLETE if a visible tool "
+        "can still reasonably obtain information required to satisfy the "
+        "user's request. If observations already contain camera_scene "
         "for the current task, do not call camera_scene again; use that "
         "observation, explain missing visual information, or report visual "
-        "unavailability. If a tool is unavailable, choose COMPLETE, WAIT, or "
-        "REPLAN based on whether the task can continue without that tool. In "
+        "unavailability. If information can only come from the user and "
+        "ask_user_question is visible, call it. If a tool is unavailable, "
+        "choose another visible capability or COMPLETE with an honest "
+        "conclusion. In "
         "argument repair mode, regenerate arguments for active_tool_name only. "
-        "The repair must use the same Tool and must not switch tool_name, "
-        "COMPLETE, WAIT, or REPLAN. Never select a Tool listed in "
+        "The repair must use the same Tool and must not switch tool_name or "
+        "return COMPLETE. Never select a Tool listed in "
         "blacklisted_tools."
     ),
 )
@@ -176,6 +152,5 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
 TEMPLATES_BY_TYPE = {
     "TASK_FORMULATION": TASK_FORMULATION_TEMPLATE,
     "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
-    "STRATEGY_SELECTION": STRATEGY_SELECTION_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
 }
