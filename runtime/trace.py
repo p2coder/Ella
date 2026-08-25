@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 from threading import Lock
@@ -150,6 +151,7 @@ class TraceRecorder:
                         json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
                     )
                     stream.flush()
+                    os.fsync(stream.fileno())
             return event
 
     def _path_for_task(self, task_id: str) -> Path | None:
@@ -180,7 +182,12 @@ class TraceRecorder:
             return count
 
     def snapshot(self, task_id: str) -> TaskTraceSnapshot | None:
-        events = tuple(self._events.get(task_id, ()))
+        with self._lock:
+            persisted = self._read_events(self._path_for_task(task_id), task_id)
+            in_memory = tuple(self._events.get(task_id, ()))
+        by_sequence = {event.sequence: event for event in persisted}
+        by_sequence.update({event.sequence: event for event in in_memory})
+        events = tuple(by_sequence[key] for key in sorted(by_sequence))
         if not events:
             return None
         matching = lambda prefix: tuple(
@@ -197,6 +204,34 @@ class TraceRecorder:
             ToolNodeTrace(matching("tool_node")),
             ToolAttemptTrace(matching("tool_attempt")),
         )
+
+    @staticmethod
+    def _read_events(path: Path | None, task_id: str) -> tuple[TraceEvent, ...]:
+        if path is None or not path.exists():
+            return ()
+        events = []
+        with path.open("r", encoding="utf-8") as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                try:
+                    document = json.loads(line)
+                    if document.get("task_id") != task_id:
+                        continue
+                    events.append(
+                        TraceEvent(
+                            sequence=int(document["sequence"]),
+                            task_id=str(document["task_id"]),
+                            trace_id=str(document["trace_id"]),
+                            boundary=str(document["boundary"]),
+                            event_type=str(document["event_type"]),
+                            payload=dict(document.get("payload", {})),
+                            recorded_at=str(document["recorded_at"]),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+        return tuple(events)
 
 
 class NoOpTraceRecorder:

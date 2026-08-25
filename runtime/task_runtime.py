@@ -559,9 +559,16 @@ class TaskRuntime:
 
     def _persist(self, task: Task) -> None:
         with self._persistence_lock:
+            version = None
             if self.task_store is not None:
                 current = self.task_store.version(task.task_id)
-                self.task_store.save(task, expected_version=current)
+                version = self.task_store.save(task, expected_version=current)
+            self._trace_task(
+                task,
+                "checkpoint",
+                "persisted",
+                {"state": task.state.value, "version": version},
+            )
             self.event_publisher.publish_checkpoint(task)
 
     def list_tasks(self) -> tuple[Task, ...]:
@@ -1803,6 +1810,15 @@ class TaskRuntime:
     ) -> None:
         if task.state not in TERMINAL_TASK_STATES:
             return
+        traced_state = task.task_local_state.get("terminal_trace_state")
+        if traced_state != task.state.value:
+            self._trace_task(
+                task,
+                "delivery",
+                "terminal_published",
+                {"state": task.state.value},
+            )
+            task.task_local_state["terminal_trace_state"] = task.state.value
         self.event_publisher.publish_terminal(
             task,
             memory_status=(
