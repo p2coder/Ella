@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from agent.final_response import FinalResponseGenerator
+from agent.verification import VerificationAgent
 from config.config import PROJECT_ROOT
 from config.settings import load_settings
 from devices.factory import DeviceFactory
@@ -54,6 +55,11 @@ from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 from tools.plan import PlanWrittenTool
 from tools.ask_user_question import AskUserQuestionTool
+from tools.verification import (
+    ArtifactExistsTool,
+    DocumentReadTool,
+    ToolObservationCheckTool,
+)
 from runtime.interactions import InteractionBroker
 
 MAX_APP_STEPS = 20
@@ -122,6 +128,8 @@ class AppRuntime:
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
         tool_manager.register(DocumentWriteTool(settings.document_directory))
+        tool_manager.register(ArtifactExistsTool(settings.document_directory))
+        tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
         interaction_broker = InteractionBroker()
@@ -134,6 +142,11 @@ class AppRuntime:
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
+        )
+        verification_agent = VerificationAgent(
+            prompt_engine=PromptEngine(),
+            llm_provider=llm_provider,
+            timing_recorder=timing_recorder,
         )
         task_runtime = TaskRuntime(
             task_factory=TaskFactory(
@@ -153,10 +166,16 @@ class AppRuntime:
                 llm_provider=llm_provider,
                 timing_recorder=timing_recorder,
             ),
+            verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
             task_store=TaskStore(settings.task_checkpoint_directory),
             task_queue=TaskQueue(),
+        )
+        tool_manager.register(
+            ToolObservationCheckTool(
+                lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)
+            )
         )
         interaction_broker.set_question_handler(
             lambda question: task_runtime.event_publisher.publish(
