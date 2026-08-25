@@ -127,8 +127,8 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.SUCCEEDED: frozenset({TaskState.DELIVERED}),
     TaskState.COMPLETED: frozenset({TaskState.DELIVERED}),
     TaskState.FAILED: frozenset({TaskState.DELIVERED}),
-    TaskState.UNCERTAIN: frozenset({TaskState.FAILED}),
-    TaskState.KILLED: frozenset(),
+    TaskState.UNCERTAIN: frozenset({TaskState.FAILED, TaskState.DELIVERED}),
+    TaskState.KILLED: frozenset({TaskState.DELIVERED}),
     TaskState.DELIVERED: frozenset(),
 }
 

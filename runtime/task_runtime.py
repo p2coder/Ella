@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from agent.context import AgentExecutionContext
 from agent.final_response import FinalResponseGenerator
+from agent.verification import VerificationAgent
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
@@ -29,7 +30,7 @@ from tasks.state import (
 )
 from runtime.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
-from tasks.task import Task, TaskIntent, TaskState
+from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from tasks.graph import (
     GraphEdge,
     TaskGraphDefinition,
@@ -81,8 +82,10 @@ class TaskRuntime:
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
     final_response_generator: FinalResponseGenerator | None = None
+    verification_agent: VerificationAgent | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     max_step_retries: int = 2
+    max_verification_rounds: int = 2
     task_store: TaskStore | None = None
     task_queue: TaskQueue | None = None
     step_runtime: StepRuntime | None = None
@@ -124,8 +127,10 @@ class TaskRuntime:
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
         final_response_generator: FinalResponseGenerator | None = None,
+        verification_agent: VerificationAgent | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         max_step_retries: int = 2,
+        max_verification_rounds: int = 2,
         task_store: TaskStore | None = None,
         task_queue: TaskQueue | None = None,
         step_runtime: StepRuntime | None = None,
@@ -140,14 +145,18 @@ class TaskRuntime:
     ) -> None:
         if max_step_retries < 0:
             raise ValueError("max_step_retries must be non-negative")
+        if max_verification_rounds < 1:
+            raise ValueError("max_verification_rounds must be positive")
         if max_task_workers < 1:
             raise ValueError("max_task_workers must be positive")
         self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
         self.final_response_generator = final_response_generator
+        self.verification_agent = verification_agent
         self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         self.max_step_retries = max_step_retries
+        self.max_verification_rounds = max_verification_rounds
         self.task_store = task_store
         self.task_queue = task_queue
         self.step_runtime = step_runtime
@@ -713,7 +722,7 @@ class TaskRuntime:
         accepted, code, message = True, "accepted", "Control command accepted."
         if command.command_type is TaskControlType.KILL:
             if task.state in {
-                TaskState.SUCCEEDED,
+                TaskState.COMPLETED,
                 TaskState.FAILED,
                 TaskState.UNCERTAIN,
                 TaskState.PAUSE_REQUESTED,
@@ -851,8 +860,13 @@ class TaskRuntime:
 
     def deliver(self, task_id: str, sender) -> bool:
         task = self._tasks[task_id].task
-        if task.state not in {TaskState.SUCCEEDED, TaskState.FAILED}:
-            raise ValueError("only SUCCEEDED or FAILED Tasks can be delivered")
+        if task.state not in {
+            TaskState.COMPLETED,
+            TaskState.FAILED,
+            TaskState.KILLED,
+            TaskState.UNCERTAIN,
+        }:
+            raise ValueError("only terminal Tasks can be delivered")
         delivery = task.delivery
         if delivery is None:
             delivery = self._new_delivery_record(task)
@@ -876,6 +890,7 @@ class TaskRuntime:
             delivered_at=attempted_at if succeeded else None,
         )
         if succeeded:
+            task.terminal_execution_state = task.state
             task.transition_to(TaskState.DELIVERED)
         self._persist(task)
         self._publish_terminal(task)
@@ -883,7 +898,7 @@ class TaskRuntime:
 
     @staticmethod
     def _new_delivery_record(task: Task) -> TaskDeliveryRecord:
-        if task.state is TaskState.SUCCEEDED:
+        if task.state is TaskState.COMPLETED:
             payload = (
                 task.completion.to_dict()
                 if task.completion is not None
@@ -955,7 +970,7 @@ class TaskRuntime:
         )
 
         if task.state in {
-            TaskState.SUCCEEDED,
+            TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.KILLED,
             TaskState.DELIVERED,
@@ -1126,19 +1141,11 @@ class TaskRuntime:
             task.task_local_state["completion_summary"] = decision.completion_summary
             task.task_local_state["completion_evidence_refs"] = decision.evidence_refs
             self._archive_and_advance(task)
-            self.timing_recorder.record_execution_completed(
-                creation.context.trace_id
+            completed = self._finalize_candidate(creation)
+            return self._result(
+                creation,
+                stop_reason="completed" if completed else None,
             )
-            task.completion = self._build_completion(creation)
-            self.timing_recorder.record_task_completed(creation.context.trace_id)
-            task.transition_to(TaskState.SUCCEEDED)
-            self._trace_task(
-                task,
-                "task",
-                "succeeded",
-                {"state": task.state.value},
-            )
-            return self._result(creation, stop_reason="completed")
 
         return self._result(creation)
 
@@ -1194,9 +1201,15 @@ class TaskRuntime:
             }
             if "succeeded" in terminal_states:
                 self._complete_graph_task(creation, runs)
-                task.transition_to(TaskState.SUCCEEDED)
                 self._persist(task)
-                return self._result(creation, stop_reason="completed")
+                return self._result(
+                    creation,
+                    stop_reason=(
+                        "completed"
+                        if task.state is TaskState.COMPLETED
+                        else None
+                    ),
+                )
             return self._fail_graph_task(creation, "no_reachable_success_terminal")
         wave_id = int(task.task_local_state.get("wave_number", 0)) + 1
         task.task_local_state["wave_number"] = wave_id
@@ -1276,7 +1289,6 @@ class TaskRuntime:
                     runs[candidate.node_id] = {"state": "skipped"}
             task.graph = TaskGraphRun(graph.definition, runs)
             self._complete_graph_task(creation, runs)
-            task.transition_to(TaskState.SUCCEEDED)
         self._persist(task)
         return self._result(creation)
 
@@ -1305,6 +1317,94 @@ class TaskRuntime:
             and isinstance(observation.get("observation_id"), str)
         )
         task.completion = self._build_completion(creation)
+        task.task_local_state["draft_final_response"] = (
+            task.completion.user_visible_output.final_response
+        )
+        self._verify_candidate(creation)
+
+    def _finalize_candidate(self, creation: TaskCreationResult) -> bool:
+        task = creation.task
+        task.task_local_state["pending_reasoning"] = {"purpose": "draft_response"}
+        self._persist(task)
+        task.completion = self._build_completion(creation)
+        task.task_local_state["draft_final_response"] = (
+            task.completion.user_visible_output.final_response
+        )
+        return self._verify_candidate(creation)
+
+    def _verify_candidate(self, creation: TaskCreationResult) -> bool:
+        task = creation.task
+        verification_round = int(
+            task.task_local_state.get("verification_round", 0)
+        ) + 1
+        task.task_local_state["verification_round"] = verification_round
+        task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
+        self._persist(task)
+        verifier = self.verification_agent
+        if verifier is None:
+            subagent, _ = self._execution_components()
+            verifier = VerificationAgent(
+                prompt_engine=subagent.prompt_engine,
+                llm_provider=subagent.llm_provider,
+                timing_recorder=self.timing_recorder,
+            )
+        try:
+            verdict = verifier.verify(task)
+        except Exception as error:
+            task.failure = {
+                "code": "verification_failed",
+                "message": str(error),
+            }
+            task.failure_reason = str(error)
+            task.transition_to(TaskState.FAILED)
+            task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
+            self._persist(task)
+            return False
+        results = tuple(task.task_local_state.get("verification_results", ()))
+        task.task_local_state["verification_results"] = (
+            *results,
+            verdict.to_dict(),
+        )
+        self._trace_task(
+            task,
+            "reasoning.verification",
+            "verdict",
+            verdict.to_dict(),
+        )
+        if verdict.recoverable and verification_round < self.max_verification_rounds:
+            task.tool_trace += ({
+                "observation_id": (
+                    f"{task.task_id}:verification_feedback:{verification_round}"
+                ),
+                "tool_name": "verification_feedback",
+                "task_id": task.task_id,
+                "trace_id": task.trace_id,
+                "payload": {
+                    "feedback": verdict.feedback_for_execution,
+                    "draft_quality_issues": verdict.draft_quality_issues,
+                },
+            },)
+            task.completion = None
+            task.task_local_state.pop("draft_final_response", None)
+            task.task_local_state.pop("completion_summary", None)
+            self._persist(task)
+            return False
+        self.timing_recorder.record_execution_completed(creation.context.trace_id)
+        self.timing_recorder.record_task_completed(creation.context.trace_id)
+        task.transition_to(TaskState.COMPLETED)
+        task.set_goal_state(verdict.goal_state)
+        task.terminal_execution_state = TaskState.COMPLETED
+        self._persist(task)
+        self._trace_task(
+            task,
+            "task",
+            "completed",
+            {
+                "state": task.state.value,
+                "goal_state": task.goal_state.value,
+            },
+        )
+        return True
 
     def _execute_graph_node(self, creation, node, wave_id: int) -> dict[str, Any]:
         task = creation.task
@@ -1582,7 +1682,7 @@ class TaskRuntime:
         runtime_result = self.run_until_blocked(task_id, max_steps)
         completion = runtime_result.completion
         if (
-            runtime_result.task.state is not TaskState.SUCCEEDED
+            runtime_result.task.state is not TaskState.COMPLETED
             or completion is None
         ):
             return runtime_result
@@ -1631,7 +1731,7 @@ class TaskRuntime:
     def _stop_reason(task: Task) -> str | None:
         if task.state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
             return "paused"
-        if task.state is TaskState.SUCCEEDED:
+        if task.state is TaskState.COMPLETED:
             return "completed"
         if task.state is TaskState.FAILED:
             return "failed"

@@ -135,7 +135,7 @@ class TaskStore:
             return "requires_recovery"
         if task.state is TaskState.UNCERTAIN:
             return "requires_resolution"
-        if task.state in {TaskState.SUCCEEDED, TaskState.FAILED}:
+        if task.state in {TaskState.COMPLETED, TaskState.FAILED}:
             return "delivery_pending"
         if task.state in {TaskState.KILLED, TaskState.DELIVERED}:
             return "terminal"

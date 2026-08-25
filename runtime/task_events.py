@@ -11,7 +11,7 @@ from tasks.task import Task, TaskState
 
 TERMINAL_TASK_STATES = frozenset(
     {
-        TaskState.SUCCEEDED,
+        TaskState.COMPLETED,
         TaskState.FAILED,
         TaskState.UNCERTAIN,
         TaskState.KILLED,
