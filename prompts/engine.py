@@ -93,7 +93,6 @@ class PromptEngine:
         prompt = redact_prompt_text(
             self._compose_prompt(template=template, context=safe_context)
         )
-        print("[prompts/engine.py]:prompt_type: ",prompt_type,"\nprompt: ",prompt)
         return PromptBuildResult(
             prompt=prompt,
             prompt_type=prompt_type,

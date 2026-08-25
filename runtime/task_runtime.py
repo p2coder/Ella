@@ -2,7 +2,8 @@ from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from threading import Event, Lock, Thread
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from queue import Empty, Queue
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
@@ -87,6 +88,7 @@ class TaskRuntime:
     step_runtime: StepRuntime | None = None
     max_runtime_ticks: int = 100
     max_steps: int = 20
+    max_task_workers: int = 500
     max_parallel_steps_per_task: int = 8
     wave_incremental_checkpoint_threshold: int = 20
     trace_recorder: TraceRecorder | NoOpTraceRecorder
@@ -104,12 +106,16 @@ class TaskRuntime:
         repr=False,
     )
     _worker_thread: Thread | None = field(init=False, default=None, repr=False)
+    _control_thread: Thread | None = field(init=False, default=None, repr=False)
+    _task_worker_pool: ThreadPoolExecutor | None = field(init=False, default=None, repr=False)
     _stop_event: Event = field(init=False, repr=False)
     _wake_event: Event = field(init=False, repr=False)
     _worker_lock: Lock = field(init=False, repr=False)
     _persistence_lock: Lock = field(init=False, repr=False)
     _worker_errors: dict[str, str] = field(init=False, repr=False)
     _worker_results: dict[str, TaskRuntimeResult] = field(init=False, repr=False)
+    _owned_tasks: dict[str, Future] = field(init=False, repr=False)
+    _control_queue: Queue = field(init=False, repr=False)
 
     def __init__(
         self,
@@ -125,6 +131,7 @@ class TaskRuntime:
         step_runtime: StepRuntime | None = None,
         max_runtime_ticks: int = 100,
         max_steps: int = 20,
+        max_task_workers: int = 500,
         max_parallel_steps_per_task: int = 8,
         wave_incremental_checkpoint_threshold: int = 20,
         trace_recorder: TraceRecorder | NoOpTraceRecorder | None = None,
@@ -133,6 +140,8 @@ class TaskRuntime:
     ) -> None:
         if max_step_retries < 0:
             raise ValueError("max_step_retries must be non-negative")
+        if max_task_workers < 1:
+            raise ValueError("max_task_workers must be positive")
         self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
@@ -144,6 +153,7 @@ class TaskRuntime:
         self.step_runtime = step_runtime
         self.max_runtime_ticks = max_runtime_ticks
         self.max_steps = max_steps
+        self.max_task_workers = max_task_workers
         self.max_parallel_steps_per_task = max_parallel_steps_per_task
         self.wave_incremental_checkpoint_threshold = (
             wave_incremental_checkpoint_threshold
@@ -155,12 +165,16 @@ class TaskRuntime:
         self._tasks = {}
         self._memory_results = {}
         self._worker_thread = None
+        self._control_thread = None
+        self._task_worker_pool = None
         self._stop_event = Event()
         self._wake_event = Event()
         self._worker_lock = Lock()
         self._persistence_lock = Lock()
         self._worker_errors = {}
         self._worker_results = {}
+        self._owned_tasks = {}
+        self._control_queue = Queue()
 
     @property
     def is_running(self) -> bool:
@@ -178,6 +192,16 @@ class TaskRuntime:
                 return
             self._stop_event.clear()
             self._restore_from_checkpoints()
+            self._task_worker_pool = ThreadPoolExecutor(
+                max_workers=self.max_task_workers,
+                thread_name_prefix="ella-task-worker",
+            )
+            self._control_thread = Thread(
+                target=self._control_loop,
+                name="ella-control-worker",
+                daemon=True,
+            )
+            self._control_thread.start()
             self._worker_thread = Thread(
                 target=self._execution_loop,
                 name="ella-task-runtime",
@@ -188,15 +212,29 @@ class TaskRuntime:
     def stop(self) -> None:
         self._stop_event.set()
         self._wake_event.set()
+        broker = self._interaction_broker()
+        if broker is not None:
+            for task_id in tuple(self._owned_tasks):
+                broker.cancel_task(task_id)
 
     def join(self, timeout: float | None = None) -> bool:
         thread = self._worker_thread
         if thread is None:
             return True
         thread.join(timeout)
-        return not thread.is_alive()
+        control = self._control_thread
+        if control is not None:
+            control.join(timeout)
+        pool = self._task_worker_pool
+        if pool is not None and not thread.is_alive():
+            pool.shutdown(wait=True, cancel_futures=False)
+            self._task_worker_pool = None
+        return not thread.is_alive() and (control is None or not control.is_alive())
 
     def schedule(self, task_id: str) -> bool:
+        if task_id in self._owned_tasks:
+            self._wake_event.set()
+            return True
         if self.task_queue is None:
             self.task_queue = TaskQueue()
         enqueued = self.task_queue.enqueue(task_id)
@@ -220,6 +258,11 @@ class TaskRuntime:
 
     def _execution_loop(self) -> None:
         while not self._stop_event.is_set():
+            self._reap_task_workers()
+            if len(self._owned_tasks) >= self.max_task_workers:
+                self._wake_event.wait(0.05)
+                self._wake_event.clear()
+                continue
             queue = self.task_queue
             task_id = None if queue is None else queue.dequeue()
             if task_id is None:
@@ -229,26 +272,56 @@ class TaskRuntime:
             creation = self._tasks.get(task_id)
             if creation is None:
                 continue
-            task = creation.task
+            if task_id in self._owned_tasks:
+                continue
+            pool = self._task_worker_pool
+            if pool is None:
+                return
+            future = pool.submit(self._run_task_worker, creation)
+            self._owned_tasks[task_id] = future
+
+    def _reap_task_workers(self) -> None:
+        completed = tuple(
+            task_id
+            for task_id, future in self._owned_tasks.items()
+            if future.done()
+        )
+        for task_id in completed:
+            future = self._owned_tasks.pop(task_id)
+            try:
+                future.result()
+            except Exception as error:
+                self._worker_errors[task_id] = str(error)
+            self._wake_event.set()
+
+    def _run_task_worker(self, creation: TaskCreationResult) -> None:
+        task = creation.task
+        self._trace_task(
+            task,
+            "runtime.worker",
+            "claimed",
+            {"state": task.state.value},
+        )
+        try:
+            while not self._stop_event.is_set():
+                if task.state in TERMINAL_TASK_STATES:
+                    return
+                if task.state is TaskState.PAUSED:
+                    self._wake_event.wait(0.05)
+                    self._wake_event.clear()
+                    continue
+                self._process_scheduled_task(creation)
+        except Exception as error:
+            self._worker_errors[task.task_id] = str(error)
+            self._handle_worker_exception(task, error)
+        finally:
+            self._publish_terminal(task)
             self._trace_task(
                 task,
                 "runtime.worker",
-                "claimed",
+                "released",
                 {"state": task.state.value},
             )
-            try:
-                self._process_scheduled_task(creation)
-            except Exception as error:
-                self._worker_errors[task_id] = str(error)
-                self._handle_worker_exception(task, error)
-            finally:
-                self._publish_terminal(task)
-                self._trace_task(
-                    task,
-                    "runtime.worker",
-                    "released",
-                    {"state": task.state.value},
-                )
 
     def _process_scheduled_task(self, creation: TaskCreationResult) -> None:
         task = creation.task
@@ -544,6 +617,37 @@ class TaskRuntime:
         return broker if isinstance(broker, InteractionBroker) else None
 
     def apply_control(self, command: TaskControlCommand) -> TaskControlResult:
+        control = self._control_thread
+        if control is None or not control.is_alive():
+            return self._apply_control_now(command)
+        completed = Event()
+        result_box: list[TaskControlResult | Exception] = []
+        self._control_queue.put((command, completed, result_box))
+        self._wake_event.set()
+        completed.wait()
+        result = result_box[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def _control_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                command, completed, result_box = self._control_queue.get(
+                    timeout=0.05
+                )
+            except Empty:
+                continue
+            try:
+                result_box.append(self._apply_control_now(command))
+            except Exception as error:
+                result_box.append(error)
+            finally:
+                completed.set()
+
+    def _apply_control_now(
+        self, command: TaskControlCommand
+    ) -> TaskControlResult:
         creation = self._tasks.get(command.task_id)
         if creation is None and self.task_store is not None:
             stored = self.task_store.load(command.task_id)
@@ -598,6 +702,9 @@ class TaskRuntime:
             else:
                 task.paused_from_state = task.state
                 task.control_request = command
+                broker = self._interaction_broker()
+                if broker is not None:
+                    broker.cancel_task(task.task_id)
                 task.transition_to(TaskState.PAUSE_REQUESTED)
                 if previous_state not in {
                     TaskState.FORMULATING,
@@ -610,8 +717,12 @@ class TaskRuntime:
                 accepted, code, message = False, "invalid_state", "Only a paused Task can resume."
             else:
                 task.control_request = command
-                task.transition_to(TaskState.READY)
+                resume_state = task.paused_from_state
+                task.transition_to(resume_state)
                 task.paused_from_state = None
+                broker = self._interaction_broker()
+                if broker is not None:
+                    broker.reset_task(task.task_id)
                 if self.task_queue is not None or self.is_running:
                     self.schedule(task.task_id)
         else:
@@ -763,7 +874,6 @@ class TaskRuntime:
             max_step_retries=self.max_step_retries,
         )
         task_id = creation.task.task_id
-        print("[task_runtime.py]submit:submit event ",task_id)
         if task_id in self._tasks:
             raise ValueError(f"duplicate task_id: {task_id}")
         creation.task.transition_to(TaskState.READY)
@@ -889,7 +999,8 @@ class TaskRuntime:
                 ),
             }
             task.task_local_state["in_flight_action"] = in_flight
-            task.transition_to(TaskState.TOOL_EXECUTION)
+            if task.state is TaskState.REASONING:
+                task.transition_to(TaskState.TOOL_EXECUTION)
             self._persist(task)
             self._trace_task(
                 task,
@@ -928,7 +1039,6 @@ class TaskRuntime:
             TaskState.KILLED,
         }:
             return self._result(creation, stop_reason=self._stop_reason(task))
-        print("[task_runtime]desicion action: ",decision.action)
         if execution.failure is not None:
             task.task_local_state.pop("current_decision", None)
             self._trace_task(
@@ -1318,7 +1428,6 @@ class TaskRuntime:
 
         creation = self._tasks[task_id]
         stop_reason = self._stop_reason(creation.task)
-        print("[task_runtime]stop reason: ",stop_reason)
         if stop_reason is not None:
             return self._result(
                 creation,
@@ -1344,7 +1453,6 @@ class TaskRuntime:
                 {"state": task.state.value},
             )
             stop_reason = self._stop_reason(creation.task)
-            print("[task_runtime] stop_reason: ",stop_reason)
             if stop_reason is not None:
                 return self._result(
                     creation,

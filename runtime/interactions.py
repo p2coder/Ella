@@ -118,3 +118,7 @@ class InteractionBroker:
         with self._condition:
             self._cancelled_tasks.add(task_id)
             self._condition.notify_all()
+
+    def reset_task(self, task_id: str) -> None:
+        with self._condition:
+            self._cancelled_tasks.discard(task_id)
