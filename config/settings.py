@@ -42,6 +42,7 @@ CONFIG_NAMES = {
     "ELLA_TASK_CHECKPOINT_DIRECTORY": "TASK_CHECKPOINT_DIRECTORY",
     "ELLA_DISPLAY_DIRECTORY": "DISPLAY_DIRECTORY",
     "ELLA_RAW_MEDIA_DIRECTORY": "RAW_MEDIA_DIRECTORY",
+    "ELLA_DOCUMENT_DIRECTORY": "DOCUMENT_DIRECTORY",
 }
 
 SAFE_DEFAULTS = {
@@ -71,6 +72,9 @@ SAFE_DEFAULTS = {
     "ELLA_DISPLAY_DIRECTORY": user_config.PROJECT_ROOT / "output" / "display",
     "ELLA_RAW_MEDIA_DIRECTORY": (
         user_config.PROJECT_ROOT / "output" / "raw_media"
+    ),
+    "ELLA_DOCUMENT_DIRECTORY": (
+        user_config.PROJECT_ROOT / "output" / "documents"
     ),
 }
 
@@ -103,6 +107,9 @@ class EllaSettings:
     display_directory: Path = user_config.PROJECT_ROOT / "output" / "display"
     raw_media_directory: Path = (
         user_config.PROJECT_ROOT / "output" / "raw_media"
+    )
+    document_directory: Path = (
+        user_config.PROJECT_ROOT / "output" / "documents"
     )
 
 
@@ -170,6 +177,7 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         ),
         display_directory=_path(values, "ELLA_DISPLAY_DIRECTORY"),
         raw_media_directory=_path(values, "ELLA_RAW_MEDIA_DIRECTORY"),
+        document_directory=_path(values, "ELLA_DOCUMENT_DIRECTORY"),
     )
 
 

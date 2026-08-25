@@ -41,6 +41,7 @@ from tasks.factory import TaskFactory
 from sessions.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
+    DocumentWriteTool,
     MockChecklistTool,
     MockVisionSummaryTool,
     MockWeatherTool,
@@ -120,6 +121,7 @@ class AppRuntime:
         tool_manager.register(MockChecklistTool())
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
+        tool_manager.register(DocumentWriteTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
         interaction_broker = InteractionBroker()
