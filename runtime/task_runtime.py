@@ -29,7 +29,14 @@ from tasks.state import (
 from runtime.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
 from tasks.task import Task, TaskState
-from tasks.graph import TaskGraphRun, TaskGraphNodeType, ToolGraphRun
+from tasks.graph import (
+    GraphEdge,
+    TaskGraphDefinition,
+    TaskGraphNodeDefinition,
+    TaskGraphRun,
+    TaskGraphNodeType,
+    ToolGraphRun,
+)
 from tasks.factory import TaskCreationResult, TaskFactory
 from agent.subagent import DecisionValidationError, SubAgent
 from tools import ToolResult
@@ -898,6 +905,7 @@ class TaskRuntime:
                 f"{task.task_id}:observation:{len(task.tool_trace) + 1}"
             )
             task.tool_trace += (observation,)
+            self._observe_capability_result(task, execution.tool_result)
             task.task_local_state.pop("current_decision", None)
             self._archive_and_advance(task)
             self._persist(task)
@@ -1016,12 +1024,19 @@ class TaskRuntime:
                     task.graph = TaskGraphRun(graph.definition, runs)
                     self._persist(task)
 
+        plan_payload = None
         for node_id in graph.definition.stable_ready_order(results):
             runs[node_id] = results[node_id]
             for observation in results[node_id].get("observations", ()):
                 task.tool_trace += (observation,)
+                if observation.get("tool_name") == "plan_written":
+                    plan_payload = observation.get("payload")
         task.graph = TaskGraphRun(graph.definition, runs)
         task.task_local_state["wave_completed"] = wave_id
+        if isinstance(plan_payload, Mapping):
+            self._activate_plan(task, plan_payload)
+            self._persist(task)
+            return self._result(creation)
         if any(
             _graph_run_state(runs.get(item)) == "succeeded"
             for item in graph.definition.terminal_node_ids
@@ -1085,6 +1100,65 @@ class TaskRuntime:
             observation["observation_id"] = f"{task.task_id}:{node.node_id}:observation:{len(local.tool_trace) + 1}"
             local.tool_trace += (observation,)
         return {"state": "failed", "code": "max_steps_exhausted", "wave_id": wave_id}
+
+    def _observe_capability_result(self, task: Task, result: ToolResult) -> None:
+        if result.tool_name == "plan_written":
+            self._activate_plan(task, result.payload)
+
+    @staticmethod
+    def _activate_plan(task: Task, payload: Mapping[str, Any]) -> None:
+        if payload.get("task_id") != task.task_id:
+            raise ValueError("plan result task_id does not match Task")
+        version_id = payload.get("version_id")
+        raw_steps = payload.get("steps")
+        if not isinstance(version_id, str) or not version_id:
+            raise ValueError("plan result requires version_id")
+        if not isinstance(raw_steps, (list, tuple)) or not raw_steps:
+            raise ValueError("plan result requires steps")
+        nodes = tuple(
+            TaskGraphNodeDefinition(
+                node_id=str(item["step_id"]),
+                node_type=TaskGraphNodeType.STEP,
+                payload={
+                    "goal": str(item["goal"]),
+                    "completion_criteria": tuple(item["completion_criteria"]),
+                },
+            )
+            for item in raw_steps
+        )
+        edges = tuple(
+            GraphEdge(str(dependency), str(item["step_id"]))
+            for item in raw_steps
+            for dependency in item.get("depends_on", ())
+        )
+        depended_on = {edge.from_node_id for edge in edges}
+        entries = tuple(
+            str(item["step_id"])
+            for item in raw_steps
+            if not item.get("depends_on")
+        )
+        terminals = tuple(
+            str(item["step_id"])
+            for item in raw_steps
+            if str(item["step_id"]) not in depended_on
+        )
+        definition = TaskGraphDefinition(
+            graph_id=f"plan-{task.task_id}",
+            version=version_id,
+            nodes=nodes,
+            edges=edges,
+            entry_node_ids=entries,
+            terminal_node_ids=terminals,
+        )
+        previous_runs = {} if task.graph is None else task.graph.node_runs
+        migrated = {
+            node.node_id: previous_runs[node.node_id]
+            for node in nodes
+            if node.node_id in previous_runs
+            and _graph_run_state(previous_runs[node.node_id]) == "succeeded"
+        }
+        task.graph = TaskGraphRun(definition, migrated)
+        task.task_local_state["active_plan_version"] = version_id
 
     def _fail_graph_task(self, creation, code: str) -> TaskRuntimeResult:
         task = creation.task

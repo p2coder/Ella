@@ -44,7 +44,7 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
-from tools.plan import PlanUpdateTool, PlanWrittenTool
+from tools.plan import PlanWrittenTool
 
 MAX_APP_STEPS = 20
 
@@ -110,7 +110,6 @@ class AppRuntime:
         tool_manager.register(MockChecklistTool())
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
-        tool_manager.register(PlanUpdateTool(plan_store))
 
 
         subagent = SubAgent(

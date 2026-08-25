@@ -1,15 +1,13 @@
-from dataclasses import dataclass, replace
+from __future__ import annotations
+
+from dataclasses import dataclass
 from enum import StrEnum
+import hashlib
 import json
 import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+import subprocess
 from typing import Any
-
-
-class ProjectionStatus(StrEnum):
-    CURRENT = "current"
-    STALE = "stale"
 
 
 class PlanStepStatus(StrEnum):
@@ -26,8 +24,6 @@ class PlanStep:
     goal: str
     completion_criteria: tuple[str, ...]
     depends_on: tuple[str, ...] = ()
-    status: PlanStepStatus = PlanStepStatus.PENDING
-    result_summary: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,108 +31,189 @@ class PlanRecord:
     task_id: str
     version_id: str
     steps: tuple[PlanStep, ...]
-    projection_status: ProjectionStatus = ProjectionStatus.CURRENT
-    revision: int = 1
+    parent_version_id: str | None
+    content_digest: str
+    created_from_decision_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "version_id": self.version_id,
+            "parent_version_id": self.parent_version_id,
+            "content_digest": self.content_digest,
+            "created_from_decision_id": self.created_from_decision_id,
+            "steps": [
+                {
+                    "step_id": step.step_id,
+                    "goal": step.goal,
+                    "completion_criteria": list(step.completion_criteria),
+                    "depends_on": list(step.depends_on),
+                }
+                for step in self.steps
+            ],
+        }
 
 
 class PlanStore:
+    """Immutable Plan versions backed by one bare Git repository."""
+
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
+        self._ensure_repository()
 
-    def write(self, record: PlanRecord) -> PlanRecord:
-        _validate_plan(record)
-        if self.load(record.task_id, record.version_id) is not None:
-            raise ValueError("plan version already exists and is immutable")
-        self._write(record)
-        return record
-
-    def load(self, task_id: str, version_id: str) -> PlanRecord | None:
-        path = self._path(task_id, version_id)
-        if not path.exists():
-            return None
-        raw = json.loads(path.read_text(encoding="utf-8"))
+    def write(
+        self,
+        *,
+        task_id: str,
+        steps: tuple[PlanStep, ...],
+        created_from_decision_id: str | None = None,
+    ) -> PlanRecord:
+        _validate_identity(task_id)
+        _validate_steps(steps)
+        parent = self.active_version(task_id)
+        body = _canonical_body(task_id, steps, parent, created_from_decision_id)
+        payload = json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        digest = hashlib.sha256(payload).hexdigest()
+        blob = self._git("hash-object", "-w", "--stdin", input_bytes=payload)
+        tree = self._git(
+            "mktree",
+            input_bytes=f"100644 blob {blob}\tplan.json\n".encode(),
+        )
+        args = ["commit-tree", tree]
+        if parent is not None:
+            args.extend(("-p", parent))
+        args.extend(("-m", f"plan {task_id}"))
+        version_id = self._git(*args, env=_git_identity_env())
+        self._git(
+            "update-ref",
+            self._ref(task_id),
+            version_id,
+            parent or ("0" * 40),
+        )
         return PlanRecord(
-            raw["task_id"], raw["version_id"],
-            tuple(PlanStep(step["step_id"], step["goal"], tuple(step["completion_criteria"]), tuple(step["depends_on"]), PlanStepStatus(step["status"]), step.get("result_summary")) for step in raw["steps"]),
-            ProjectionStatus(raw["projection_status"]), raw["revision"],
+            task_id,
+            version_id,
+            steps,
+            parent,
+            digest,
+            created_from_decision_id,
         )
 
-    def update_progress(
-        self,
-        task_id: str,
-        version_id: str,
-        step_id: str,
-        expected_old_status: PlanStepStatus,
-        new_status: PlanStepStatus,
-        result_summary: str | None = None,
-    ) -> PlanRecord:
-        record = self.load(task_id, version_id)
-        if record is None:
-            raise KeyError((task_id, version_id))
-        index = next((i for i, step in enumerate(record.steps) if step.step_id == step_id), None)
-        if index is None:
-            raise KeyError(step_id)
-        old = record.steps[index]
-        if old.status is not expected_old_status:
-            raise ValueError("plan progress compare-and-set conflict")
-        steps = list(record.steps)
-        steps[index] = replace(old, status=new_status, result_summary=result_summary)
-        updated = replace(record, steps=tuple(steps), revision=record.revision + 1)
-        self._write(updated)
-        return updated
+    def load(self, task_id: str, version_id: str | None = None) -> PlanRecord | None:
+        _validate_identity(task_id)
+        target = version_id or self.active_version(task_id)
+        if target is None:
+            return None
+        try:
+            raw = self._git("show", f"{target}:plan.json")
+        except subprocess.CalledProcessError:
+            return None
+        body = json.loads(raw)
+        steps = tuple(
+            PlanStep(
+                str(item["step_id"]),
+                str(item["goal"]),
+                tuple(item["completion_criteria"]),
+                tuple(item.get("depends_on", ())),
+            )
+            for item in body["steps"]
+        )
+        payload = json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return PlanRecord(
+            str(body["task_id"]),
+            target,
+            steps,
+            body.get("parent_version_id"),
+            hashlib.sha256(payload).hexdigest(),
+            body.get("created_from_decision_id"),
+        )
 
-    def mark_stale(self, task_id: str, version_id: str) -> PlanRecord:
-        record = self.load(task_id, version_id)
-        if record is None:
-            raise KeyError((task_id, version_id))
-        updated = replace(record, projection_status=ProjectionStatus.STALE, revision=record.revision + 1)
-        self._write(updated)
-        return updated
+    def active_version(self, task_id: str) -> str | None:
+        _validate_identity(task_id)
+        try:
+            return self._git("rev-parse", "--verify", self._ref(task_id))
+        except subprocess.CalledProcessError:
+            return None
 
-    def _write(self, record: PlanRecord) -> None:
+    def _ensure_repository(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        data = {
-            "task_id": record.task_id,
-            "version_id": record.version_id,
-            "projection_status": record.projection_status.value,
-            "revision": record.revision,
-            "steps": [
-                {"step_id": step.step_id, "goal": step.goal, "completion_criteria": step.completion_criteria, "depends_on": step.depends_on, "status": step.status.value, "result_summary": step.result_summary}
-                for step in record.steps
-            ],
-        }
-        payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        path = self._path(record.task_id, record.version_id)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=self.root, delete=False) as temp:
-            temp.write(payload)
-            temp.flush()
-            os.fsync(temp.fileno())
-            temporary = temp.name
-        os.replace(temporary, path)
+        if not (self.root / "HEAD").exists():
+            subprocess.run(
+                ["git", "init", "--bare", str(self.root)],
+                check=True,
+                capture_output=True,
+            )
 
-    def _path(self, task_id: str, version_id: str) -> Path:
-        for value in (task_id, version_id):
-            if not value or Path(value).name != value:
-                raise ValueError("plan identity must not contain a path")
-        return self.root / f"{task_id}--{version_id}.json"
+    def _git(
+        self,
+        *args: str,
+        input_bytes: bytes | None = None,
+        env: dict[str, str] | None = None,
+    ) -> str:
+        result = subprocess.run(
+            ["git", "--git-dir", str(self.root), *args],
+            input=input_bytes,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        return result.stdout.decode("utf-8").strip()
+
+    @staticmethod
+    def _ref(task_id: str) -> str:
+        return f"refs/ella/tasks/{task_id}"
 
 
-def _validate_plan(record: PlanRecord) -> None:
-    if not record.task_id or not record.version_id or not record.steps:
-        raise ValueError("plan identity and steps are required")
-    ids = [step.step_id for step in record.steps]
+def _canonical_body(
+    task_id: str,
+    steps: tuple[PlanStep, ...],
+    parent: str | None,
+    decision_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "parent_version_id": parent,
+        "created_from_decision_id": decision_id,
+        "steps": [
+            {
+                "step_id": step.step_id,
+                "goal": step.goal,
+                "completion_criteria": list(step.completion_criteria),
+                "depends_on": list(step.depends_on),
+            }
+            for step in steps
+        ],
+    }
+
+
+def _validate_identity(value: str) -> None:
+    if not value or Path(value).name != value or value.startswith("."):
+        raise ValueError("task_id must be a safe Git ref component")
+
+
+def _validate_steps(steps: tuple[PlanStep, ...]) -> None:
+    if not steps:
+        raise ValueError("plan requires at least one step")
+    ids = tuple(step.step_id for step in steps)
+    if any(not item or Path(item).name != item for item in ids):
+        raise ValueError("step_id must be a safe non-empty name")
     if len(ids) != len(set(ids)):
         raise ValueError("plan step IDs must be unique")
     known = set(ids)
-    for step in record.steps:
+    dependencies = {step.step_id: step.depends_on for step in steps}
+    for step in steps:
         if not step.goal or not step.completion_criteria:
             raise ValueError("each plan step needs a goal and completion criteria")
-        if not set(step.depends_on) <= known or step.step_id in step.depends_on:
+        if step.step_id in step.depends_on or not set(step.depends_on) <= known:
             raise ValueError("invalid plan dependency")
     visiting: set[str] = set()
     visited: set[str] = set()
-    dependencies = {step.step_id: step.depends_on for step in record.steps}
-    def visit(step_id):
+
+    def visit(step_id: str) -> None:
         if step_id in visiting:
             raise ValueError("plan dependencies must be acyclic")
         if step_id in visited:
@@ -146,5 +223,19 @@ def _validate_plan(record: PlanRecord) -> None:
             visit(dependency)
         visiting.remove(step_id)
         visited.add(step_id)
+
     for step_id in ids:
         visit(step_id)
+
+
+def _git_identity_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Ella Runtime",
+            "GIT_AUTHOR_EMAIL": "runtime@ella.local",
+            "GIT_COMMITTER_NAME": "Ella Runtime",
+            "GIT_COMMITTER_EMAIL": "runtime@ella.local",
+        }
+    )
+    return env
