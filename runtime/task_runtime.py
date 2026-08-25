@@ -51,6 +51,7 @@ from .task_store import TaskStore
 from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
 from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
+from .interactions import InteractionBroker, UserAnswer
 
 
 @dataclass(frozen=True, slots=True)
@@ -503,7 +504,44 @@ class TaskRuntime:
         correlation_key: str,
         value: str,
     ) -> bool:
-        return False
+        broker = self._interaction_broker()
+        if broker is None:
+            return False
+        question = next(
+            (
+                item
+                for item in broker.pending_for_task(task_id)
+                if item.question_id == correlation_key
+            ),
+            None,
+        )
+        if question is None:
+            return False
+        accepted = broker.answer(
+            UserAnswer(
+                question_id=question.question_id,
+                task_id=task_id,
+                user_id=question.user_id,
+                answer=value,
+                metadata={},
+            )
+        )
+        if accepted:
+            task = self._tasks[task_id].task
+            self._trace_task(
+                task,
+                "interaction.ask_user_question",
+                "answered",
+                {"question_id": question.question_id},
+            )
+        return accepted
+
+    def _interaction_broker(self) -> InteractionBroker | None:
+        if self.executor is None:
+            return None
+        tool = self.executor.tool_manager.get_tool("ask_user_question")
+        broker = getattr(tool, "broker", None)
+        return broker if isinstance(broker, InteractionBroker) else None
 
     def apply_control(self, command: TaskControlCommand) -> TaskControlResult:
         creation = self._tasks.get(command.task_id)
@@ -533,6 +571,9 @@ class TaskRuntime:
                 accepted, code, message = False, "terminal_task", "Terminal Task cannot be killed."
             else:
                 task.control_request = command
+                broker = self._interaction_broker()
+                if broker is not None:
+                    broker.cancel_task(task.task_id)
                 if task.state is not TaskState.KILL_REQUESTED:
                     task.transition_to(TaskState.KILL_REQUESTED)
                 if previous_state not in {

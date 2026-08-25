@@ -45,6 +45,8 @@ from tools import (
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 from tools.plan import PlanWrittenTool
+from tools.ask_user_question import AskUserQuestionTool
+from runtime.interactions import InteractionBroker
 
 MAX_APP_STEPS = 20
 
@@ -110,6 +112,8 @@ class AppRuntime:
         tool_manager.register(MockChecklistTool())
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
+        interaction_broker = InteractionBroker()
+        tool_manager.register(AskUserQuestionTool(interaction_broker))
 
 
         subagent = SubAgent(
