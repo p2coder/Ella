@@ -29,7 +29,7 @@ from tasks.state import (
 )
 from runtime.executor import CapabilityExecutor
 from sessions.output import UserVisibleAgentOutput
-from tasks.task import Task, TaskState
+from tasks.task import Task, TaskIntent, TaskState
 from tasks.graph import (
     GraphEdge,
     TaskGraphDefinition,
@@ -325,29 +325,6 @@ class TaskRuntime:
 
     def _process_scheduled_task(self, creation: TaskCreationResult) -> None:
         task = creation.task
-        if task.state in {TaskState.CREATED, TaskState.FORMULATING}:
-            if self.formulation_handler is None:
-                raise RuntimeError("TaskRuntime has no formulation handler")
-            if task.state is TaskState.CREATED:
-                self.begin_formulation(task.task_id)
-            handoff = self.formulation_handler(task)
-            if task.state in {
-                TaskState.PAUSE_REQUESTED,
-                TaskState.KILL_REQUESTED,
-            }:
-                self._reach_control_safe_point(task)
-                return
-            self._trace_task(
-                task,
-                "reasoning.formulation",
-                "completed",
-                {
-                    "task_goal": handoff.task_goal,
-                    "prompt_text": handoff.task_formulation_prompt_text,
-                },
-            )
-            self.submit_formulated(task.task_id, handoff)
-            return
         if task.state not in {TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
             return
         result = self.run_until_complete(task.task_id, self.max_steps)
@@ -486,7 +463,13 @@ class TaskRuntime:
                 {"state": task.state.value},
             )
 
-    def create_task(self, source_event) -> TaskHandle:
+    def create_task(
+        self,
+        source_event,
+        *,
+        user_preference_summary: str = "",
+        environment_summary: str = "",
+    ) -> TaskHandle:
         task_id = self.task_factory._new_task_id()
         scope = self.task_factory._resolve_capability_scope()
         context = AgentExecutionContext(
@@ -505,11 +488,25 @@ class TaskRuntime:
             trace_id=source_event.trace_id,
             source_event=source_event,
             execution_context=context,
+            task_local_state={
+                "latest_user_input": str(source_event.payload.get("text", "")),
+                "user_preference_summary": user_preference_summary,
+                "environment_summary": environment_summary,
+            },
         )
+        task.current_step = replace(
+            task.current_step,
+            max_step_retries=self.max_step_retries,
+        )
+        task.transition_to(TaskState.READY)
         creation = TaskCreationResult(task)
         self._tasks[task_id] = creation
         self._persist(task)
         self._trace_task(task, "task", "created")
+        self._trace_task(task, "task", "submitted")
+        self.timing_recorder.record_task_submitted(
+            task.trace_id, task_id=task_id
+        )
         if self.is_running:
             self.schedule(task_id)
         return TaskHandle(task_id, source_event.trace_id)
@@ -547,6 +544,43 @@ class TaskRuntime:
             task.trace_id, task_id=task_id
         )
         return TaskHandle(task_id, task.trace_id)
+
+    def _commit_task_intent(self, task: Task, intent: TaskIntent) -> None:
+        event = task.source_event
+        context = task.execution_context
+        if event is None or context is None:
+            raise ValueError("First Decision requires Task event and context")
+        task.intent = intent
+        task.handoff = HandoffRequest(
+            task_goal=intent.goal,
+            trigger_event=event,
+            user_preference_summary=str(
+                task.task_local_state.get("user_preference_summary", "")
+            ),
+            environment_summary=str(
+                task.task_local_state.get("environment_summary", "")
+            ),
+            context_summary="Intent established by First Decision.",
+            constraints=intent.constraints,
+            completion_criteria=intent.minimum_acceptance_criteria,
+        )
+        task.execution_context = AgentExecutionContext(
+            agent_id=context.agent_id,
+            agent_role=context.agent_role,
+            parent_agent_id=context.parent_agent_id,
+            task_id=context.task_id,
+            trace_id=context.trace_id,
+            handoff_goal=intent.goal,
+            memory_scope=context.memory_scope,
+            permissions=context.permissions,
+            capability_scope=context.capability_scope,
+        )
+        self._trace_task(
+            task,
+            "reasoning.first_decision",
+            "intent_committed",
+            {"intent": intent.to_dict()},
+        )
 
     def fail_formulation(self, task_id: str, reason: str) -> None:
         task = self._tasks[task_id].task
@@ -928,7 +962,7 @@ class TaskRuntime:
         }:
             raise ValueError(f"cannot step terminal task: {task.state.value}")
         if task.state is TaskState.CREATED:
-            raise ValueError("CREATED task must be formulated before execution")
+            raise ValueError("CREATED task must be submitted before execution")
 
         subagent, executor = self._execution_components()
 
@@ -956,11 +990,23 @@ class TaskRuntime:
             )
         else:
             try:
-                decision = subagent.decide_next_action(
-                    task.handoff,
-                    creation.context,
-                    task,
-                )
+                if task.intent is None:
+                    first = subagent.decide_first_action(creation.context, task)
+                    if first.intent is not None:
+                        self._commit_task_intent(task, first.intent)
+                    decision = first.action
+                    task.task_local_state["pending_reasoning"] = {
+                        "purpose": "first_decision"
+                    }
+                else:
+                    decision = subagent.decide_next_action(
+                        task.handoff,
+                        creation.context,
+                        task,
+                    )
+                    task.task_local_state["pending_reasoning"] = {
+                        "purpose": "execution"
+                    }
             except DecisionValidationError as error:
                 self._handle_decision_failure(task, str(error))
                 self._persist(task)

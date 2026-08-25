@@ -7,7 +7,7 @@ from agent.handoff import HandoffRequest
 from skill.manager import SkillManager
 from tools.manager import ToolManager
 
-from .task import Task
+from .task import Task, TaskIntent
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -64,6 +64,14 @@ class TaskFactory:
             trace_id=handoff.trigger_event.trace_id,
             source_event=handoff.trigger_event,
             execution_context=context,
+            intent=TaskIntent(
+                goal=handoff.task_goal,
+                constraints=handoff.constraints,
+                deliverables=(handoff.context_summary,)
+                if handoff.context_summary
+                else (),
+                minimum_acceptance_criteria=handoff.completion_criteria,
+            ),
         )
         return TaskCreationResult(task=task)
 

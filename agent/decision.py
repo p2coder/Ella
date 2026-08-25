@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from tasks.task import TaskIntent
+
 
 CALL_TOOL = "CALL_TOOL"
 COMPLETE = "COMPLETE"
@@ -69,3 +71,24 @@ class ExecutionDecision:
             completion_summary=value.get("completion_summary"),
             evidence_refs=tuple(evidence_refs),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FirstDecision:
+    intent: TaskIntent | None
+    action: ExecutionDecision
+
+    def __post_init__(self) -> None:
+        if self.intent is None and not (
+            self.action.action == CALL_TOOL
+            and self.action.tool_name == "ask_user_question"
+        ):
+            raise ValueError(
+                "FirstDecision without intent must ask the user a question"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "intent": None if self.intent is None else self.intent.to_dict(),
+            "action": self.action.to_dict(),
+        }

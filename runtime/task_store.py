@@ -22,7 +22,7 @@ from tasks.graph import (
     ToolGraphRun,
     ToolNodeDefinition,
 )
-from tasks.task import Task, TaskGoalState, TaskState
+from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from sessions.output import UserVisibleAgentOutput
 from tasks.state import StepExecutionState, ToolFailureKind, ToolFailureObservation
 from tasks.completion import TaskCompletionPackage
@@ -164,6 +164,7 @@ def _encode_task(task: Task) -> dict[str, Any]:
                 if task.terminal_execution_state
                 else None
             ),
+            "intent": None if task.intent is None else task.intent.to_dict(),
             "graph": _encode_graph(task.graph),
             "paused_from_state": task.paused_from_state.value
             if task.paused_from_state
@@ -208,6 +209,18 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
         terminal_execution_state=(
             TaskState(data["terminal_execution_state"])
             if data.get("terminal_execution_state")
+            else None
+        ),
+        intent=(
+            TaskIntent(
+                goal=str(data["intent"]["goal"]),
+                constraints=tuple(data["intent"].get("constraints", ())),
+                deliverables=tuple(data["intent"].get("deliverables", ())),
+                minimum_acceptance_criteria=tuple(
+                    data["intent"].get("minimum_acceptance_criteria", ())
+                ),
+            )
+            if data.get("intent")
             else None
         ),
         paused_from_state=TaskState(data["paused_from_state"])

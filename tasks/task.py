@@ -34,6 +34,35 @@ class TaskGoalState(StrEnum):
     NOT_ACHIEVED = "not_achieved"
 
 
+@dataclass(frozen=True, slots=True)
+class TaskIntent:
+    goal: str
+    constraints: tuple[str, ...] = ()
+    deliverables: tuple[str, ...] = ()
+    minimum_acceptance_criteria: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.goal.strip():
+            raise ValueError("TaskIntent goal must be non-empty")
+        for field_name in (
+            "constraints",
+            "deliverables",
+            "minimum_acceptance_criteria",
+        ):
+            values = tuple(getattr(self, field_name))
+            if any(not isinstance(item, str) or not item.strip() for item in values):
+                raise ValueError(f"TaskIntent {field_name} must contain non-empty strings")
+            object.__setattr__(self, field_name, values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "goal": self.goal,
+            "constraints": self.constraints,
+            "deliverables": self.deliverables,
+            "minimum_acceptance_criteria": self.minimum_acceptance_criteria,
+        }
+
+
 ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CREATED: frozenset(
         {
@@ -112,6 +141,7 @@ class Task:
     state: TaskState = TaskState.CREATED
     goal_state: TaskGoalState | None = None
     terminal_execution_state: TaskState | None = None
+    intent: TaskIntent | None = None
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
     tool_trace: tuple[dict[str, Any], ...] = ()

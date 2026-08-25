@@ -149,7 +149,26 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
 )
 
 
+FIRST_DECISION_TEMPLATE = PromptTemplate(
+    name="first_decision",
+    system_prompt=ELLA_SYSTEM_PROMPT,
+    instruction=(
+        f"{DECISION_POLICY_PROMPT} This is the first decision for a raw user "
+        "request. Return one strict JSON object containing intent and action. "
+        "intent must contain goal, constraints, deliverables, and "
+        "minimum_acceptance_criteria. Acceptance criteria describe what must "
+        "be true, not checker or tool names. action must use the current "
+        "execution protocol. For a complex task, create a plan by calling "
+        "the visible plan_written capability. For a simple task, call the "
+        "needed visible Tool or answer directly. If the user's purpose is "
+        "genuinely unclear, set intent to null and call ask_user_question. "
+        "Do not use keyword-specific goal templates."
+    ),
+)
+
+
 TEMPLATES_BY_TYPE = {
+    "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
     "TASK_FORMULATION": TASK_FORMULATION_TEMPLATE,
     "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
