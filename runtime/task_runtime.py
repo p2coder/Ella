@@ -985,8 +985,14 @@ class TaskRuntime:
                 {"action": decision.action, "tool_name": decision.tool_name},
             )
         else:
+            is_first_decision = task.intent is None
             try:
-                if task.intent is None:
+                if is_first_decision:
+                    self._trace_task(
+                        task,
+                        "reasoning.first_decision",
+                        "started",
+                    )
                     first = subagent.decide_first_action(creation.context, task)
                     if first.intent is not None:
                         self._commit_task_intent(task, first.intent)
@@ -1011,7 +1017,11 @@ class TaskRuntime:
             self._persist(task)
             self._trace_task(
                 task,
-                "reasoning.execution_decision",
+                (
+                    "reasoning.first_decision"
+                    if is_first_decision
+                    else "reasoning.execution_decision"
+                ),
                 "completed",
                 {
                     "action": decision.action,
@@ -1020,7 +1030,11 @@ class TaskRuntime:
                     "completion_summary": decision.completion_summary,
                     "evidence_refs": decision.evidence_refs,
                     "prompt_text": task.task_local_state.get(
-                        "execution_decision_prompt_text",
+                        (
+                            "first_decision_prompt_text"
+                            if is_first_decision
+                            else "execution_decision_prompt_text"
+                        ),
                         "",
                     ),
                 },
@@ -1311,6 +1325,16 @@ class TaskRuntime:
         task.task_local_state["draft_final_response"] = (
             task.completion.user_visible_output.final_response
         )
+        self._trace_task(
+            task,
+            "reasoning.draft_response",
+            "generated",
+            {
+                "response_length": len(
+                    task.task_local_state["draft_final_response"]
+                )
+            },
+        )
         return self._verify_candidate(creation)
 
     def _verify_candidate(self, creation: TaskCreationResult) -> bool:
@@ -1325,6 +1349,12 @@ class TaskRuntime:
         task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
         task.task_local_state["verification_in_progress"] = True
         self._persist(task)
+        self._trace_task(
+            task,
+            "reasoning.verification",
+            "started",
+            {"round": verification_round},
+        )
         verifier = self.verification_agent
         if verifier is None:
             subagent, _ = self._execution_components()
@@ -1363,6 +1393,16 @@ class TaskRuntime:
                     "arguments": action.arguments or {},
                     "safe_to_retry": True,
                 }
+                self._trace_task(
+                    task,
+                    "reasoning.verification",
+                    "tool_requested",
+                    {
+                        "round": verification_round,
+                        "tool_name": action.tool_name,
+                        "arguments": action.arguments or {},
+                    },
+                )
                 task.transition_to(TaskState.TOOL_EXECUTION)
                 self._persist(task)
                 execution = executor.execute(decision, creation.context, task)
@@ -1383,6 +1423,16 @@ class TaskRuntime:
                     *existing,
                     mechanical_result,
                 )
+                self._trace_task(
+                    task,
+                    "reasoning.verification",
+                    "tool_observed",
+                    {
+                        "round": verification_round,
+                        "tool_name": action.tool_name,
+                        "result": mechanical_result,
+                    },
+                )
                 self._persist(task)
             if verdict is None:
                 raise RuntimeError("verification tool-call budget exhausted")
@@ -1394,6 +1444,12 @@ class TaskRuntime:
             task.failure_reason = str(error)
             task.transition_to(TaskState.FAILED)
             task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
+            self._trace_task(
+                task,
+                "reasoning.verification",
+                "failed",
+                {"round": verification_round, "message": str(error)},
+            )
             self._persist(task)
             return False
         results = tuple(task.task_local_state.get("verification_results", ()))
@@ -1425,6 +1481,15 @@ class TaskRuntime:
             task.task_local_state.pop("completion_summary", None)
             task.task_local_state.pop("verification_in_progress", None)
             task.task_local_state["pending_reasoning"] = {"purpose": "execution"}
+            self._trace_task(
+                task,
+                "reasoning.verification",
+                "returned_to_execution",
+                {
+                    "round": verification_round,
+                    "feedback": verdict.feedback_for_execution,
+                },
+            )
             self._persist(task)
             return False
         self.timing_recorder.record_execution_completed(creation.context.trace_id)
