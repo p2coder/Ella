@@ -1,6 +1,5 @@
 """Deprecated import compatibility; no runtime state is owned here."""
 
-from agent.strategy import StrategyDecision
 from agent.subagent import SubAgent
 from runtime.executor import CapabilityExecutionResult, CapabilityExecutor
 from tasks.factory import TaskCreationResult, TaskFactory
@@ -13,7 +12,6 @@ TaskSessionManager = TaskFactory
 __all__ = [
     "CapabilityExecutionResult",
     "CapabilityExecutor",
-    "StrategyDecision",
     "SubAgent",
     "Task",
     "TaskCreationResult",

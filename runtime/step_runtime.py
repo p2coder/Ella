@@ -3,10 +3,10 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from agent.context import AgentExecutionContext
+from agent.decision import CALL_TOOL, ExecutionDecision
 from runtime.executor import CapabilityExecutionResult, CapabilityExecutor
 from tasks.graph import ToolGraphRun, ToolNodeDefinition
 from tasks.task import Task
-from agent.strategy import StrategyDecision
 from tools.base import EffectiveToolExecutionMetadata
 from tools.manager import CapabilityUnavailableError
 
@@ -49,7 +49,6 @@ class StepRuntime:
         *,
         task: Task,
         context: AgentExecutionContext,
-        strategy: StrategyDecision,
         availability: Mapping[str, str] | None = None,
     ) -> StepTickResult:
         runs = {
@@ -81,12 +80,15 @@ class StepRuntime:
             return StepTickResult(updated, node.node_id, None, self._step_state(updated, runs))
 
         arguments = dict(node.input_binding)
-        execution = self.executor.execute_tool_node(
-            tool_name=node.tool_name,
-            arguments=arguments,
-            strategy=strategy,
-            context=context,
-            task=task,
+        execution = self.executor.execute(
+            ExecutionDecision(
+                CALL_TOOL,
+                node.tool_name,
+                arguments,
+                f"Execute ToolGraph node {node.node_id}.",
+            ),
+            context,
+            task,
         )
         attempt = {
             "attempt_index": len(current.attempts) + 1,
