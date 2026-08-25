@@ -56,6 +56,8 @@ class FinalResponseGenerator:
         execution_failures: Iterable[
             ToolFailureObservation | Mapping[str, Any]
         ] = (),
+        completion_summary: str = "",
+        evidence_refs: Iterable[str] = (),
         **_: Any,
     ) -> FinalResponseResult:
         generation_started = perf_counter()
@@ -82,6 +84,8 @@ class FinalResponseGenerator:
             "environment_summary": environment_summary,
             "memory_context": memory_context,
             "provider_or_tool_errors": tool_errors,
+            "completion_summary": completion_summary,
+            "evidence_refs": tuple(evidence_refs),
         }
         if execution_failure_summary:
             legacy_context["execution_failure_summary"] = execution_failure_summary
@@ -115,6 +119,8 @@ class FinalResponseGenerator:
                         "observations": self._observation_summaries(
                             tool_results_tuple
                         ),
+                        "completion_summary": completion_summary,
+                        "evidence_refs": tuple(evidence_refs),
                     },
                 },
             )

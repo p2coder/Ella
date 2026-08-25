@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from threading import Event, Lock, Thread
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
 from agent.context import AgentExecutionContext
@@ -8,7 +12,7 @@ from agent.final_response import FinalResponseGenerator
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
-from agent.decision import CALL_TOOL, COMPLETE, WAIT
+from agent.decision import CALL_TOOL, COMPLETE, ExecutionDecision
 from tasks.state import (
     StepExecutionState,
     DeliveryAttempt,
@@ -27,9 +31,9 @@ from sessions.output import UserVisibleAgentOutput
 from tasks.task import Task, TaskState
 from tasks.graph import TaskGraphRun, TaskGraphNodeType, ToolGraphRun
 from tasks.factory import TaskCreationResult, TaskFactory
-from agent.strategy import StrategyDecision
-from agent.subagent import SubAgent
+from agent.subagent import DecisionValidationError, SubAgent
 from tools import ToolResult
+from tools.base import ToolUncertainPolicy
 from .timing import (
     NoOpRuntimeTimingRecorder,
     RuntimeTimingRecorder,
@@ -38,8 +42,8 @@ from .timing import (
 from .task_queue import TaskQueue
 from .task_store import TaskStore
 from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
-from .waiting import WaitingRegistry
 from .trace import NoOpTraceRecorder, TraceRecorder
+from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,14 +73,17 @@ class TaskRuntime:
     executor: CapabilityExecutor | None = None
     final_response_generator: FinalResponseGenerator | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
-    max_argument_retries: int = 2
+    max_step_retries: int = 2
     task_store: TaskStore | None = None
     task_queue: TaskQueue | None = None
     step_runtime: StepRuntime | None = None
     max_runtime_ticks: int = 100
     max_steps: int = 20
-    waiting_registry: WaitingRegistry | None = None
+    max_parallel_steps_per_task: int = 8
+    wave_incremental_checkpoint_threshold: int = 20
     trace_recorder: TraceRecorder | NoOpTraceRecorder
+    formulation_handler: Callable[[Task], HandoffRequest] | None
+    event_publisher: TaskEventPublisher
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskCreationResult] = field(
         default_factory=dict,
@@ -88,6 +95,13 @@ class TaskRuntime:
         init=False,
         repr=False,
     )
+    _worker_thread: Thread | None = field(init=False, default=None, repr=False)
+    _stop_event: Event = field(init=False, repr=False)
+    _wake_event: Event = field(init=False, repr=False)
+    _worker_lock: Lock = field(init=False, repr=False)
+    _persistence_lock: Lock = field(init=False, repr=False)
+    _worker_errors: dict[str, str] = field(init=False, repr=False)
+    _worker_results: dict[str, TaskRuntimeResult] = field(init=False, repr=False)
 
     def __init__(
         self,
@@ -97,33 +111,299 @@ class TaskRuntime:
         memory_manager: MemoryManager | None = None,
         final_response_generator: FinalResponseGenerator | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
-        max_argument_retries: int = 2,
+        max_step_retries: int = 2,
         task_store: TaskStore | None = None,
         task_queue: TaskQueue | None = None,
         step_runtime: StepRuntime | None = None,
         max_runtime_ticks: int = 100,
         max_steps: int = 20,
-        waiting_registry: WaitingRegistry | None = None,
+        max_parallel_steps_per_task: int = 8,
+        wave_incremental_checkpoint_threshold: int = 20,
         trace_recorder: TraceRecorder | NoOpTraceRecorder | None = None,
+        formulation_handler: Callable[[Task], HandoffRequest] | None = None,
+        event_publisher: TaskEventPublisher | None = None,
     ) -> None:
-        if max_argument_retries < 0:
-            raise ValueError("max_argument_retries must be non-negative")
+        if max_step_retries < 0:
+            raise ValueError("max_step_retries must be non-negative")
         self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
         self.final_response_generator = final_response_generator
         self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
-        self.max_argument_retries = max_argument_retries
+        self.max_step_retries = max_step_retries
         self.task_store = task_store
         self.task_queue = task_queue
         self.step_runtime = step_runtime
         self.max_runtime_ticks = max_runtime_ticks
         self.max_steps = max_steps
-        self.waiting_registry = waiting_registry
+        self.max_parallel_steps_per_task = max_parallel_steps_per_task
+        self.wave_incremental_checkpoint_threshold = (
+            wave_incremental_checkpoint_threshold
+        )
         self.trace_recorder = trace_recorder or NoOpTraceRecorder()
+        self.formulation_handler = formulation_handler
+        self.event_publisher = event_publisher or TaskEventPublisher()
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
         self._memory_results = {}
+        self._worker_thread = None
+        self._stop_event = Event()
+        self._wake_event = Event()
+        self._worker_lock = Lock()
+        self._persistence_lock = Lock()
+        self._worker_errors = {}
+        self._worker_results = {}
+
+    @property
+    def is_running(self) -> bool:
+        thread = self._worker_thread
+        return thread is not None and thread.is_alive()
+
+    def configure_formulation(
+        self, handler: Callable[[Task], HandoffRequest]
+    ) -> None:
+        self.formulation_handler = handler
+
+    def start(self) -> None:
+        with self._worker_lock:
+            if self.is_running:
+                return
+            self._stop_event.clear()
+            self._restore_from_checkpoints()
+            self._worker_thread = Thread(
+                target=self._execution_loop,
+                name="ella-task-runtime",
+                daemon=True,
+            )
+            self._worker_thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._wake_event.set()
+
+    def join(self, timeout: float | None = None) -> bool:
+        thread = self._worker_thread
+        if thread is None:
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
+
+    def schedule(self, task_id: str) -> bool:
+        if self.task_queue is None:
+            self.task_queue = TaskQueue()
+        enqueued = self.task_queue.enqueue(task_id)
+        self._wake_event.set()
+        return enqueued
+
+    def result_for(self, task_id: str) -> TaskRuntimeResult:
+        result = self._worker_results.get(task_id)
+        if result is not None:
+            return result
+        creation = self._tasks.get(task_id)
+        if creation is None:
+            raise KeyError(task_id)
+        return self._result(
+            creation,
+            stop_reason=self._stop_reason(creation.task),
+            memory_result=self._memory_results.get(task_id),
+            failure_reason=self._worker_errors.get(task_id),
+            record_trace=False,
+        )
+
+    def _execution_loop(self) -> None:
+        while not self._stop_event.is_set():
+            queue = self.task_queue
+            task_id = None if queue is None else queue.dequeue()
+            if task_id is None:
+                self._wake_event.wait(0.1)
+                self._wake_event.clear()
+                continue
+            creation = self._tasks.get(task_id)
+            if creation is None:
+                continue
+            task = creation.task
+            self._trace_task(
+                task,
+                "runtime.worker",
+                "claimed",
+                {"state": task.state.value},
+            )
+            try:
+                self._process_scheduled_task(creation)
+            except Exception as error:
+                self._worker_errors[task_id] = str(error)
+                self._handle_worker_exception(task, error)
+            finally:
+                self._publish_terminal(task)
+                self._trace_task(
+                    task,
+                    "runtime.worker",
+                    "released",
+                    {"state": task.state.value},
+                )
+
+    def _process_scheduled_task(self, creation: TaskCreationResult) -> None:
+        task = creation.task
+        if task.state in {TaskState.CREATED, TaskState.FORMULATING}:
+            if self.formulation_handler is None:
+                raise RuntimeError("TaskRuntime has no formulation handler")
+            if task.state is TaskState.CREATED:
+                self.begin_formulation(task.task_id)
+            handoff = self.formulation_handler(task)
+            if task.state in {
+                TaskState.PAUSE_REQUESTED,
+                TaskState.KILL_REQUESTED,
+            }:
+                self._reach_control_safe_point(task)
+                return
+            self._trace_task(
+                task,
+                "reasoning.formulation",
+                "completed",
+                {
+                    "task_goal": handoff.task_goal,
+                    "prompt_text": handoff.task_formulation_prompt_text,
+                },
+            )
+            self.submit_formulated(task.task_id, handoff)
+            return
+        if task.state not in {TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
+            return
+        result = self.run_until_complete(task.task_id, self.max_steps)
+        reached_control_safe_point = self._reach_control_safe_point(task)
+        self._worker_results[task.task_id] = (
+            self._result(
+                creation,
+                steps=result.steps,
+                stop_reason=self._stop_reason(task),
+                blocked=result.blocked,
+            )
+            if reached_control_safe_point
+            else result
+        )
+        if result.stop_reason == "max_steps" and task.state is TaskState.REASONING:
+            task.failure = {
+                "code": "max_steps_exhausted",
+                "message": "Task execution exhausted its step budget.",
+            }
+            task.failure_reason = task.failure["message"]
+            task.transition_to(TaskState.FAILED)
+            self._persist(task)
+            self._trace_task(task, "task", "failed", task.failure)
+            self._worker_results[task.task_id] = self._result(
+                creation,
+                stop_reason="failed",
+                failure_reason=task.failure_reason,
+            )
+
+    def _handle_worker_exception(self, task: Task, error: Exception) -> None:
+        in_flight = task.task_local_state.get("in_flight_action")
+        if in_flight and task.state is TaskState.TOOL_EXECUTION:
+            task.failure = {
+                "code": "uncertain_in_flight_action",
+                "message": (
+                    "Runtime stopped after dispatching a Tool and could not "
+                    "confirm its external outcome."
+                ),
+                "tool_name": in_flight.get("tool_name"),
+            }
+            task.failure_reason = task.failure["message"]
+            task.transition_to(TaskState.UNCERTAIN)
+            self._persist(task)
+            self._trace_task(
+                task,
+                "recovery",
+                "in_flight_action_uncertain",
+                {"error": str(error), **dict(in_flight)},
+            )
+            return
+        if task.state is TaskState.CREATED:
+            task.transition_to(TaskState.FORMULATING)
+        if task.state in {
+            TaskState.FORMULATING,
+            TaskState.READY,
+            TaskState.REASONING,
+            TaskState.TOOL_EXECUTION,
+        }:
+            task.failure = {
+                "code": "runtime_worker_failed",
+                "message": str(error),
+            }
+            task.failure_reason = str(error)
+            task.transition_to(TaskState.FAILED)
+            self._persist(task)
+        self._trace_task(
+            task,
+            "runtime.worker",
+            "failed",
+            {"error": str(error), "state": task.state.value},
+        )
+
+    def _restore_from_checkpoints(self) -> None:
+        if self.task_store is None:
+            return
+        for stored in self.task_store.list():
+            task = stored.task
+            if task.execution_context is None:
+                continue
+            self._tasks[task.task_id] = TaskCreationResult(task)
+            self._trace_task(
+                task,
+                "recovery",
+                "checkpoint_loaded",
+                {"state": task.state.value, "version": stored.version},
+            )
+            in_flight = task.task_local_state.get("in_flight_action")
+            if in_flight and task.state is TaskState.TOOL_EXECUTION:
+                if bool(in_flight.get("safe_to_retry")):
+                    task.task_local_state.pop("in_flight_action", None)
+                    self._persist(task)
+                    self._trace_task(
+                        task,
+                        "recovery",
+                        "safe_action_requeued",
+                        dict(in_flight),
+                    )
+                else:
+                    task.failure = {
+                        "code": "uncertain_in_flight_action",
+                        "message": (
+                            "A Tool may have changed external state before the "
+                            "previous process stopped."
+                        ),
+                        "tool_name": in_flight.get("tool_name"),
+                    }
+                    task.failure_reason = task.failure["message"]
+                    task.transition_to(TaskState.UNCERTAIN)
+                    self._persist(task)
+                    self._trace_task(
+                        task,
+                        "recovery",
+                        "in_flight_action_uncertain",
+                        dict(in_flight),
+                    )
+                    self._publish_terminal(task)
+                    continue
+            if task.state is TaskState.PAUSE_REQUESTED:
+                task.transition_to(TaskState.PAUSED)
+                self._persist(task)
+            elif task.state is TaskState.KILL_REQUESTED:
+                task.transition_to(TaskState.KILLED)
+                self._persist(task)
+            elif task.state in {
+                TaskState.CREATED,
+                TaskState.FORMULATING,
+                TaskState.READY,
+                TaskState.REASONING,
+                TaskState.TOOL_EXECUTION,
+            }:
+                self.schedule(task.task_id)
+            self._trace_task(
+                task,
+                "recovery",
+                "restored",
+                {"state": task.state.value},
+            )
 
     def create_task(self, source_event) -> TaskHandle:
         task_id = self.task_factory._new_task_id()
@@ -149,6 +429,8 @@ class TaskRuntime:
         self._tasks[task_id] = creation
         self._persist(task)
         self._trace_task(task, "task", "created")
+        if self.is_running:
+            self.schedule(task_id)
         return TaskHandle(task_id, source_event.trace_id)
 
     def begin_formulation(self, task_id: str) -> None:
@@ -178,8 +460,8 @@ class TaskRuntime:
         task.transition_to(TaskState.READY)
         self._persist(task)
         self._trace_task(task, "task", "submitted")
-        if self.task_queue is not None:
-            self.task_queue.enqueue(task_id)
+        if self.task_queue is not None or self.is_running:
+            self.schedule(task_id)
         self.timing_recorder.record_task_submitted(
             task.trace_id, task_id=task_id
         )
@@ -192,12 +474,29 @@ class TaskRuntime:
         task.transition_to(TaskState.FAILED)
         self._persist(task)
         self._trace_task(task, "reasoning.formulation", "failed", task.failure)
+        self._publish_terminal(task)
 
     def _persist(self, task: Task) -> None:
-        if self.task_store is None:
-            return
-        current = self.task_store.version(task.task_id)
-        self.task_store.save(task, expected_version=current)
+        with self._persistence_lock:
+            if self.task_store is not None:
+                current = self.task_store.version(task.task_id)
+                self.task_store.save(task, expected_version=current)
+            self.event_publisher.publish_checkpoint(task)
+
+    def list_tasks(self) -> tuple[Task, ...]:
+        return tuple(
+            creation.task
+            for _, creation in sorted(self._tasks.items())
+        )
+
+    def provide_input(
+        self,
+        task_id: str,
+        *,
+        correlation_key: str,
+        value: str,
+    ) -> bool:
+        return False
 
     def apply_control(self, command: TaskControlCommand) -> TaskControlResult:
         creation = self._tasks.get(command.task_id)
@@ -229,18 +528,35 @@ class TaskRuntime:
                 task.control_request = command
                 if task.state is not TaskState.KILL_REQUESTED:
                     task.transition_to(TaskState.KILL_REQUESTED)
-                task.transition_to(TaskState.KILLED)
+                if previous_state not in {
+                    TaskState.FORMULATING,
+                    TaskState.REASONING,
+                    TaskState.TOOL_EXECUTION,
+                }:
+                    task.failure = {
+                        "code": "task_killed",
+                        "message": (
+                            command.reason
+                            or "Task was cancelled before completion."
+                        ),
+                    }
+                    task.failure_reason = task.failure["message"]
+                    task.transition_to(TaskState.KILLED)
         elif command.command_type is TaskControlType.PAUSE:
             if task.state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
                 accepted, code, message = False, "kill_has_priority", "Kill has priority over pause."
-            elif task.state not in {TaskState.CREATED, TaskState.FORMULATING, TaskState.READY, TaskState.RUNNING, TaskState.WAITING}:
+            elif task.state not in {TaskState.CREATED, TaskState.FORMULATING, TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
                 accepted, code, message = False, "invalid_state", "Task cannot be paused from its current state."
             else:
                 task.paused_from_state = task.state
                 task.control_request = command
                 task.transition_to(TaskState.PAUSE_REQUESTED)
-                self._persist(task)
-                task.transition_to(TaskState.PAUSED)
+                if previous_state not in {
+                    TaskState.FORMULATING,
+                    TaskState.REASONING,
+                    TaskState.TOOL_EXECUTION,
+                }:
+                    task.transition_to(TaskState.PAUSED)
         elif command.command_type is TaskControlType.RESUME:
             if task.state is not TaskState.PAUSED or task.paused_from_state is None:
                 accepted, code, message = False, "invalid_state", "Only a paused Task can resume."
@@ -248,8 +564,8 @@ class TaskRuntime:
                 task.control_request = command
                 task.transition_to(TaskState.READY)
                 task.paused_from_state = None
-                if self.task_queue is not None:
-                    self.task_queue.enqueue(task.task_id)
+                if self.task_queue is not None or self.is_running:
+                    self.schedule(task.task_id)
         else:
             accepted, code, message = False, "unsupported_command", "Command is not handled by the control plane."
         result = TaskControlResult(command.command_id, task.task_id, accepted, previous_state.value, task.state.value, code, message)
@@ -266,43 +582,39 @@ class TaskRuntime:
                 command.command_type.value,
                 {"previous_state": previous_state.value, "state": task.state.value},
             )
+            self._publish_terminal(task)
         return result
 
-    def enter_waiting(self, task_id: str, condition) -> None:
-        task = self._tasks[task_id].task
-        if task.state is not TaskState.RUNNING:
-            raise ValueError("only RUNNING Task may enter WAITING")
-        task.waiting_condition = condition
-        task.transition_to(TaskState.WAITING)
-        if self.waiting_registry is not None:
-            self.waiting_registry.register(task_id, condition)
-        self._persist(task)
-        self._trace_task(
-            task,
-            "waiting",
-            "registered",
-            {"kind": condition.kind.value, "correlation_key": condition.correlation_key},
-        )
-
-    def wake_waiting(
-        self, task_id: str, *, correlation_key: str | None = None, now=None
-    ) -> bool:
-        task = self._tasks[task_id].task
-        if task.state is not TaskState.WAITING or task.waiting_condition is None:
-            return False
-        registry = self.waiting_registry or WaitingRegistry()
-        if self.waiting_registry is None:
-            registry.register(task_id, task.waiting_condition)
-        if not registry.should_wake(task_id, correlation_key=correlation_key, now=now):
-            return False
-        task.waiting_condition = None
-        task.transition_to(TaskState.READY)
-        registry.remove(task_id)
-        if self.task_queue is not None:
-            self.task_queue.enqueue(task_id)
-        self._persist(task)
-        self._trace_task(task, "waiting", "woken")
-        return True
+    def _reach_control_safe_point(self, task: Task) -> bool:
+        if task.state is TaskState.PAUSE_REQUESTED:
+            task.transition_to(TaskState.PAUSED)
+            self._persist(task)
+            self._trace_task(
+                task,
+                "control",
+                "paused_at_safe_point",
+                {
+                    "paused_from_state": (
+                        None
+                        if task.paused_from_state is None
+                        else task.paused_from_state.value
+                    )
+                },
+            )
+            return True
+        if task.state is TaskState.KILL_REQUESTED:
+            reason = getattr(task.control_request, "reason", None)
+            task.failure = {
+                "code": "task_killed",
+                "message": reason or "Task was cancelled before completion.",
+            }
+            task.failure_reason = task.failure["message"]
+            task.transition_to(TaskState.KILLED)
+            self._persist(task)
+            self._trace_task(task, "control", "killed_at_safe_point")
+            self._publish_terminal(task)
+            return True
+        return False
 
     def resolve_uncertain_as_failed(self, task_id: str, reason: str) -> None:
         task = self._tasks[task_id].task
@@ -328,6 +640,7 @@ class TaskRuntime:
         task.failure_reason = reason
         task.transition_to(TaskState.FAILED)
         self._persist(task)
+        self._publish_terminal(task)
 
     def deliver(self, task_id: str, sender) -> bool:
         task = self._tasks[task_id].task
@@ -358,6 +671,7 @@ class TaskRuntime:
         if succeeded:
             task.transition_to(TaskState.DELIVERED)
         self._persist(task)
+        self._publish_terminal(task)
         return succeeded
 
     @staticmethod
@@ -398,7 +712,7 @@ class TaskRuntime:
         creation = self.task_factory.create_task(handoff)
         creation.task.current_step = replace(
             creation.task.current_step,
-            max_argument_retries=self.max_argument_retries,
+            max_step_retries=self.max_step_retries,
         )
         task_id = creation.task.task_id
         print("[task_runtime.py]submit:submit event ",task_id)
@@ -407,8 +721,8 @@ class TaskRuntime:
         creation.task.transition_to(TaskState.READY)
         self._tasks[task_id] = creation
         self._persist(creation.task)
-        if self.task_queue is not None:
-            self.task_queue.enqueue(task_id)
+        if self.task_queue is not None or self.is_running:
+            self.schedule(task_id)
         self._trace_task(creation.task, "task", "submitted")
         self.timing_recorder.record_task_submitted(
             creation.context.trace_id,
@@ -428,7 +742,7 @@ class TaskRuntime:
     def step(self, task_id: str) -> TaskRuntimeResult:
         creation = self._tasks[task_id]
         task = creation.task
-        if task.graph is not None and task.state is TaskState.RUNNING:
+        if task.graph is not None and task.state is TaskState.REASONING:
             return self._step_task_graph(creation)
         self.timing_recorder.record_task_processing_started(
             creation.context.trace_id
@@ -447,51 +761,56 @@ class TaskRuntime:
         subagent, executor = self._execution_components()
 
         if task.state is TaskState.READY:
-            task.current_strategy = subagent.select_strategy(
-                task.handoff,
-                creation.context,
-                task,
-            )
-            task.transition_to(TaskState.RUNNING)
+            task.transition_to(TaskState.REASONING)
+            self._persist(task)
             self._trace_task(
                 task,
-                "reasoning.strategy_selection",
-                "completed",
-                {"mode": task.current_strategy.mode},
+                "reasoning.execution_decision",
+                "ready",
+                {"state": task.state.value},
             )
             return self._result(creation)
-
-        if task.state is TaskState.RUNNING and task.current_strategy is None:
-            subagent.skill_manager.refresh()
-            executor.tool_manager.list_names()
-            task.current_strategy = subagent.select_strategy(
-                task.handoff,
-                creation.context,
-                task,
-            )
-            task.task_local_state.pop("replan_requested", None)
-            self._trace_task(
-                task,
-                "reasoning.strategy_selection",
-                "refreshed",
-                {"mode": task.current_strategy.mode},
-            )
-            return self._result(creation)
-
-        if task.state is TaskState.WAITING:
-            raise ValueError("cannot step waiting task without a resume signal")
-
-        strategy = task.current_strategy
-        if not isinstance(strategy, StrategyDecision):
-            raise ValueError("running task requires a current strategy")
 
         self.timing_recorder.record_execution_started(creation.context.trace_id)
-        decision = subagent.decide_next_action(
-            task.handoff,
-            creation.context,
-            task,
-            strategy,
-        )
+        self._persist(task)
+        saved_decision = task.task_local_state.get("current_decision")
+        if isinstance(saved_decision, Mapping):
+            decision = ExecutionDecision.from_dict(saved_decision)
+            self._trace_task(
+                task,
+                "reasoning.execution_decision",
+                "restored",
+                {"action": decision.action, "tool_name": decision.tool_name},
+            )
+        else:
+            try:
+                decision = subagent.decide_next_action(
+                    task.handoff,
+                    creation.context,
+                    task,
+                )
+            except DecisionValidationError as error:
+                self._handle_decision_failure(task, str(error))
+                self._persist(task)
+                return self._result(creation)
+            task.task_local_state["current_decision"] = decision.to_dict()
+            self._persist(task)
+            self._trace_task(
+                task,
+                "reasoning.execution_decision",
+                "completed",
+                {
+                    "action": decision.action,
+                    "tool_name": decision.tool_name,
+                    "decision_reason": decision.decision_reason,
+                    "completion_summary": decision.completion_summary,
+                    "evidence_refs": decision.evidence_refs,
+                    "prompt_text": task.task_local_state.get(
+                        "execution_decision_prompt_text",
+                        "",
+                    ),
+                },
+            )
         if task.state in {
             TaskState.PAUSE_REQUESTED,
             TaskState.PAUSED,
@@ -502,15 +821,58 @@ class TaskRuntime:
 
         repair_violation = self._repair_violation(task, decision)
         if repair_violation is not None:
+            task.task_local_state.pop("current_decision", None)
             self._handle_failure(task, repair_violation)
+            self._persist(task)
             return self._result(creation)
 
-        execution = executor.execute(
-            decision,
-            strategy,
-            creation.context,
-            task,
-        )
+        in_flight = None
+        if decision.action == CALL_TOOL and decision.tool_name is not None:
+            tool = executor.tool_manager.get_tool(decision.tool_name)
+            definition = None if tool is None else tool.definition
+            in_flight = {
+                "attempt_id": task.current_step.attempt_id,
+                "tool_name": decision.tool_name,
+                "arguments": decision.tool_input or {},
+                "safe_to_retry": bool(
+                    definition is not None
+                    and definition.uncertain_policy is ToolUncertainPolicy.NEVER
+                    and not definition.side_effecting
+                ),
+            }
+            task.task_local_state["in_flight_action"] = in_flight
+            task.transition_to(TaskState.TOOL_EXECUTION)
+            self._persist(task)
+            self._trace_task(
+                task,
+                f"tool_attempt.{decision.tool_name}",
+                "dispatched",
+                in_flight,
+            )
+            self.event_publisher.publish_progress(
+                task,
+                execution_stage="tool_execution",
+                tool_name=decision.tool_name,
+            )
+        execution = executor.execute(decision, creation.context, task)
+        if in_flight is not None:
+            task.task_local_state.pop("in_flight_action", None)
+            if task.state is TaskState.TOOL_EXECUTION:
+                task.transition_to(TaskState.REASONING)
+            self._persist(task)
+            self._trace_task(
+                task,
+                f"tool_attempt.{decision.tool_name}",
+                "failed" if execution.failure is not None else "completed",
+                {
+                    "attempt_id": in_flight["attempt_id"],
+                    "failure": (
+                        None
+                        if execution.failure is None
+                        else execution.failure.to_dict()
+                    ),
+                },
+            )
         if task.state in {
             TaskState.PAUSE_REQUESTED,
             TaskState.PAUSED,
@@ -520,26 +882,30 @@ class TaskRuntime:
             return self._result(creation, stop_reason=self._stop_reason(task))
         print("[task_runtime]desicion action: ",decision.action)
         if execution.failure is not None:
+            task.task_local_state.pop("current_decision", None)
+            self._trace_task(
+                task,
+                f"tool_attempt.{decision.tool_name or 'none'}",
+                "rejected",
+                execution.failure.to_dict(),
+            )
             self._handle_failure(task, execution.failure)
             return self._result(creation)
 
         if execution.tool_result is not None:
-            task.tool_trace += (execution.tool_result.to_dict(),)
-            self._archive_and_advance(task)
-
-        if execution.replan_required:
-            task.current_strategy = None
-            task.task_local_state["replan_requested"] = True
-            self._trace_task(
-                task,
-                "reasoning.execution_decision",
-                "replan_requested",
-                {"reason": decision.reason},
+            observation = execution.tool_result.to_dict()
+            observation["observation_id"] = (
+                f"{task.task_id}:observation:{len(task.tool_trace) + 1}"
             )
-        elif decision.action == WAIT:
+            task.tool_trace += (observation,)
+            task.task_local_state.pop("current_decision", None)
             self._archive_and_advance(task)
-            task.transition_to(TaskState.WAITING)
-        elif decision.action == COMPLETE:
+            self._persist(task)
+
+        if decision.action == COMPLETE:
+            task.task_local_state.pop("current_decision", None)
+            task.task_local_state["completion_summary"] = decision.completion_summary
+            task.task_local_state["completion_evidence_refs"] = decision.evidence_refs
             self._archive_and_advance(task)
             self.timing_recorder.record_execution_completed(
                 creation.context.trace_id
@@ -547,9 +913,36 @@ class TaskRuntime:
             task.completion = self._build_completion(creation)
             self.timing_recorder.record_task_completed(creation.context.trace_id)
             task.transition_to(TaskState.SUCCEEDED)
+            self._trace_task(
+                task,
+                "task",
+                "succeeded",
+                {"state": task.state.value},
+            )
             return self._result(creation, stop_reason="completed")
 
         return self._result(creation)
+
+    def _handle_decision_failure(self, task: Task, message: str) -> None:
+        step = task.current_step
+        if step.retry_index < step.max_step_retries:
+            task.current_step = replace(
+                step,
+                retry_index=step.retry_index + 1,
+            )
+            self._trace_task(
+                task,
+                "reasoning.execution_decision",
+                "repair_requested",
+                {"message": message, "retry_index": task.current_step.retry_index},
+            )
+            return
+        task.failure = {
+            "code": "decision_repair_exhausted",
+            "message": message,
+        }
+        task.failure_reason = message
+        task.transition_to(TaskState.FAILED)
 
     def _step_task_graph(
         self, creation: TaskCreationResult
@@ -563,18 +956,11 @@ class TaskRuntime:
             )
         graph = task.graph
         runs = {key: value for key, value in graph.node_runs.items()}
-        completed_steps = sum(
-            1
-            for value in runs.values()
-            if _graph_run_state(value) == "succeeded"
-        )
-        if completed_steps >= self.max_steps:
-            return self._fail_graph_task(creation, "max_steps_exhausted")
         ready = []
         for node in graph.definition.nodes:
             if node.node_type is not TaskGraphNodeType.STEP:
                 continue
-            if _graph_run_state(runs.get(node.node_id)) not in {None, "pending", "ready", "running"}:
+            if _graph_run_state(runs.get(node.node_id)) not in {None, "pending", "ready"}:
                 continue
             if all(
                 _graph_run_state(runs.get(predecessor)) == "succeeded"
@@ -592,68 +978,50 @@ class TaskRuntime:
                 self._persist(task)
                 return self._result(creation, stop_reason="completed")
             return self._fail_graph_task(creation, "no_reachable_success_terminal")
-        node_id = ordered[0]
-        node = next(item for item in graph.definition.nodes if item.node_id == node_id)
-        payload = node.payload
-        tool_graph = payload.get("tool_graph_run") if isinstance(payload, dict) else None
-        if not isinstance(tool_graph, ToolGraphRun) or self.step_runtime is None:
-            runs[node_id] = {"state": "failed", "code": "step_graph_unavailable"}
-        else:
-            strategy = task.current_strategy or StrategyDecision(
-                "react", None, "graph execution", None, (), task_id=task.task_id, trace_id=task.trace_id
-            )
-            tick = self.step_runtime.tick(
-                tool_graph,
-                task=task,
-                context=task.execution_context,
-                strategy=strategy,
-            )
-            if tick.execution_result is not None and tick.execution_result.uncertain:
-                tool_runs = dict(tick.graph_run.node_runs)
-                selected_tool_node = tick.selected_node_id
-                if selected_tool_node is not None:
-                    current_tool_run = tool_runs.get(selected_tool_node)
-                    if isinstance(current_tool_run, ToolNodeRun):
-                        tool_runs[selected_tool_node] = replace(
-                            current_tool_run,
-                            state=ToolNodeRunState.UNCERTAIN,
-                        )
-                uncertain_tool_graph = ToolGraphRun(
-                    tick.graph_run.definition,
-                    tool_runs,
-                )
-                runs[node_id] = {
-                    "state": "uncertain",
-                    "tool_graph_run": uncertain_tool_graph,
-                }
-                task.graph = TaskGraphRun(graph.definition, runs)
-                failure = tick.execution_result.failure
-                task.task_local_state["uncertain_attempt"] = {
-                    "tool_name": tick.execution_result.decision.tool_name,
-                    "arguments": tick.execution_result.decision.tool_input or {},
-                    "invoked_at": datetime.now(timezone.utc),
-                    "possible_side_effects": (
-                        "The Tool may have changed external state, but no result "
-                        "was confirmed.",
-                    ),
-                    "failure": None if failure is None else failure.to_dict(),
-                }
-                task.transition_to(TaskState.UNCERTAIN)
-                self._persist(task)
-                return self._result(
-                    creation,
-                    stop_reason="uncertain",
-                    blocked=True,
-                    failure_reason=(
-                        "Tool execution outcome is unknown; ordinary scheduling "
-                        "has stopped."
-                    ),
-                )
-            runs[node_id] = {
-                "state": tick.step_state,
-                "tool_graph_run": tick.graph_run,
-            }
+        wave_id = int(task.task_local_state.get("wave_number", 0)) + 1
+        task.task_local_state["wave_number"] = wave_id
+        node_by_id = {node.node_id: node for node in graph.definition.nodes}
+        for node_id in ordered:
+            runs[node_id] = {"state": "running", "wave_id": wave_id}
         task.graph = TaskGraphRun(graph.definition, runs)
+        self._persist(task)
+
+        results: dict[str, dict[str, Any]] = {}
+        with ThreadPoolExecutor(
+            max_workers=min(self.max_parallel_steps_per_task, len(ordered)),
+            thread_name_prefix=f"ella-{task.task_id}-wave-{wave_id}",
+        ) as pool:
+            futures = {
+                pool.submit(
+                    self._execute_graph_node,
+                    creation,
+                    node_by_id[node_id],
+                    wave_id,
+                ): node_id
+                for node_id in ordered
+            }
+            for future in as_completed(futures):
+                node_id = futures[future]
+                try:
+                    results[node_id] = future.result()
+                except Exception as error:
+                    results[node_id] = {
+                        "state": "failed",
+                        "code": "node_execution_failed",
+                        "message": str(error),
+                        "wave_id": wave_id,
+                    }
+                if len(ordered) > self.wave_incremental_checkpoint_threshold:
+                    runs[node_id] = results[node_id]
+                    task.graph = TaskGraphRun(graph.definition, runs)
+                    self._persist(task)
+
+        for node_id in graph.definition.stable_ready_order(results):
+            runs[node_id] = results[node_id]
+            for observation in results[node_id].get("observations", ()):
+                task.tool_trace += (observation,)
+        task.graph = TaskGraphRun(graph.definition, runs)
+        task.task_local_state["wave_completed"] = wave_id
         if any(
             _graph_run_state(runs.get(item)) == "succeeded"
             for item in graph.definition.terminal_node_ids
@@ -665,6 +1033,58 @@ class TaskRuntime:
             task.transition_to(TaskState.SUCCEEDED)
         self._persist(task)
         return self._result(creation)
+
+    def _execute_graph_node(self, creation, node, wave_id: int) -> dict[str, Any]:
+        task = creation.task
+        payload = dict(node.payload) if isinstance(node.payload, Mapping) else {}
+        goal = str(payload.get("goal") or node.node_id)
+        criteria = tuple(payload.get("completion_criteria", ()))
+        local = Task(
+            task_id=task.task_id,
+            handoff=task.handoff,
+            state=TaskState.REASONING,
+            trace_id=task.trace_id,
+            source_event=task.source_event,
+            execution_context=task.execution_context,
+            tool_trace=task.tool_trace,
+            current_step=StepExecutionState(max_step_retries=self.max_step_retries),
+        )
+        subagent, executor = self._execution_components()
+        start_trace_len = len(local.tool_trace)
+        for _ in range(self.max_steps):
+            try:
+                decision = subagent.decide_next_action(
+                    task.handoff,
+                    creation.context,
+                    local,
+                    current_goal=goal,
+                    completion_criteria=criteria,
+                )
+            except DecisionValidationError as error:
+                if local.current_step.retry_index >= local.current_step.max_step_retries:
+                    return {"state": "failed", "code": "decision_repair_exhausted", "message": str(error), "wave_id": wave_id}
+                local.current_step = replace(local.current_step, retry_index=local.current_step.retry_index + 1)
+                continue
+            if decision.action == COMPLETE:
+                return {
+                    "state": "succeeded",
+                    "wave_id": wave_id,
+                    "completion_summary": decision.completion_summary,
+                    "evidence_refs": decision.evidence_refs,
+                    "observations": local.tool_trace[start_trace_len:],
+                }
+            local.state = TaskState.TOOL_EXECUTION
+            execution = executor.execute(decision, creation.context, local)
+            local.state = TaskState.REASONING
+            if execution.uncertain:
+                return {"state": "uncertain", "wave_id": wave_id, "failure": None if execution.failure is None else execution.failure.to_dict()}
+            if execution.failure is not None:
+                local.current_step = replace(local.current_step, failures=(*local.current_step.failures, execution.failure))
+                continue
+            observation = execution.tool_result.to_dict()
+            observation["observation_id"] = f"{task.task_id}:{node.node_id}:observation:{len(local.tool_trace) + 1}"
+            local.tool_trace += (observation,)
+        return {"state": "failed", "code": "max_steps_exhausted", "wave_id": wave_id}
 
     def _fail_graph_task(self, creation, code: str) -> TaskRuntimeResult:
         task = creation.task
@@ -715,7 +1135,7 @@ class TaskRuntime:
             ToolFailureKind.INVALID_ARGUMENTS_REPAIR_VIOLATION,
         }:
             active_tool = step.active_tool_name or failure.tool_name
-            if step.retry_index < step.max_argument_retries:
+            if step.retry_index < step.max_step_retries:
                 session.current_step = replace(
                     step,
                     retry_index=step.retry_index + 1,
@@ -770,7 +1190,7 @@ class TaskRuntime:
         session.step_history += (archived,)
         session.current_step = StepExecutionState(
             step_number=archived.step_number + 1,
-            max_argument_retries=archived.max_argument_retries,
+            max_step_retries=archived.max_step_retries,
         )
 
     def run_until_blocked(
@@ -792,7 +1212,22 @@ class TaskRuntime:
             )
 
         for steps in range(1, max_steps + 1):
+            task = creation.task
+            self._persist(task)
+            self._trace_task(
+                task,
+                f"step.{task.current_step.attempt_id}",
+                "started",
+                {"state": task.state.value},
+            )
             self.step(task_id)
+            self._persist(task)
+            self._trace_task(
+                task,
+                f"step.{task.current_step.attempt_id}",
+                "checkpointed",
+                {"state": task.state.value},
+            )
             stop_reason = self._stop_reason(creation.task)
             print("[task_runtime] stop_reason: ",stop_reason)
             if stop_reason is not None:
@@ -837,6 +1272,17 @@ class TaskRuntime:
                     failure_reason=f"memory write failed: {error}",
                 )
             self._memory_results[task_id] = memory_result
+            self._trace_task(
+                runtime_result.task,
+                "memory",
+                "written",
+                {"action": getattr(memory_result, "action", "written")},
+            )
+
+        self._publish_terminal(
+            runtime_result.task,
+            memory_result=memory_result,
+        )
 
         return self._result(
             self._tasks[task_id],
@@ -854,8 +1300,6 @@ class TaskRuntime:
 
     @staticmethod
     def _stop_reason(task: Task) -> str | None:
-        if task.state is TaskState.WAITING:
-            return "waiting"
         if task.state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
             return "paused"
         if task.state is TaskState.SUCCEEDED:
@@ -872,7 +1316,7 @@ class TaskRuntime:
 
     @staticmethod
     def _is_blocked_reason(stop_reason: str) -> bool:
-        return stop_reason in {"waiting", "max_steps"}
+        return stop_reason == "max_steps"
 
     def _build_completion(
         self,
@@ -891,28 +1335,36 @@ class TaskRuntime:
             )
             for entry in session.tool_trace
         )
+        self._trace_task(
+            session,
+            "reasoning.final_response",
+            "started",
+            {"tool_result_count": len(tool_results)},
+        )
         final_response, final_response_prompt_text = self._generate_final_response(
             creation,
             tool_results,
+        )
+        self._trace_task(
+            session,
+            "reasoning.final_response",
+            "completed",
+            {
+                "response_length": len(final_response),
+                "prompt_text": final_response_prompt_text,
+                "final_response": final_response,
+            },
         )
         output = UserVisibleAgentOutput(
             process={
                 "task_goal": session.handoff.task_goal,
                 "user_input": user_input,
-                "strategy": getattr(
-                    session.current_strategy,
-                    "skill_name",
-                    None,
-                ),
+                "strategy": None,
                 "tool_results": tuple(
                     result.tool_name for result in tool_results
                 ),
                 "task_formulation_prompt_text": (
                     session.handoff.task_formulation_prompt_text
-                ),
-                "strategy_selection_prompt_text": session.task_local_state.get(
-                    "strategy_selection_prompt_text",
-                    "",
                 ),
                 "execution_decision_prompt_text": session.task_local_state.get(
                     "execution_decision_prompt_text",
@@ -962,6 +1414,12 @@ class TaskRuntime:
             environment_summary=handoff.environment_summary,
             memory_context=self._memory_context(),
             execution_failures=self._execution_failures(session),
+            completion_summary=str(
+                session.task_local_state.get("completion_summary", "")
+            ),
+            evidence_refs=tuple(
+                session.task_local_state.get("completion_evidence_refs", ())
+            ),
         )
         prompt_text = result.prompt_trace.get("prompt_text", "")
         return result.final_response, (
@@ -1022,18 +1480,20 @@ class TaskRuntime:
         blocked: bool = False,
         memory_result: MemoryWriteResult | None = None,
         failure_reason: str | None = None,
+        record_trace: bool = True,
     ) -> TaskRuntimeResult:
         timing = self.timing_recorder.snapshot(creation.context.trace_id)
-        self._trace_task(
-            creation.task,
-            "task_node.runtime",
-            "state_observed",
-            {
-                "state": creation.task.state.value,
-                "stop_reason": stop_reason,
-                "timing": None if timing is None else timing.to_dict(),
-            },
-        )
+        if record_trace:
+            self._trace_task(
+                creation.task,
+                "task_node.runtime",
+                "state_observed",
+                {
+                    "state": creation.task.state.value,
+                    "stop_reason": stop_reason,
+                    "timing": None if timing is None else timing.to_dict(),
+                },
+            )
         return TaskRuntimeResult(
             handle=TaskHandle(
                 task_id=creation.task.task_id,
@@ -1064,6 +1524,23 @@ class TaskRuntime:
             boundary=boundary,
             event_type=event_type,
             payload=payload or {},
+        )
+
+    def _publish_terminal(
+        self,
+        task: Task,
+        *,
+        memory_result: MemoryWriteResult | None = None,
+    ) -> None:
+        if task.state not in TERMINAL_TASK_STATES:
+            return
+        self.event_publisher.publish_terminal(
+            task,
+            memory_status=(
+                None
+                if memory_result is None
+                else getattr(memory_result, "action", None)
+            ),
         )
 
     def _timing_dict(self, creation: TaskCreationResult) -> dict:

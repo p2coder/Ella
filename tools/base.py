@@ -28,6 +28,12 @@ class ToolUncertainPolicy(StrEnum):
     POSSIBLE_AFTER_DISPATCH = "possible_after_dispatch"
 
 
+class CapabilityKind(StrEnum):
+    EXTERNAL = "external"
+    RUNTIME = "runtime"
+    INTERACTION = "interaction"
+
+
 _OVERRIDABLE_EXECUTION_FIELDS = frozenset(
     {"idempotency", "side_effecting", "uncertain_policy"}
 )
@@ -46,6 +52,7 @@ class ToolDefinition:
     side_effecting: bool = False
     uncertain_policy: ToolUncertainPolicy = ToolUncertainPolicy.NEVER
     overridable_fields: tuple[str, ...] = ()
+    capability_kind: CapabilityKind = CapabilityKind.EXTERNAL
 
     def __post_init__(self) -> None:
         _require_non_empty_string("name", self.name)
@@ -60,6 +67,8 @@ class ToolDefinition:
             raise TypeError("side_effecting must be a boolean")
         if not isinstance(self.uncertain_policy, ToolUncertainPolicy):
             raise TypeError("uncertain_policy must be a ToolUncertainPolicy")
+        if not isinstance(self.capability_kind, CapabilityKind):
+            raise TypeError("capability_kind must be a CapabilityKind")
         overridable_fields = tuple(dict.fromkeys(self.overridable_fields))
         unknown_fields = set(overridable_fields) - _OVERRIDABLE_EXECUTION_FIELDS
         if unknown_fields:
@@ -78,6 +87,7 @@ class ToolDefinition:
             "input_schema": self.input_schema,
             "input_examples": self.input_examples,
             "output_schema": self.output_schema,
+            "capability_kind": self.capability_kind.value,
         }
 
 
