@@ -10,6 +10,11 @@ from tools.manager import ToolManager
 from tests.runtime.test_first_decision_flow import FirstDecisionProvider, _event
 
 
+class FailingVerificationAgent:
+    def decide(self, task, definitions=()):
+        raise ValueError("invalid verification payload")
+
+
 def test_trace_separates_first_decision_and_verification(tmp_path) -> None:
     recorder = TraceRecorder.for_directory(tmp_path)
     tool_manager = ToolManager()
@@ -51,3 +56,36 @@ def test_trace_separates_first_decision_and_verification(tmp_path) -> None:
     assert ("reasoning.verification", "verdict") in markers
     assert ("task", "completed") in markers
     assert ("checkpoint", "persisted") in markers
+
+
+def test_verification_failure_does_not_expose_unverified_draft(tmp_path) -> None:
+    recorder = TraceRecorder.for_directory(tmp_path)
+    tool_manager = ToolManager()
+    subagent = SubAgent(
+        skill_manager=SkillManager(),
+        tool_directory=tool_manager,
+        llm_provider=FirstDecisionProvider(),
+    )
+    runtime = TaskRuntime(
+        task_factory=TaskFactory(
+            task_id_factory=lambda: "task-invalid-verification",
+            tool_manager=tool_manager,
+        ),
+        subagent=subagent,
+        executor=CapabilityExecutor(
+            subagent=subagent,
+            skill_manager=SkillManager(),
+            tool_manager=tool_manager,
+        ),
+        verification_agent=FailingVerificationAgent(),
+        trace_recorder=recorder,
+    )
+    handle = runtime.create_task(_event())
+
+    runtime.step(handle.task_id)
+    result = runtime.step(handle.task_id)
+
+    assert result.task.state.value == "failed"
+    assert result.task.completion is None
+    assert result.completion is None
+    assert result.task.failure["code"] == "verification_failed"

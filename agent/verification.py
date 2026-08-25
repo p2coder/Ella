@@ -149,6 +149,12 @@ class VerificationAgent:
                 raise VerificationDecisionError("invalid verification JSON") from error
         if not isinstance(output, Mapping):
             raise VerificationDecisionError("verification verdict must be an object")
+        wrapped_verdict = output.get("VERIFICATION_VERDICT")
+        if isinstance(wrapped_verdict, Mapping):
+            output = {"action": "VERIFICATION_VERDICT", **dict(wrapped_verdict)}
+        wrapped_tool_call = output.get("CALL_TOOL")
+        if isinstance(wrapped_tool_call, Mapping):
+            output = {"action": "CALL_TOOL", **dict(wrapped_tool_call)}
         action = output.get("action", "VERIFICATION_VERDICT")
         if action == "CALL_TOOL":
             tool_name = output.get("tool_name")
@@ -164,8 +170,10 @@ class VerificationAgent:
         try:
             verdict = VerificationVerdict(
                 goal_state=TaskGoalState(str(output["goal_state"]).lower()),
-                criterion_results=tuple(output.get("criterion_results", ())),
-                deliverable_results=tuple(output.get("deliverable_results", ())),
+                criterion_results=_result_lines(output.get("criterion_results", ())),
+                deliverable_results=_result_lines(
+                    output.get("deliverable_results", ())
+                ),
                 draft_quality_issues=tuple(output.get("draft_quality_issues", ())),
                 recoverable=bool(output.get("recoverable", False)),
                 feedback_for_execution=str(output.get("feedback_for_execution", "")),
@@ -197,3 +205,16 @@ class VerificationAgent:
                 else "The response could not be verified."
             ),
         )
+
+
+def _result_lines(value: Any) -> tuple[str, ...]:
+    if isinstance(value, Mapping):
+        return tuple(
+            f"{key}: {'passed' if result is True else 'failed' if result is False else result}"
+            for key, result in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    if value in (None, ""):
+        return ()
+    return (str(value),)

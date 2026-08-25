@@ -1447,6 +1447,7 @@ class TaskRuntime:
             if verdict is None:
                 raise RuntimeError("verification tool-call budget exhausted")
         except Exception as error:
+            task.completion = None
             task.failure = {
                 "code": "verification_failed",
                 "message": str(error),

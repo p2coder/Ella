@@ -71,6 +71,29 @@ def test_verdict_serialization_uses_three_value_goal_state() -> None:
     assert verdict.to_dict()["goal_state"] == "partially_achieved"
 
 
+def test_provider_wrapped_verdict_is_normalized() -> None:
+    action = VerificationAgent._action_from_output(
+        {
+            "VERIFICATION_VERDICT": {
+                "goal_state": "not_achieved",
+                "criterion_results": {"report.md exists": False},
+                "deliverable_results": {"report.md was written": False},
+                "draft_quality_issues": ["The report is missing."],
+                "recoverable": True,
+                "feedback_for_execution": "Write report.md before submitting.",
+                "public_summary": "The report was not generated.",
+            }
+        },
+        (),
+    )
+
+    assert action.verdict is not None
+    assert action.verdict.goal_state is TaskGoalState.NOT_ACHIEVED
+    assert action.verdict.recoverable is True
+    assert action.verdict.criterion_results == ("report.md exists: failed",)
+    assert action.verdict.deliverable_results == ("report.md was written: failed",)
+
+
 def test_verifier_may_request_only_a_visible_read_only_tool(tmp_path) -> None:
     class Provider:
         provider_name = "verification-test"
