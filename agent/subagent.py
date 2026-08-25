@@ -4,7 +4,7 @@ from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
-from agent.decision import CALL_TOOL, COMPLETE, ExecutionDecision, FirstDecision
+from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
 from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import serialize_tool_definitions
@@ -323,7 +323,7 @@ class SubAgent:
         decision_reason = payload.get("decision_reason")
         if not isinstance(decision_reason, str) or not decision_reason.strip():
             raise DecisionValidationError("decision_reason is required")
-        if action == COMPLETE:
+        if action == SUBMIT_RESULT:
             summary = payload.get("completion_summary")
             refs = payload.get("evidence_refs", ())
             if not isinstance(refs, (list, tuple)):
@@ -332,7 +332,7 @@ class SubAgent:
             if not set(refs) <= known:
                 raise DecisionValidationError("evidence_refs contains an unknown observation")
             return ExecutionDecision(
-                COMPLETE,
+                SUBMIT_RESULT,
                 None,
                 None,
                 decision_reason,
@@ -358,7 +358,7 @@ class SubAgent:
                 for index in range(1, len(task.tool_trace) + 1)
             )
             return ExecutionDecision(
-                COMPLETE,
+                SUBMIT_RESULT,
                 None,
                 None,
                 "Available observations support a final response.",
@@ -366,7 +366,7 @@ class SubAgent:
                 refs,
             )
         return ExecutionDecision(
-            COMPLETE,
+            SUBMIT_RESULT,
             None,
             None,
             "The request can be answered without a capability call.",

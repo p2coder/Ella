@@ -30,7 +30,7 @@ class FirstDecisionProvider:
                     ],
                 },
                 "action": {
-                    "action": "COMPLETE",
+                    "action": "SUBMIT_RESULT",
                     "decision_reason": "No external capability is needed.",
                     "completion_summary": "Reply with a greeting.",
                     "evidence_refs": [],
@@ -92,7 +92,7 @@ def test_first_decision_commits_intent_and_pending_action() -> None:
 
     assert result.intent is not None
     assert result.intent.goal == "Greet the user naturally."
-    assert result.action.action == "COMPLETE"
+    assert result.action.action == "SUBMIT_RESULT"
     assert "minimum_acceptance_criteria" in task.task_local_state[
         "first_decision_prompt_text"
     ]

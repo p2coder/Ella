@@ -13,7 +13,7 @@ from agent.final_response import FinalResponseGenerator
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
-from agent.decision import CALL_TOOL, COMPLETE, ExecutionDecision
+from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision
 from tasks.state import (
     StepExecutionState,
     DeliveryAttempt,
@@ -1121,7 +1121,7 @@ class TaskRuntime:
             self._archive_and_advance(task)
             self._persist(task)
 
-        if decision.action == COMPLETE:
+        if decision.action == SUBMIT_RESULT:
             task.task_local_state.pop("current_decision", None)
             task.task_local_state["completion_summary"] = decision.completion_summary
             task.task_local_state["completion_evidence_refs"] = decision.evidence_refs
@@ -1337,7 +1337,7 @@ class TaskRuntime:
                     return {"state": "failed", "code": "decision_repair_exhausted", "message": str(error), "wave_id": wave_id}
                 local.current_step = replace(local.current_step, retry_index=local.current_step.retry_index + 1)
                 continue
-            if decision.action == COMPLETE:
+            if decision.action == SUBMIT_RESULT:
                 return {
                     "state": "succeeded",
                     "wave_id": wave_id,

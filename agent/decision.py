@@ -5,8 +5,8 @@ from tasks.task import TaskIntent
 
 
 CALL_TOOL = "CALL_TOOL"
-COMPLETE = "COMPLETE"
-SUPPORTED_EXECUTION_ACTIONS = frozenset({CALL_TOOL, COMPLETE})
+SUBMIT_RESULT = "SUBMIT_RESULT"
+SUPPORTED_EXECUTION_ACTIONS = frozenset({CALL_TOOL, SUBMIT_RESULT})
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,17 +33,17 @@ class ExecutionDecision:
                 raise ValueError("CALL_TOOL must not include completion fields")
             return
         if self.tool_name is not None:
-            raise ValueError("COMPLETE must not include tool_name")
+            raise ValueError("SUBMIT_RESULT must not include tool_name")
         if self.tool_input not in (None, {}):
-            raise ValueError("COMPLETE must not include tool_input")
+            raise ValueError("SUBMIT_RESULT must not include tool_input")
         if not isinstance(self.completion_summary, str) or not self.completion_summary.strip():
-            raise ValueError("COMPLETE requires completion_summary")
+            raise ValueError("SUBMIT_RESULT requires completion_summary")
         if any(not isinstance(ref, str) or not ref.strip() for ref in self.evidence_refs):
             raise ValueError("evidence_refs must contain non-empty strings")
 
     @property
-    def is_complete(self) -> bool:
-        return self.action == COMPLETE
+    def is_submit_result(self) -> bool:
+        return self.action == SUBMIT_RESULT
 
     def to_dict(self) -> dict[str, object]:
         return {

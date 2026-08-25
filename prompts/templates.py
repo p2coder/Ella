@@ -61,7 +61,7 @@ TOOL_POLICY_PROMPT = (
 DECISION_POLICY_PROMPT = (
     f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT} One execution decision may "
     "choose at most one action. CALL_TOOL may use exactly one visible tool. "
-    "COMPLETE is valid when current information is enough, even if no Tool "
+    "SUBMIT_RESULT is valid when current information is enough, even if no Tool "
     "was used. Planning and user interaction are expressed through visible "
     "runtime capabilities, not separate actions."
 )
@@ -102,9 +102,9 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
         f"{DECISION_POLICY_PROMPT} Return one strict JSON object. The action "
-        "must be CALL_TOOL or COMPLETE. CALL_TOOL must include "
+        "must be CALL_TOOL or SUBMIT_RESULT. CALL_TOOL must include "
         "a visible tool_name and an arguments object matching that tool's "
-        "schema. Include decision_reason for every action. COMPLETE must also "
+        "schema. Include decision_reason for every action. SUBMIT_RESULT must also "
         "include a non-empty completion_summary and evidence_refs containing "
         "only observation IDs from WorkSpace; evidence_refs may be empty only "
         "when the task does not depend on a capability result. Read concrete "
@@ -112,7 +112,7 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "summaries, and observations only from WorkSpace. Other actions must "
         "not include a tool name. Use the provided "
         "tool_results observations before choosing another tool call. If an "
-        "observation is sufficient for the current task, choose COMPLETE. If "
+        "observation is sufficient for the current task, choose SUBMIT_RESULT. If "
         "the user's request explicitly depends on current screen content and "
         "screen_scene is visible, CALL_TOOL screen_scene before asking the "
         "user for confirmation, unless the request is unsafe or the user "
@@ -131,19 +131,19 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "the same tool call with materially identical arguments. If the "
         "missing information can still be obtained through a refined tool "
         "call, another visible tool, or user input, continue execution. "
-        "Choose COMPLETE only when the task can be reasonably concluded with "
-        "the available information. Do not choose COMPLETE if a visible tool "
+        "Choose SUBMIT_RESULT only when the task can be reasonably concluded with "
+        "the available information. Do not choose SUBMIT_RESULT if a visible tool "
         "can still reasonably obtain information required to satisfy the "
         "user's request. If observations already contain camera_scene "
         "for the current task, do not call camera_scene again; use that "
         "observation, explain missing visual information, or report visual "
         "unavailability. If information can only come from the user and "
         "ask_user_question is visible, call it. If a tool is unavailable, "
-        "choose another visible capability or COMPLETE with an honest "
+        "choose another visible capability or SUBMIT_RESULT with an honest "
         "conclusion. In "
         "argument repair mode, regenerate arguments for active_tool_name only. "
         "The repair must use the same Tool and must not switch tool_name or "
-        "return COMPLETE. Never select a Tool listed in "
+        "return SUBMIT_RESULT. Never select a Tool listed in "
         "blacklisted_tools."
     ),
 )
