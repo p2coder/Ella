@@ -56,6 +56,9 @@ class SubAgent:
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": self._observations(task),
+                    "decision_repair": task.task_local_state.get(
+                        "decision_repair"
+                    ),
                 },
             },
         )

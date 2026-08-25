@@ -1014,6 +1014,7 @@ class TaskRuntime:
                 self._persist(task)
                 return self._result(creation)
             task.task_local_state["current_decision"] = decision.to_dict()
+            task.task_local_state.pop("decision_repair", None)
             self._persist(task)
             self._trace_task(
                 task,
@@ -1151,6 +1152,14 @@ class TaskRuntime:
                 step,
                 retry_index=step.retry_index + 1,
             )
+            task.task_local_state["decision_repair"] = {
+                "validation_error": message,
+                "retry_index": task.current_step.retry_index,
+                "instruction": (
+                    "Return the same decision protocol with all required fields. "
+                    "Every action requires a non-empty decision_reason."
+                ),
+            }
             self._trace_task(
                 task,
                 "reasoning.execution_decision",
@@ -1163,6 +1172,7 @@ class TaskRuntime:
             "message": message,
         }
         task.failure_reason = message
+        task.task_local_state.pop("decision_repair", None)
         task.transition_to(TaskState.FAILED)
 
     def _step_task_graph(
