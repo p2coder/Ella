@@ -33,6 +33,8 @@ from tools import (
     MockWeatherTool,
     ToolManager,
     ToolResult,
+    WebPageReadTool,
+    WebSearchTool,
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
@@ -101,6 +103,8 @@ class DemoRuntime:
         tool_manager.register(MockVisionSummaryTool())
         tool_manager.register(MockWeatherTool())
         tool_manager.register(MockChecklistTool())
+        tool_manager.register(WebSearchTool())
+        tool_manager.register(WebPageReadTool())
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
 
