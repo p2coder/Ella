@@ -15,6 +15,7 @@ QWEN_API_KEY_ENV_NAMES = (
     "DASHSCOPE_API_KEY",
     "QWEN_API_KEY",
 )
+DEEPSEEK_API_KEY_ENV_NAMES = ("DEEPSEEK_API_KEY",)
 
 CONFIG_NAMES = {
     "ELLA_MODEL_PROVIDER": "MODEL_PROVIDER",
@@ -22,6 +23,12 @@ CONFIG_NAMES = {
     "ELLA_QWEN_LLM_MODEL": "QWEN_LLM_MODEL",
     "ELLA_QWEN_MULTIMODAL_MODEL": "QWEN_MULTIMODAL_MODEL",
     "ELLA_QWEN_SPEECH_MODEL": "QWEN_SPEECH_MODEL",
+    "ELLA_DEEPSEEK_API_KEY": "DEEPSEEK_API_KEY",
+    "ELLA_DEEPSEEK_LLM_MODEL": "DEEPSEEK_LLM_MODEL",
+    "ELLA_DEEPSEEK_BASE_URL": "DEEPSEEK_BASE_URL",
+    "ELLA_DEEPSEEK_BYPASS_PROXY": "DEEPSEEK_BYPASS_PROXY",
+    "ELLA_DEEPSEEK_THINKING_ENABLED": "DEEPSEEK_THINKING_ENABLED",
+    "ELLA_DEEPSEEK_REASONING_EFFORT": "DEEPSEEK_REASONING_EFFORT",
     "ELLA_MIC_ENABLED": "MIC_ENABLED",
     "ELLA_MIC_DEVICE": "MIC_DEVICE",
     "ELLA_MIC_ALWAYS_LISTENING": "MIC_ALWAYS_LISTENING",
@@ -51,6 +58,12 @@ SAFE_DEFAULTS = {
     "ELLA_QWEN_LLM_MODEL": None,
     "ELLA_QWEN_MULTIMODAL_MODEL": None,
     "ELLA_QWEN_SPEECH_MODEL": None,
+    "ELLA_DEEPSEEK_API_KEY": None,
+    "ELLA_DEEPSEEK_LLM_MODEL": "deepseek-v4-pro",
+    "ELLA_DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "ELLA_DEEPSEEK_BYPASS_PROXY": True,
+    "ELLA_DEEPSEEK_THINKING_ENABLED": True,
+    "ELLA_DEEPSEEK_REASONING_EFFORT": "high",
     "ELLA_MIC_ENABLED": False,
     "ELLA_MIC_DEVICE": "default",
     "ELLA_MIC_ALWAYS_LISTENING": True,
@@ -86,6 +99,12 @@ class EllaSettings:
     qwen_llm_model: str | None
     qwen_multimodal_model: str | None
     qwen_speech_model: str | None
+    deepseek_api_key: str | None
+    deepseek_llm_model: str | None
+    deepseek_base_url: str
+    deepseek_bypass_proxy: bool
+    deepseek_thinking_enabled: bool
+    deepseek_reasoning_effort: str
     mic_enabled: bool
     mic_device: str
     mic_always_listening: bool
@@ -119,11 +138,29 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         values.update(overrides)
 
     api_key = _optional_string(values, "ELLA_QWEN_API_KEY")
+    deepseek_api_key = _optional_string(values, "ELLA_DEEPSEEK_API_KEY")
     if overrides is None:
         api_key = _first_environment_value(QWEN_API_KEY_ENV_NAMES) or api_key
+        deepseek_api_key = (
+            _first_environment_value(DEEPSEEK_API_KEY_ENV_NAMES)
+            or deepseek_api_key
+        )
+
+    model_provider = _string(values, "ELLA_MODEL_PROVIDER", "qwen").lower()
+    if model_provider not in {"mock", "qwen", "deepseek"}:
+        raise ValueError(f"unsupported model provider: {model_provider}")
+    reasoning_effort = _string(
+        values,
+        "ELLA_DEEPSEEK_REASONING_EFFORT",
+        "high",
+    ).lower()
+    if reasoning_effort not in {"low", "high", "max"}:
+        raise ValueError(
+            "DEEPSEEK_REASONING_EFFORT must be low, high, or max"
+        )
 
     return EllaSettings(
-        model_provider=_string(values, "ELLA_MODEL_PROVIDER", "qwen"),
+        model_provider=model_provider,
         qwen_api_key=api_key,
         qwen_llm_model=_optional_string(values, "ELLA_QWEN_LLM_MODEL"),
         qwen_multimodal_model=_optional_string(
@@ -131,6 +168,27 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
             "ELLA_QWEN_MULTIMODAL_MODEL",
         ),
         qwen_speech_model=_optional_string(values, "ELLA_QWEN_SPEECH_MODEL"),
+        deepseek_api_key=deepseek_api_key,
+        deepseek_llm_model=_optional_string(
+            values,
+            "ELLA_DEEPSEEK_LLM_MODEL",
+        ),
+        deepseek_base_url=_string(
+            values,
+            "ELLA_DEEPSEEK_BASE_URL",
+            "https://api.deepseek.com",
+        ).rstrip("/"),
+        deepseek_bypass_proxy=_boolean(
+            values,
+            "ELLA_DEEPSEEK_BYPASS_PROXY",
+            True,
+        ),
+        deepseek_thinking_enabled=_boolean(
+            values,
+            "ELLA_DEEPSEEK_THINKING_ENABLED",
+            True,
+        ),
+        deepseek_reasoning_effort=reasoning_effort,
         mic_enabled=_boolean(values, "ELLA_MIC_ENABLED", False),
         mic_device=_string(values, "ELLA_MIC_DEVICE", "default"),
         mic_always_listening=_boolean(

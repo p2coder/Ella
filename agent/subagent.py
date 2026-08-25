@@ -4,14 +4,14 @@ from time import perf_counter
 from typing import Any
 
 from agent.context import AgentExecutionContext
-from agent.decision import CALL_TOOL, COMPLETE, ExecutionDecision
+from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
 from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.llm import serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
-from tasks.task import Task
+from tasks.task import Task, TaskIntent
 
 
 class DecisionValidationError(ValueError):
@@ -32,6 +32,84 @@ class SubAgent:
     trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
         default_factory=NoOpTraceRecorder
     )
+
+    def decide_first_action(
+        self,
+        context: AgentExecutionContext,
+        task: Task,
+    ) -> FirstDecision:
+        definitions = self._visible_definitions(context, task)
+        serialized = serialize_tool_definitions(definitions)
+        user_input = str(
+            task.task_local_state.get(
+                "latest_user_input",
+                "" if task.source_event is None else task.source_event.payload.get("text", ""),
+            )
+        )
+        prompt = self.prompt_engine.build(
+            PromptType.FIRST_DECISION,
+            {
+                "user_prompt": user_input,
+                "workspace": {
+                    "task_id": task.task_id,
+                    "trace_id": context.trace_id,
+                    "visible_skills": self._visible_skills(context),
+                    "visible_tools": serialized,
+                    "observations": self._observations(task),
+                    "decision_repair": task.task_local_state.get(
+                        "decision_repair"
+                    ),
+                },
+            },
+        )
+        task.task_local_state["first_decision_prompt_text"] = prompt.prompt
+        if self.llm_provider is None:
+            return self._first_decision_fallback(user_input, task, definitions)
+        started = perf_counter()
+        try:
+            result = self.llm_provider.generate(
+                prompt.prompt,
+                trace_id=context.trace_id,
+                metadata={"boundary": "first_decision"},
+            )
+        except Exception:
+            self._record_boundary_timing(
+                context, "first_decision", started, False, None
+            )
+            raise
+        self._record_boundary_timing(
+            context,
+            "first_decision",
+            started,
+            not getattr(result, "failed", False),
+            result,
+        )
+        if getattr(result, "failed", False):
+            raise DecisionValidationError("first decision provider failed")
+        try:
+            payload = self._extract_payload(result.output)
+            return self._first_decision_from_payload(payload, serialized, ())
+        except DecisionValidationError:
+            if bool(getattr(result, "metadata", {}).get("mock")):
+                return self._first_decision_fallback(user_input, task, definitions)
+            raise
+
+    def _record_boundary_timing(
+        self,
+        context: AgentExecutionContext,
+        boundary: str,
+        started: float,
+        success: bool,
+        result: Any,
+    ) -> None:
+        self.timing_recorder.record_llm_call(
+            context.trace_id,
+            boundary=boundary,
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            success=success,
+            provider_name=getattr(result or self.llm_provider, "provider_name", None),
+            model_name=getattr(result or self.llm_provider, "model_name", None),
+        )
 
     def decide_next_action(
         self,
@@ -65,6 +143,9 @@ class SubAgent:
                     "visible_tools": serialized,
                     "observations": observations,
                     "current_step": self._step_context(task),
+                    "decision_repair": task.task_local_state.get(
+                        "decision_repair"
+                    ),
                 },
             },
         )
@@ -118,14 +199,70 @@ class SubAgent:
         success: bool,
         result: Any,
     ) -> None:
-        self.timing_recorder.record_llm_call(
-            context.trace_id,
-            boundary="execution_decision",
-            duration_ms=round((perf_counter() - started) * 1000, 3),
-            success=success,
-            provider_name=getattr(result or self.llm_provider, "provider_name", None),
-            model_name=getattr(result or self.llm_provider, "model_name", None),
+        self._record_boundary_timing(
+            context, "execution_decision", started, success, result
         )
+
+    @classmethod
+    def _first_decision_from_payload(
+        cls,
+        payload: dict[str, Any],
+        tools: tuple[dict[str, Any], ...],
+        observations: tuple[dict[str, Any], ...],
+    ) -> FirstDecision:
+        raw_intent = payload.get("intent")
+        raw_action = payload.get("action")
+        if not isinstance(raw_action, dict):
+            raise DecisionValidationError("first decision action is required")
+        action = cls._decision_from_payload(raw_action, tools, observations)
+        if raw_intent is None:
+            try:
+                return FirstDecision(None, action)
+            except ValueError as error:
+                raise DecisionValidationError(str(error)) from error
+        if not isinstance(raw_intent, dict):
+            raise DecisionValidationError("intent must be an object or null")
+        try:
+            intent = TaskIntent(
+                goal=str(raw_intent.get("goal", "")),
+                constraints=tuple(raw_intent.get("constraints", ())),
+                deliverables=tuple(raw_intent.get("deliverables", ())),
+                minimum_acceptance_criteria=tuple(
+                    raw_intent.get("minimum_acceptance_criteria", ())
+                ),
+            )
+            return FirstDecision(intent, action)
+        except (TypeError, ValueError) as error:
+            raise DecisionValidationError(f"invalid first decision: {error}") from error
+
+    @classmethod
+    def _first_decision_fallback(
+        cls,
+        user_input: str,
+        task: Task,
+        definitions: tuple[Any, ...],
+    ) -> FirstDecision:
+        normalized = user_input.strip()
+        if not normalized:
+            if not any(item.name == "ask_user_question" for item in definitions):
+                raise DecisionValidationError("empty input requires ask_user_question")
+            return FirstDecision(
+                None,
+                ExecutionDecision(
+                    CALL_TOOL,
+                    "ask_user_question",
+                    {"question": "What would you like Ella to help with?"},
+                    "The user's purpose is unclear.",
+                ),
+            )
+        intent = TaskIntent(
+            goal=normalized,
+            deliverables=("A useful response to the user's request.",),
+            minimum_acceptance_criteria=(
+                "The response addresses the user's stated request honestly.",
+            ),
+        )
+        return FirstDecision(intent, cls._fallback(task, definitions))
 
     def _visible_definitions(self, context: AgentExecutionContext, task: Task) -> tuple[Any, ...]:
         if self.tool_directory is None:
@@ -189,10 +326,10 @@ class SubAgent:
         observations: tuple[dict[str, Any], ...],
     ) -> ExecutionDecision:
         action = payload.get("action")
-        decision_reason = payload.get("decision_reason")
+        decision_reason = payload.get("decision_reason", payload.get("reason"))
         if not isinstance(decision_reason, str) or not decision_reason.strip():
-            raise DecisionValidationError("decision_reason is required")
-        if action == COMPLETE:
+            decision_reason = f"Model selected {action or 'an unspecified action'}."
+        if action == SUBMIT_RESULT:
             summary = payload.get("completion_summary")
             refs = payload.get("evidence_refs", ())
             if not isinstance(refs, (list, tuple)):
@@ -201,7 +338,7 @@ class SubAgent:
             if not set(refs) <= known:
                 raise DecisionValidationError("evidence_refs contains an unknown observation")
             return ExecutionDecision(
-                COMPLETE,
+                SUBMIT_RESULT,
                 None,
                 None,
                 decision_reason,
@@ -227,7 +364,7 @@ class SubAgent:
                 for index in range(1, len(task.tool_trace) + 1)
             )
             return ExecutionDecision(
-                COMPLETE,
+                SUBMIT_RESULT,
                 None,
                 None,
                 "Available observations support a final response.",
@@ -235,7 +372,7 @@ class SubAgent:
                 refs,
             )
         return ExecutionDecision(
-            COMPLETE,
+            SUBMIT_RESULT,
             None,
             None,
             "The request can be answered without a capability call.",

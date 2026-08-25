@@ -33,12 +33,30 @@ class ProviderFactory:
                 model_name=self.settings.qwen_llm_model or "qwen-plus",
                 client=DashScopeOpenAITransport(),
             )
+        if (
+            self.settings.model_provider == "deepseek"
+            and self._deepseek_llm_configured()
+        ):
+            from .deepseek import DeepSeekLLMProvider, DeepSeekOpenAITransport
+
+            return DeepSeekLLMProvider(
+                api_key=self.settings.deepseek_api_key,
+                model_name=(
+                    self.settings.deepseek_llm_model or "deepseek-v4-pro"
+                ),
+                client=DeepSeekOpenAITransport(
+                    base_url=self.settings.deepseek_base_url,
+                    bypass_proxy=self.settings.deepseek_bypass_proxy,
+                ),
+                thinking_enabled=self.settings.deepseek_thinking_enabled,
+                reasoning_effort=self.settings.deepseek_reasoning_effort,
+            )
         return UnavailableLLMProvider.from_settings(self.settings)
 
     def speech(self) -> MockSpeechProvider | "UnavailableSpeechProvider" | object:
         if not self.settings.use_real_providers:
             return MockSpeechProvider()
-        if self.settings.model_provider == "qwen" and self._qwen_speech_configured():
+        if self._qwen_speech_configured():
             from .qwen import DashScopeOpenAITransport, QwenSpeechProvider
 
             return QwenSpeechProvider(
@@ -52,8 +70,7 @@ class ProviderFactory:
         if not self.settings.use_real_providers:
             return MockVisionProvider()
         if (
-            self.settings.model_provider == "qwen"
-            and self._qwen_multimodal_configured()
+            self._qwen_multimodal_configured()
         ):
             from .qwen import DashScopeOpenAITransport, QwenMultimodalProvider
 
@@ -70,8 +87,7 @@ class ProviderFactory:
         if not self.settings.use_real_providers:
             return MockMultimodalProvider()
         if (
-            self.settings.model_provider == "qwen"
-            and self._qwen_multimodal_configured()
+            self._qwen_multimodal_configured()
         ):
             from .qwen import DashScopeOpenAITransport, QwenMultimodalProvider
 
@@ -100,6 +116,12 @@ class ProviderFactory:
             and self.settings.qwen_multimodal_model is not None
         )
 
+    def _deepseek_llm_configured(self) -> bool:
+        return (
+            self.settings.deepseek_api_key is not None
+            and self.settings.deepseek_llm_model is not None
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class _UnavailableProviderBase:
@@ -110,9 +132,14 @@ class _UnavailableProviderBase:
 
     @classmethod
     def from_settings(cls, settings: EllaSettings):
+        api_key = (
+            settings.deepseek_api_key
+            if settings.model_provider == "deepseek"
+            else settings.qwen_api_key
+        )
         return cls(
             requested_provider=settings.model_provider,
-            api_key_missing=settings.qwen_api_key is None,
+            api_key_missing=api_key is None,
         )
 
     def _result(self, *, trace_id: str | None) -> ProviderResult:
@@ -120,7 +147,11 @@ class _UnavailableProviderBase:
         metadata: dict[str, Any] = {"requested_provider": self.requested_provider}
         if self.api_key_missing:
             message = "real provider is unavailable because API key is missing"
-            metadata["missing"] = "ELLA_QWEN_API_KEY"
+            metadata["missing"] = (
+                "DEEPSEEK_API_KEY"
+                if self.requested_provider == "deepseek"
+                else "ELLA_QWEN_API_KEY"
+            )
 
         return ProviderResult(
             provider_name=self.provider_name,

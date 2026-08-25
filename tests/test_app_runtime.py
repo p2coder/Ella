@@ -1,6 +1,8 @@
 import ast
 import inspect
 import textwrap
+from pathlib import Path
+from types import SimpleNamespace
 
 import app_runtime
 from memory import MemoryWriteResult
@@ -16,8 +18,6 @@ class _DisplayTaskResult:
             user_visible_output=UserVisibleAgentOutput(
                 process={
                     "task_goal": "Answer.",
-                    "task_formulation_prompt_text": "FORMULATION",
-                    "strategy_selection_prompt_text": "STRATEGY",
                     "execution_decision_prompt_text": "EXECUTION",
                     "final_response_prompt_text": "FINAL",
                 },
@@ -27,8 +27,23 @@ class _DisplayTaskResult:
         )
         self.memory_result = MemoryWriteResult(
             action="recorded",
-            memory_path=app_runtime.DEFAULT_MEMORY_PATH,
+            memory_path=Path("memory.md"),
         )
+        self.handle = SimpleNamespace(task_id="task-1")
+        self.task = SimpleNamespace(
+            state=SimpleNamespace(value="completed"),
+            active_step_ids=(),
+            paused_from_state=None,
+            terminal_outcome=None,
+            delivery=None,
+            goal_state=SimpleNamespace(value="achieved"),
+            terminal_execution_state=SimpleNamespace(value="completed"),
+            task_local_state={
+                "first_decision_prompt_text": "FIRST",
+                "verification_prompt_text": "VERIFY",
+            },
+        )
+        self.timing = None
 
 
 def test_formal_app_runtime_uses_neutral_event_context():
@@ -72,7 +87,9 @@ def test_formal_app_runtime_snapshot_preserves_all_generated_prompts():
         _DisplayTaskResult(),
     )
 
-    assert snapshot.task_formulation_prompt_text == "FORMULATION"
-    assert snapshot.strategy_selection_prompt_text == "STRATEGY"
+    assert snapshot.task_formulation_prompt_text == ""
+    assert snapshot.first_decision_prompt_text == "FIRST"
     assert snapshot.execution_decision_prompt_text == "EXECUTION"
+    assert snapshot.verification_prompt_text == "VERIFY"
     assert snapshot.final_response_prompt_text == "FINAL"
+    assert snapshot.goal_state == "achieved"

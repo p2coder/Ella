@@ -22,14 +22,14 @@ from tasks.graph import (
     ToolGraphRun,
     ToolNodeDefinition,
 )
-from tasks.task import Task, TaskState
+from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from sessions.output import UserVisibleAgentOutput
 from tasks.state import StepExecutionState, ToolFailureKind, ToolFailureObservation
 from tasks.completion import TaskCompletionPackage
 from tools import ToolResult
 
 
-CHECKPOINT_SCHEMA_VERSION = 2
+CHECKPOINT_SCHEMA_VERSION = 3
 _FORBIDDEN_KEYS = frozenset({"api_key", "authorization", "credentials"})
 _OMITTED_KEY_PARTS = frozenset(
     {"prompt_text", "captured_frame", "display_frame", "raw_media"}
@@ -135,7 +135,7 @@ class TaskStore:
             return "requires_recovery"
         if task.state is TaskState.UNCERTAIN:
             return "requires_resolution"
-        if task.state in {TaskState.SUCCEEDED, TaskState.FAILED}:
+        if task.state in {TaskState.COMPLETED, TaskState.FAILED}:
             return "delivery_pending"
         if task.state in {TaskState.KILLED, TaskState.DELIVERED}:
             return "terminal"
@@ -158,6 +158,13 @@ def _encode_task(task: Task) -> dict[str, Any]:
             if task.execution_context
             else None,
             "state": task.state.value,
+            "goal_state": task.goal_state.value if task.goal_state else None,
+            "terminal_execution_state": (
+                task.terminal_execution_state.value
+                if task.terminal_execution_state
+                else None
+            ),
+            "intent": None if task.intent is None else task.intent.to_dict(),
             "graph": _encode_graph(task.graph),
             "paused_from_state": task.paused_from_state.value
             if task.paused_from_state
@@ -194,6 +201,28 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
         execution_context=context,
         graph=_decode_graph(data.get("graph")),
         state=TaskState(data["state"]),
+        goal_state=(
+            TaskGoalState(data["goal_state"])
+            if data.get("goal_state")
+            else None
+        ),
+        terminal_execution_state=(
+            TaskState(data["terminal_execution_state"])
+            if data.get("terminal_execution_state")
+            else None
+        ),
+        intent=(
+            TaskIntent(
+                goal=str(data["intent"]["goal"]),
+                constraints=tuple(data["intent"].get("constraints", ())),
+                deliverables=tuple(data["intent"].get("deliverables", ())),
+                minimum_acceptance_criteria=tuple(
+                    data["intent"].get("minimum_acceptance_criteria", ())
+                ),
+            )
+            if data.get("intent")
+            else None
+        ),
         paused_from_state=TaskState(data["paused_from_state"])
         if data.get("paused_from_state")
         else None,

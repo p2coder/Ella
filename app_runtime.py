@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from agent.final_response import FinalResponseGenerator
+from agent.verification import VerificationAgent
 from config.config import PROJECT_ROOT
 from config.settings import load_settings
 from devices.factory import DeviceFactory
@@ -54,6 +55,11 @@ from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 from tools.plan import PlanWrittenTool
 from tools.ask_user_question import AskUserQuestionTool
+from tools.verification import (
+    ArtifactExistsTool,
+    DocumentReadTool,
+    ToolObservationCheckTool,
+)
 from runtime.interactions import InteractionBroker
 
 MAX_APP_STEPS = 20
@@ -122,6 +128,8 @@ class AppRuntime:
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
         tool_manager.register(DocumentWriteTool(settings.document_directory))
+        tool_manager.register(ArtifactExistsTool(settings.document_directory))
+        tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
         interaction_broker = InteractionBroker()
@@ -134,6 +142,11 @@ class AppRuntime:
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
+        )
+        verification_agent = VerificationAgent(
+            prompt_engine=PromptEngine(),
+            llm_provider=llm_provider,
+            timing_recorder=timing_recorder,
         )
         task_runtime = TaskRuntime(
             task_factory=TaskFactory(
@@ -153,10 +166,16 @@ class AppRuntime:
                 llm_provider=llm_provider,
                 timing_recorder=timing_recorder,
             ),
+            verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
             task_store=TaskStore(settings.task_checkpoint_directory),
             task_queue=TaskQueue(),
+        )
+        tool_manager.register(
+            ToolObservationCheckTool(
+                lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)
+            )
         )
         interaction_broker.set_question_handler(
             lambda question: task_runtime.event_publisher.publish(
@@ -319,6 +338,12 @@ class AppRuntime:
             "trace_id": task.trace_id,
             "user_input_summary": _task_user_input(task),
             "state": task.state.value,
+            "goal_state": None if task.goal_state is None else task.goal_state.value,
+            "terminal_execution_state": (
+                None
+                if task.terminal_execution_state is None
+                else task.terminal_execution_state.value
+            ),
             "execution_stage": _execution_stage(task),
             "active_step_ids": task.active_step_ids,
             "pending_questions": tuple(
@@ -550,7 +575,6 @@ def _execution_stage(task) -> str:
         return "tool_execution"
     return {
         "created": "created",
-        "formulating": "task_formulation",
         "ready": "queued",
         "reasoning": "reasoning",
         "tool_execution": "tool_execution",
@@ -594,14 +618,18 @@ def _build_display_snapshot(
         scene_summary=_scene_summary(camera_result),
         visible_items=_visible_items(camera_result),
         task_goal=str(process.get("task_goal", "")),
-        task_formulation_prompt_text=str(
-            process.get("task_formulation_prompt_text", "")
+        task_formulation_prompt_text="",
+        first_decision_prompt_text=str(
+            task_result.task.task_local_state.get("first_decision_prompt_text", "")
         ),
         execution_decision_prompt_text=str(
             process.get("execution_decision_prompt_text", "")
         ),
         final_response_prompt_text=str(
             process.get("final_response_prompt_text", "")
+        ),
+        verification_prompt_text=str(
+            task_result.task.task_local_state.get("verification_prompt_text", "")
         ),
         tool_results_summary=_tool_results_summary(tool_results),
         final_response=output.final_response,
@@ -617,6 +645,16 @@ def _build_display_snapshot(
         ),
         terminal_outcome=_display_value(task_result.task.terminal_outcome),
         delivery_status=_display_value(task_result.task.delivery),
+        goal_state=(
+            ""
+            if task_result.task.goal_state is None
+            else task_result.task.goal_state.value
+        ),
+        terminal_execution_state=(
+            ""
+            if task_result.task.terminal_execution_state is None
+            else task_result.task.terminal_execution_state.value
+        ),
     )
 
 
@@ -655,9 +693,8 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     lines = []
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
-        ("task_formulation_stage", snapshot.task_formulation_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("planning", snapshot.planning_duration_ms),
+        ("first_decision_stage", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
         ("final_response_stage", snapshot.final_response_generation_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
@@ -668,8 +705,9 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
 
     llm_by_boundary = _llm_timing_by_boundary(snapshot)
     for boundary in (
-        "task_formulation",
+        "first_decision",
         "execution_decision",
+        "verification_decision",
         "final_response",
     ):
         value = llm_by_boundary.get(boundary)

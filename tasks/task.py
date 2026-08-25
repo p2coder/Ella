@@ -13,35 +13,60 @@ from .graph import TaskGraphNodeType, TaskGraphRun
 
 class TaskState(StrEnum):
     CREATED = "created"
-    FORMULATING = "formulating"
     READY = "ready"
     REASONING = "reasoning"
     TOOL_EXECUTION = "tool_execution"
     PAUSE_REQUESTED = "pause_requested"
     PAUSED = "paused"
     KILL_REQUESTED = "kill_requested"
-    SUCCEEDED = "succeeded"
+    COMPLETED = "completed"
     FAILED = "failed"
     UNCERTAIN = "uncertain"
     KILLED = "killed"
     DELIVERED = "delivered"
 
 
+class TaskGoalState(StrEnum):
+    ACHIEVED = "achieved"
+    PARTIALLY_ACHIEVED = "partially_achieved"
+    NOT_ACHIEVED = "not_achieved"
+
+
+@dataclass(frozen=True, slots=True)
+class TaskIntent:
+    goal: str
+    constraints: tuple[str, ...] = ()
+    deliverables: tuple[str, ...] = ()
+    minimum_acceptance_criteria: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.goal.strip():
+            raise ValueError("TaskIntent goal must be non-empty")
+        for field_name in (
+            "constraints",
+            "deliverables",
+            "minimum_acceptance_criteria",
+        ):
+            values = tuple(getattr(self, field_name))
+            if any(not isinstance(item, str) or not item.strip() for item in values):
+                raise ValueError(f"TaskIntent {field_name} must contain non-empty strings")
+            object.__setattr__(self, field_name, values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "goal": self.goal,
+            "constraints": self.constraints,
+            "deliverables": self.deliverables,
+            "minimum_acceptance_criteria": self.minimum_acceptance_criteria,
+        }
+
+
 ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CREATED: frozenset(
         {
-            TaskState.FORMULATING,
             TaskState.READY,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
-        }
-    ),
-    TaskState.FORMULATING: frozenset(
-        {
-            TaskState.READY,
-            TaskState.PAUSE_REQUESTED,
-            TaskState.KILL_REQUESTED,
-            TaskState.FAILED,
         }
     ),
     TaskState.READY: frozenset(
@@ -56,7 +81,7 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.TOOL_EXECUTION,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
-            TaskState.SUCCEEDED,
+            TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.UNCERTAIN,
         }
@@ -78,8 +103,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.PAUSED: frozenset(
         {
-            TaskState.CREATED,
-            TaskState.FORMULATING,
             TaskState.READY,
             TaskState.REASONING,
             TaskState.TOOL_EXECUTION,
@@ -87,10 +110,10 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
         }
     ),
     TaskState.KILL_REQUESTED: frozenset({TaskState.KILLED}),
-    TaskState.SUCCEEDED: frozenset({TaskState.DELIVERED}),
+    TaskState.COMPLETED: frozenset({TaskState.DELIVERED}),
     TaskState.FAILED: frozenset({TaskState.DELIVERED}),
-    TaskState.UNCERTAIN: frozenset({TaskState.FAILED}),
-    TaskState.KILLED: frozenset(),
+    TaskState.UNCERTAIN: frozenset({TaskState.FAILED, TaskState.DELIVERED}),
+    TaskState.KILLED: frozenset({TaskState.DELIVERED}),
     TaskState.DELIVERED: frozenset(),
 }
 
@@ -101,6 +124,9 @@ class Task:
     session_id: InitVar[str | None] = None
     handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
+    goal_state: TaskGoalState | None = None
+    terminal_execution_state: TaskState | None = None
+    intent: TaskIntent | None = None
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
     tool_trace: tuple[dict[str, Any], ...] = ()
@@ -152,7 +178,29 @@ class Task:
                 "invalid task state transition: "
                 f"{self.state.value} -> {next_state.value}"
             )
+        previous_state = self.state
+        if next_state in {TaskState.KILLED, TaskState.UNCERTAIN}:
+            self.goal_state = TaskGoalState.NOT_ACHIEVED
+        elif next_state is TaskState.FAILED and self.goal_state is None:
+            self.goal_state = TaskGoalState.NOT_ACHIEVED
+        elif next_state is TaskState.DELIVERED:
+            if self.terminal_execution_state is None:
+                self.terminal_execution_state = previous_state
+            if self.goal_state is None:
+                raise ValueError("DELIVERED Task requires a committed goal state")
         self.state = next_state
+        self.updated_at = datetime.now(timezone.utc)
+
+    def set_goal_state(self, goal_state: TaskGoalState) -> None:
+        if self.state not in {
+            TaskState.COMPLETED,
+            TaskState.FAILED,
+            TaskState.UNCERTAIN,
+            TaskState.KILLED,
+            TaskState.DELIVERED,
+        }:
+            raise ValueError("goal state may only be committed at a terminal boundary")
+        self.goal_state = goal_state
         self.updated_at = datetime.now(timezone.utc)
 
 

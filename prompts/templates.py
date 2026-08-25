@@ -61,7 +61,7 @@ TOOL_POLICY_PROMPT = (
 DECISION_POLICY_PROMPT = (
     f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT} One execution decision may "
     "choose at most one action. CALL_TOOL may use exactly one visible tool. "
-    "COMPLETE is valid when current information is enough, even if no Tool "
+    "SUBMIT_RESULT is valid when current information is enough, even if no Tool "
     "was used. Planning and user interaction are expressed through visible "
     "runtime capabilities, not separate actions."
 )
@@ -102,9 +102,9 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     system_prompt=ELLA_SYSTEM_PROMPT,
     instruction=(
         f"{DECISION_POLICY_PROMPT} Return one strict JSON object. The action "
-        "must be CALL_TOOL or COMPLETE. CALL_TOOL must include "
+        "must be CALL_TOOL or SUBMIT_RESULT. CALL_TOOL must include "
         "a visible tool_name and an arguments object matching that tool's "
-        "schema. Include decision_reason for every action. COMPLETE must also "
+        "schema. Include decision_reason for every action. SUBMIT_RESULT must also "
         "include a non-empty completion_summary and evidence_refs containing "
         "only observation IDs from WorkSpace; evidence_refs may be empty only "
         "when the task does not depend on a capability result. Read concrete "
@@ -112,7 +112,7 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "summaries, and observations only from WorkSpace. Other actions must "
         "not include a tool name. Use the provided "
         "tool_results observations before choosing another tool call. If an "
-        "observation is sufficient for the current task, choose COMPLETE. If "
+        "observation is sufficient for the current task, choose SUBMIT_RESULT. If "
         "the user's request explicitly depends on current screen content and "
         "screen_scene is visible, CALL_TOOL screen_scene before asking the "
         "user for confirmation, unless the request is unsafe or the user "
@@ -131,26 +131,81 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "the same tool call with materially identical arguments. If the "
         "missing information can still be obtained through a refined tool "
         "call, another visible tool, or user input, continue execution. "
-        "Choose COMPLETE only when the task can be reasonably concluded with "
-        "the available information. Do not choose COMPLETE if a visible tool "
+        "Choose SUBMIT_RESULT only when the task can be reasonably concluded with "
+        "the available information. Do not choose SUBMIT_RESULT if a visible tool "
         "can still reasonably obtain information required to satisfy the "
         "user's request. If observations already contain camera_scene "
         "for the current task, do not call camera_scene again; use that "
         "observation, explain missing visual information, or report visual "
         "unavailability. If information can only come from the user and "
         "ask_user_question is visible, call it. If a tool is unavailable, "
-        "choose another visible capability or COMPLETE with an honest "
+        "choose another visible capability or SUBMIT_RESULT with an honest "
         "conclusion. In "
         "argument repair mode, regenerate arguments for active_tool_name only. "
         "The repair must use the same Tool and must not switch tool_name or "
-        "return COMPLETE. Never select a Tool listed in "
+        "return SUBMIT_RESULT. Never select a Tool listed in "
         "blacklisted_tools."
     ),
 )
 
 
+FIRST_DECISION_TEMPLATE = PromptTemplate(
+    name="first_decision",
+    system_prompt=ELLA_SYSTEM_PROMPT,
+    instruction=(
+        f"{DECISION_POLICY_PROMPT} This is the first decision for a raw user "
+        "request. Return one strict JSON object containing intent and action. "
+        "intent must contain goal, constraints, deliverables, and "
+        "minimum_acceptance_criteria. Acceptance criteria describe what must "
+        "be true, not checker or tool names. action must be exactly one of "
+        "these shapes: CALL_TOOL: {\"action\":\"CALL_TOOL\","
+        "\"tool_name\":\"<visible name>\",\"tool_input\":{},"
+        "\"decision_reason\":\"<non-empty reason>\"}; SUBMIT_RESULT: "
+        "{\"action\":\"SUBMIT_RESULT\",\"tool_name\":null,"
+        "\"tool_input\":null,\"decision_reason\":\"<non-empty reason>\","
+        "\"completion_summary\":\"<non-empty candidate summary>\","
+        "\"evidence_refs\":[]}. decision_reason is mandatory for every "
+        "action. Do not rename action to type, tool_input to arguments, or "
+        "decision_reason to reason. For a complex task, create a plan by calling "
+        "the visible plan_written capability. For a simple task, call the "
+        "needed visible Tool or answer directly. If the user's purpose is "
+        "genuinely unclear, set intent to null and call ask_user_question. "
+        "Do not use keyword-specific goal templates. If WorkSpace contains "
+        "decision_repair, correct the stated validation error; do not repeat "
+        "the same invalid shape."
+    ),
+)
+
+
+VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
+    name="verification_decision",
+    system_prompt=(
+        "You are Ella's independent result verifier. Evaluate only the "
+        "provided intent, persisted observations, deliverables, acceptance "
+        "criteria, failures, and actual draft response. Do not assume an "
+        "action happened without evidence and do not expose hidden reasoning."
+    ),
+    instruction=(
+        "Return one strict JSON action. If a visible read-only verification "
+        "Tool is required, return CALL_TOOL with tool_name and arguments. "
+        "Otherwise return VERIFICATION_VERDICT with goal_state equal to "
+        "achieved, partially_achieved, or not_achieved; criterion_results, "
+        "deliverable_results, draft_quality_issues, recoverable, "
+        "feedback_for_execution, and public_summary. achieved requires all "
+        "necessary criteria and deliverables. partially_achieved requires "
+        "real completion of at least one goal portion. not_achieved means no "
+        "goal portion was achieved. Also check that the actual draft is "
+        "truthful, complete, and consistent with evidence. Never call a Tool "
+        "outside visible_verification_tools and never request a write or a new "
+        "external observation."
+    ),
+)
+
+
 TEMPLATES_BY_TYPE = {
+    "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
     "TASK_FORMULATION": TASK_FORMULATION_TEMPLATE,
     "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
+    "VERIFICATION_DECISION": VERIFICATION_DECISION_TEMPLATE,
 }

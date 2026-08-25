@@ -20,6 +20,8 @@ def make_snapshot() -> RunDisplaySnapshot:
         final_response="<final>",
         memory_status="recorded",
         execution_decision_prompt_text="EXECUTION prompt",
+        first_decision_prompt_text="FIRST prompt",
+        verification_prompt_text="VERIFY prompt",
     )
 
 
@@ -27,8 +29,9 @@ def test_snapshot_carries_all_prompt_display_fields():
     data = make_snapshot().to_dict()
 
     assert data["prompt_display_fields"] == (
-        "task_formulation_prompt_text",
+        "first_decision_prompt_text",
         "execution_decision_prompt_text",
+        "verification_prompt_text",
         "final_response_prompt_text",
     )
     assert data["task_formulation_prompt_text"] == "TASK prompt [REDACTED]"
@@ -52,16 +55,18 @@ def test_web_ui_displays_all_prompts_from_snapshot():
     html = render_web_ui_shell(make_snapshot())
 
     assert "Prompt Sent to LLM" in html
-    assert "Task formulation prompt" in html
+    assert "First decision prompt" in html
     assert "Execution decision prompt" in html
+    assert "Verification prompt" in html
     assert "Final response prompt" in html
-    assert "TASK prompt [REDACTED]" in html
+    assert "FIRST prompt" in html
     assert "EXECUTION prompt" in html
+    assert "VERIFY prompt" in html
     assert "FINAL prompt &lt;answer&gt;" in html
 
 
 def test_web_ui_explains_when_a_prompt_was_not_invoked():
-    snapshot = replace(make_snapshot(), task_formulation_prompt_text="")
+    snapshot = replace(make_snapshot(), first_decision_prompt_text="")
 
     html = render_web_ui_shell(snapshot)
 

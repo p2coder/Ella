@@ -501,7 +501,7 @@
                 <p id="timing-summary" class="field-value">{{timing_summary}}</p>
               </div>
               <div class="field">
-                <span class="field-label">Task state</span>
+                <span class="field-label">Execution state</span>
                 <div class="task-state-board" data-task-id="{{task_id}}" data-task-state="{{task_state}}">
                   <span class="task-state-value">{{task_state_label}}</span>
                   <div class="task-controls" aria-label="Task controls" {{controls_hidden}}>
@@ -510,6 +510,14 @@
                     <button type="button" class="danger" data-task-action="kill" {{kill_disabled}}>Cancel</button>
                   </div>
                 </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Goal state</span>
+                <p class="field-value">{{goal_state}}</p>
+              </div>
+              <div class="field">
+                <span class="field-label">Terminal execution state</span>
+                <p class="field-value">{{terminal_execution_state}}</p>
               </div>
               <div class="field">
                 <span class="field-label">Task ID</span>
@@ -536,8 +544,12 @@
             </header>
             <div class="panel-body">
               <details class="prompt-details">
-                <summary>Task formulation prompt</summary>
-                <pre class="prompt-text">{{task_formulation_prompt_text}}</pre>
+                <summary>First decision prompt</summary>
+                <pre class="prompt-text">{{first_decision_prompt_text}}</pre>
+              </details>
+              <details class="prompt-details">
+                <summary>Verification prompt</summary>
+                <pre class="prompt-text">{{verification_prompt_text}}</pre>
               </details>
               <details class="prompt-details">
                 <summary>Execution decision prompt</summary>
@@ -798,7 +810,7 @@
       taskCache.set(task.task_id, task);
       updateDisplayedTaskTiming(task);
       const terminalStates = new Set([
-        "succeeded", "failed", "uncertain", "killed", "delivered",
+        "completed", "failed", "uncertain", "killed", "delivered",
       ]);
       const activeTasks = [];
       const terminalTasks = [];

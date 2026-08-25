@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 from agent.final_response import FinalResponseGenerator
+from agent.verification import VerificationAgent
 from config.config import PROJECT_ROOT
 from config.settings import load_settings
 from devices.factory import DeviceFactory
@@ -40,6 +41,11 @@ from tools import (
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
 from tools.plan import PlanWrittenTool
+from tools.verification import (
+    ArtifactExistsTool,
+    DocumentReadTool,
+    ToolObservationCheckTool,
+)
 
 
 DEFAULT_INPUT = "Ella，看看当前画面，我要出门了"
@@ -107,6 +113,8 @@ class DemoRuntime:
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
         tool_manager.register(DocumentWriteTool(settings.document_directory))
+        tool_manager.register(ArtifactExistsTool(settings.document_directory))
+        tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
         tool_manager.register(PlanWrittenTool(plan_store))
 
@@ -116,6 +124,10 @@ class DemoRuntime:
             llm_provider=llm_provider,
         )
         final_response_generator = FinalResponseGenerator(
+            prompt_engine=PromptEngine(),
+            llm_provider=llm_provider,
+        )
+        verification_agent = VerificationAgent(
             prompt_engine=PromptEngine(),
             llm_provider=llm_provider,
         )
@@ -133,6 +145,12 @@ class DemoRuntime:
             ),
             memory_manager=MemoryManager(memory_path or settings.memory_path),
             final_response_generator=final_response_generator,
+            verification_agent=verification_agent,
+        )
+        tool_manager.register(
+            ToolObservationCheckTool(
+                lambda task_id: task_runtime.get_task(task_id).tool_trace
+            )
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,

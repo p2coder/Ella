@@ -30,6 +30,15 @@ QWEN_LLM_MODEL = "qwen-plus"
 QWEN_MULTIMODAL_MODEL = "qwen-vl-plus"
 QWEN_SPEECH_MODEL = "qwen3-asr-flash"
 
+# Optional text LLM provider. Set MODEL_PROVIDER = "deepseek" to use it for
+# reasoning and response generation. Camera and speech remain backed by Qwen.
+DEEPSEEK_API_KEY = None
+DEEPSEEK_LLM_MODEL = "deepseek-v4-pro"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_BYPASS_PROXY = True
+DEEPSEEK_THINKING_ENABLED = True
+DEEPSEEK_REASONING_EFFORT = "high"
+
 
 # MODEL_PROVIDER = "qwen"
 
