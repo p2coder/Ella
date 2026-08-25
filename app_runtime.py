@@ -693,9 +693,8 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     lines = []
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
-        ("task_formulation_stage", snapshot.task_formulation_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("planning", snapshot.planning_duration_ms),
+        ("first_decision_stage", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
         ("final_response_stage", snapshot.final_response_generation_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
@@ -706,8 +705,9 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
 
     llm_by_boundary = _llm_timing_by_boundary(snapshot)
     for boundary in (
-        "task_formulation",
+        "first_decision",
         "execution_decision",
+        "verification_decision",
         "final_response",
     ):
         value = llm_by_boundary.get(boundary)
