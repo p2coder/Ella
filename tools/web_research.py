@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 import ipaddress
+import json
 import socket
+from threading import Lock
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus, urljoin, urlsplit
@@ -38,6 +40,12 @@ class WebSearchTool:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     name: str = "web_search"
     allowed_roles: tuple[str, ...] = ("main_agent",)
+    _cache: dict[tuple[str, int], tuple[dict[str, str], ...]] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+    _cache_lock: Lock = field(default_factory=Lock, compare=False, repr=False)
 
     @property
     def definition(self) -> ToolDefinition:
@@ -115,32 +123,100 @@ class WebSearchTool:
             name="max_results",
             maximum=MAX_SEARCH_RESULTS,
         )
-        search_url = "https://search.brave.com/search?q=" + quote_plus(query)
-        try:
-            response = self.transport(
-                search_url,
-                self.timeout_seconds,
-                MAX_RESPONSE_BYTES,
-            )
-            if response.status_code >= 400:
-                raise RuntimeError(f"search returned HTTP {response.status_code}")
-            parser = _BraveSearchResultParser(limit)
-            parser.feed(response.body.decode("utf-8", errors="replace"))
-            if not parser.results:
-                raise RuntimeError("search returned no parseable public results")
+        cache_key = (query.casefold(), limit)
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+        errors: list[str] = []
+        if cached is None:
+            results = self._try_brave(query, limit, errors)
+            if not results:
+                results = self._try_github(query, limit, errors)
+            if results:
+                cached = tuple(dict(item) for item in results)
+                with self._cache_lock:
+                    self._cache[cache_key] = cached
+        if cached:
             payload = {
                 "status": "available",
                 "query": query,
-                "results": parser.results,
+                "results": [dict(item) for item in cached],
             }
-        except Exception as error:
+        else:
             payload = _unavailable_payload(
                 query=query,
                 results=(),
                 code="web_search_failed",
-                message=str(error),
+                message="; ".join(errors) or "no public search results found",
             )
         return ToolResult(self.name, context.task_id, context.trace_id, payload)
+
+    def _try_brave(
+        self,
+        query: str,
+        limit: int,
+        errors: list[str],
+    ) -> list[dict[str, str]]:
+        try:
+            response = self.transport(
+                "https://search.brave.com/search?q=" + quote_plus(query),
+                self.timeout_seconds,
+                MAX_RESPONSE_BYTES,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(f"HTTP {response.status_code}")
+            parser = _BraveSearchResultParser(limit)
+            parser.feed(response.body.decode("utf-8", errors="replace"))
+            if not parser.results:
+                raise RuntimeError("no parseable results")
+            return parser.results
+        except Exception as error:
+            errors.append(f"Brave search failed: {error}")
+            return []
+
+    def _try_github(
+        self,
+        query: str,
+        limit: int,
+        errors: list[str],
+    ) -> list[dict[str, str]]:
+        api_url = (
+            "https://api.github.com/search/repositories?q="
+            + quote_plus(f"{query} in:name,description,readme")
+            + f"&per_page={limit}"
+        )
+        try:
+            response = self.transport(
+                api_url,
+                self.timeout_seconds,
+                MAX_RESPONSE_BYTES,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(f"HTTP {response.status_code}")
+            document = json.loads(response.body.decode("utf-8"))
+            results: list[dict[str, str]] = []
+            for item in document.get("items", ())[:limit]:
+                url = str(item.get("html_url", ""))
+                _validate_public_url(url, resolve_dns=False)
+                description = str(item.get("description") or "").strip()
+                homepage = str(item.get("homepage") or "").strip()
+                snippet = "GitHub repository"
+                if description:
+                    snippet += f": {description}"
+                if homepage:
+                    snippet += f" Project site: {homepage}"
+                results.append(
+                    {
+                        "title": str(item.get("full_name") or item.get("name") or url),
+                        "url": url,
+                        "snippet": snippet,
+                    }
+                )
+            if not results:
+                raise RuntimeError("no repository results")
+            return results
+        except Exception as error:
+            errors.append(f"GitHub repository search failed: {error}")
+            return []
 
 
 @dataclass(frozen=True, slots=True)

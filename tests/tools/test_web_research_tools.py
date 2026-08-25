@@ -110,6 +110,52 @@ def test_transport_failure_returns_structured_unavailable_result():
     assert result.payload["error"]["code"] == "web_search_failed"
 
 
+def test_web_search_falls_back_to_public_github_repository_search():
+    calls = []
+
+    def transport(url, timeout, max_bytes):
+        calls.append(url)
+        if "search.brave.com" in url:
+            return WebResponse(url, 429, "text/html", b"rate limited")
+        return WebResponse(
+            url,
+            200,
+            "application/json",
+            b'{"items":[{"full_name":"langchain-ai/langgraph",'
+            b'"html_url":"https://github.com/langchain-ai/langgraph",'
+            b'"description":"Build resilient language agents as graphs.",'
+            b'"homepage":"https://docs.langchain.com/oss/python/langgraph"}]}',
+        )
+
+    result = WebSearchTool(transport=transport).run(
+        context(), {"query": "LangGraph persistence", "max_results": 5}
+    )
+
+    assert result.payload["status"] == "available"
+    assert result.payload["results"][0]["title"] == "langchain-ai/langgraph"
+    assert result.payload["results"][0]["url"] == (
+        "https://github.com/langchain-ai/langgraph"
+    )
+    assert "GitHub repository" in result.payload["results"][0]["snippet"]
+    assert len(calls) == 2
+
+
+def test_web_search_caches_repeated_identical_queries():
+    calls = []
+    html = b'<div class="snippet" data-type="web"><div><a href="https://example.com/docs"><div class="search-snippet-title">Docs</div></a><div class="content">Source text.</div></div></div>'
+
+    def transport(url, timeout, max_bytes):
+        calls.append(url)
+        return WebResponse(url, 200, "text/html", html)
+
+    tool = WebSearchTool(transport=transport)
+    first = tool.run(context(), {"query": "same query", "max_results": 3})
+    second = tool.run(context(), {"query": "same query", "max_results": 3})
+
+    assert first.payload == second.payload
+    assert len(calls) == 1
+
+
 def test_tool_definitions_explain_search_then_verify_boundary():
     search = WebSearchTool().definition
     reader = WebPageReadTool().definition
