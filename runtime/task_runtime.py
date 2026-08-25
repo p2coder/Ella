@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from threading import Event, Lock, Thread
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from queue import Empty, Queue
-from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -95,7 +94,6 @@ class TaskRuntime:
     max_parallel_steps_per_task: int = 8
     wave_incremental_checkpoint_threshold: int = 20
     trace_recorder: TraceRecorder | NoOpTraceRecorder
-    formulation_handler: Callable[[Task], HandoffRequest] | None
     event_publisher: TaskEventPublisher
     _memory_manager: MemoryManager = field(init=False, repr=False)
     _tasks: dict[str, TaskCreationResult] = field(
@@ -140,7 +138,6 @@ class TaskRuntime:
         max_parallel_steps_per_task: int = 8,
         wave_incremental_checkpoint_threshold: int = 20,
         trace_recorder: TraceRecorder | NoOpTraceRecorder | None = None,
-        formulation_handler: Callable[[Task], HandoffRequest] | None = None,
         event_publisher: TaskEventPublisher | None = None,
     ) -> None:
         if max_step_retries < 0:
@@ -168,7 +165,6 @@ class TaskRuntime:
             wave_incremental_checkpoint_threshold
         )
         self.trace_recorder = trace_recorder or NoOpTraceRecorder()
-        self.formulation_handler = formulation_handler
         self.event_publisher = event_publisher or TaskEventPublisher()
         self._memory_manager = memory_manager or MemoryManager()
         self._tasks = {}
@@ -189,11 +185,6 @@ class TaskRuntime:
     def is_running(self) -> bool:
         thread = self._worker_thread
         return thread is not None and thread.is_alive()
-
-    def configure_formulation(
-        self, handler: Callable[[Task], HandoffRequest]
-    ) -> None:
-        self.formulation_handler = handler
 
     def start(self) -> None:
         with self._worker_lock:
@@ -384,10 +375,8 @@ class TaskRuntime:
                 {"error": str(error), **dict(in_flight)},
             )
             return
-        if task.state is TaskState.CREATED:
-            task.transition_to(TaskState.FORMULATING)
         if task.state in {
-            TaskState.FORMULATING,
+            TaskState.CREATED,
             TaskState.READY,
             TaskState.REASONING,
             TaskState.TOOL_EXECUTION,
@@ -459,7 +448,6 @@ class TaskRuntime:
                 self._persist(task)
             elif task.state in {
                 TaskState.CREATED,
-                TaskState.FORMULATING,
                 TaskState.READY,
                 TaskState.REASONING,
                 TaskState.TOOL_EXECUTION,
@@ -520,40 +508,6 @@ class TaskRuntime:
             self.schedule(task_id)
         return TaskHandle(task_id, source_event.trace_id)
 
-    def begin_formulation(self, task_id: str) -> None:
-        task = self._tasks[task_id].task
-        task.transition_to(TaskState.FORMULATING)
-        self._persist(task)
-        self._trace_task(task, "reasoning.formulation", "started")
-
-    def submit_formulated(
-        self, task_id: str, handoff: HandoffRequest
-    ) -> TaskHandle:
-        creation = self._tasks[task_id]
-        task = creation.task
-        task.handoff = handoff
-        old = task.execution_context
-        task.execution_context = AgentExecutionContext(
-            agent_id=old.agent_id,
-            agent_role=old.agent_role,
-            parent_agent_id=old.parent_agent_id,
-            task_id=task.task_id,
-            trace_id=task.trace_id,
-            handoff_goal=handoff.task_goal,
-            memory_scope=old.memory_scope,
-            permissions=old.permissions,
-            capability_scope=old.capability_scope,
-        )
-        task.transition_to(TaskState.READY)
-        self._persist(task)
-        self._trace_task(task, "task", "submitted")
-        if self.task_queue is not None or self.is_running:
-            self.schedule(task_id)
-        self.timing_recorder.record_task_submitted(
-            task.trace_id, task_id=task_id
-        )
-        return TaskHandle(task_id, task.trace_id)
-
     def _commit_task_intent(self, task: Task, intent: TaskIntent) -> None:
         event = task.source_event
         context = task.execution_context
@@ -590,15 +544,6 @@ class TaskRuntime:
             "intent_committed",
             {"intent": intent.to_dict()},
         )
-
-    def fail_formulation(self, task_id: str, reason: str) -> None:
-        task = self._tasks[task_id].task
-        task.failure = {"code": "task_formulation_failed", "message": reason}
-        task.failure_reason = reason
-        task.transition_to(TaskState.FAILED)
-        self._persist(task)
-        self._trace_task(task, "reasoning.formulation", "failed", task.failure)
-        self._publish_terminal(task)
 
     def _persist(self, task: Task) -> None:
         with self._persistence_lock:
@@ -738,7 +683,6 @@ class TaskRuntime:
                 if task.state is not TaskState.KILL_REQUESTED:
                     task.transition_to(TaskState.KILL_REQUESTED)
                 if previous_state not in {
-                    TaskState.FORMULATING,
                     TaskState.REASONING,
                     TaskState.TOOL_EXECUTION,
                 }:
@@ -754,7 +698,7 @@ class TaskRuntime:
         elif command.command_type is TaskControlType.PAUSE:
             if task.state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
                 accepted, code, message = False, "kill_has_priority", "Kill has priority over pause."
-            elif task.state not in {TaskState.CREATED, TaskState.FORMULATING, TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
+            elif task.state not in {TaskState.CREATED, TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
                 accepted, code, message = False, "invalid_state", "Task cannot be paused from its current state."
             else:
                 task.paused_from_state = task.state
@@ -764,7 +708,6 @@ class TaskRuntime:
                     broker.cancel_task(task.task_id)
                 task.transition_to(TaskState.PAUSE_REQUESTED)
                 if previous_state not in {
-                    TaskState.FORMULATING,
                     TaskState.REASONING,
                     TaskState.TOOL_EXECUTION,
                 }:

@@ -13,14 +13,12 @@ from .graph import TaskGraphNodeType, TaskGraphRun
 
 class TaskState(StrEnum):
     CREATED = "created"
-    FORMULATING = "formulating"
     READY = "ready"
     REASONING = "reasoning"
     TOOL_EXECUTION = "tool_execution"
     PAUSE_REQUESTED = "pause_requested"
     PAUSED = "paused"
     KILL_REQUESTED = "kill_requested"
-    SUCCEEDED = "succeeded"
     COMPLETED = "completed"
     FAILED = "failed"
     UNCERTAIN = "uncertain"
@@ -66,18 +64,9 @@ class TaskIntent:
 ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CREATED: frozenset(
         {
-            TaskState.FORMULATING,
             TaskState.READY,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
-        }
-    ),
-    TaskState.FORMULATING: frozenset(
-        {
-            TaskState.READY,
-            TaskState.PAUSE_REQUESTED,
-            TaskState.KILL_REQUESTED,
-            TaskState.FAILED,
         }
     ),
     TaskState.READY: frozenset(
@@ -92,7 +81,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.TOOL_EXECUTION,
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
-            TaskState.SUCCEEDED,
             TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.UNCERTAIN,
@@ -115,8 +103,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.PAUSED: frozenset(
         {
-            TaskState.CREATED,
-            TaskState.FORMULATING,
             TaskState.READY,
             TaskState.REASONING,
             TaskState.TOOL_EXECUTION,
@@ -124,7 +110,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
         }
     ),
     TaskState.KILL_REQUESTED: frozenset({TaskState.KILLED}),
-    TaskState.SUCCEEDED: frozenset({TaskState.DELIVERED}),
     TaskState.COMPLETED: frozenset({TaskState.DELIVERED}),
     TaskState.FAILED: frozenset({TaskState.DELIVERED}),
     TaskState.UNCERTAIN: frozenset({TaskState.FAILED, TaskState.DELIVERED}),
@@ -193,6 +178,16 @@ class Task:
                 "invalid task state transition: "
                 f"{self.state.value} -> {next_state.value}"
             )
+        previous_state = self.state
+        if next_state in {TaskState.KILLED, TaskState.UNCERTAIN}:
+            self.goal_state = TaskGoalState.NOT_ACHIEVED
+        elif next_state is TaskState.FAILED and self.goal_state is None:
+            self.goal_state = TaskGoalState.NOT_ACHIEVED
+        elif next_state is TaskState.DELIVERED:
+            if self.terminal_execution_state is None:
+                self.terminal_execution_state = previous_state
+            if self.goal_state is None:
+                raise ValueError("DELIVERED Task requires a committed goal state")
         self.state = next_state
         self.updated_at = datetime.now(timezone.utc)
 

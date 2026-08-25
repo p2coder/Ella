@@ -79,3 +79,27 @@ def test_checkpoint_round_trips_dual_state(tmp_path) -> None:
     assert restored.task.state is TaskState.DELIVERED
     assert restored.task.goal_state is TaskGoalState.ACHIEVED
     assert restored.task.terminal_execution_state is TaskState.COMPLETED
+
+
+@pytest.mark.parametrize("terminal", (TaskState.KILLED, TaskState.UNCERTAIN))
+def test_cancelled_or_uncertain_task_is_not_achieved(terminal) -> None:
+    task = _task()
+    task.transition_to(TaskState.READY)
+    if terminal is TaskState.KILLED:
+        task.transition_to(TaskState.KILL_REQUESTED)
+    else:
+        task.transition_to(TaskState.REASONING)
+    task.transition_to(terminal)
+
+    assert task.goal_state is TaskGoalState.NOT_ACHIEVED
+
+
+def test_delivery_retains_terminal_execution_state() -> None:
+    task = _task()
+    task.transition_to(TaskState.READY)
+    task.transition_to(TaskState.REASONING)
+    task.transition_to(TaskState.FAILED)
+    task.transition_to(TaskState.DELIVERED)
+
+    assert task.goal_state is TaskGoalState.NOT_ACHIEVED
+    assert task.terminal_execution_state is TaskState.FAILED
