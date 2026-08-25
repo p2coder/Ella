@@ -1133,6 +1133,7 @@ class TaskRuntime:
                 for node_id in graph.definition.terminal_node_ids
             }
             if "succeeded" in terminal_states:
+                self._complete_graph_task(creation, runs)
                 task.transition_to(TaskState.SUCCEEDED)
                 self._persist(task)
                 return self._result(creation, stop_reason="completed")
@@ -1188,6 +1189,24 @@ class TaskRuntime:
             self._activate_plan(task, plan_payload)
             self._persist(task)
             return self._result(creation)
+        uncertain_nodes = tuple(
+            node_id
+            for node_id, result in results.items()
+            if _graph_run_state(result) == "uncertain"
+        )
+        if uncertain_nodes:
+            task.failure = {
+                "code": "wave_contains_uncertain_node",
+                "message": (
+                    "One or more capability outcomes in the dispatched wave "
+                    "could not be confirmed."
+                ),
+                "node_ids": uncertain_nodes,
+            }
+            task.failure_reason = task.failure["message"]
+            task.transition_to(TaskState.UNCERTAIN)
+            self._persist(task)
+            return self._result(creation, stop_reason="uncertain")
         if any(
             _graph_run_state(runs.get(item)) == "succeeded"
             for item in graph.definition.terminal_node_ids
@@ -1196,9 +1215,36 @@ class TaskRuntime:
                 if _graph_run_state(runs.get(candidate.node_id)) in {None, "pending", "ready"}:
                     runs[candidate.node_id] = {"state": "skipped"}
             task.graph = TaskGraphRun(graph.definition, runs)
+            self._complete_graph_task(creation, runs)
             task.transition_to(TaskState.SUCCEEDED)
         self._persist(task)
         return self._result(creation)
+
+    def _complete_graph_task(
+        self,
+        creation: TaskCreationResult,
+        runs: Mapping[str, Any],
+    ) -> None:
+        task = creation.task
+        terminal_summaries = tuple(
+            str(runs[node_id].get("completion_summary", "")).strip()
+            for node_id in task.graph.definition.terminal_node_ids
+            if isinstance(runs.get(node_id), Mapping)
+            and _graph_run_state(runs[node_id]) == "succeeded"
+            and str(runs[node_id].get("completion_summary", "")).strip()
+        )
+        task.task_local_state["completion_summary"] = (
+            "\n".join(terminal_summaries)
+            if terminal_summaries
+            else "The planned task reached a successful terminal node."
+        )
+        task.task_local_state["completion_evidence_refs"] = tuple(
+            observation.get("observation_id")
+            for observation in task.tool_trace
+            if isinstance(observation, Mapping)
+            and isinstance(observation.get("observation_id"), str)
+        )
+        task.completion = self._build_completion(creation)
 
     def _execute_graph_node(self, creation, node, wave_id: int) -> dict[str, Any]:
         task = creation.task
