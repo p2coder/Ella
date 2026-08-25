@@ -46,6 +46,7 @@ class ProviderFactory:
                 ),
                 client=DeepSeekOpenAITransport(
                     base_url=self.settings.deepseek_base_url,
+                    bypass_proxy=self.settings.deepseek_bypass_proxy,
                 ),
                 thinking_enabled=self.settings.deepseek_thinking_enabled,
                 reasoning_effort=self.settings.deepseek_reasoning_effort,

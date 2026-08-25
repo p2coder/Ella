@@ -31,7 +31,7 @@ def test_provider_normalizes_chat_completion_content() -> None:
     assert received["reasoning_effort"] == "high"
 
 
-def test_transport_uses_official_openai_compatible_parameters() -> None:
+def test_transport_uses_official_openai_compatible_parameters(monkeypatch) -> None:
     captured = {}
 
     class Completions:
@@ -49,6 +49,12 @@ def test_transport_uses_official_openai_compatible_parameters() -> None:
         captured["client"] = kwargs
         return Client()
 
+    direct_client = object()
+    monkeypatch.setattr(
+        DeepSeekOpenAITransport,
+        "_direct_http_client",
+        staticmethod(lambda: direct_client),
+    )
     transport = DeepSeekOpenAITransport(client_factory=factory)
     response = transport(
         {
@@ -62,6 +68,7 @@ def test_transport_uses_official_openai_compatible_parameters() -> None:
 
     assert response.choices[0].message.content == "ok"
     assert captured["client"]["base_url"] == "https://api.deepseek.com"
+    assert captured["client"]["http_client"] is direct_client
     assert captured["request"] == {
         "model": "deepseek-v4-pro",
         "messages": [{"role": "user", "content": "Hello"}],

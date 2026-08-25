@@ -19,6 +19,7 @@ class DeepSeekTransportError(RuntimeError):
 class DeepSeekOpenAITransport:
     base_url: str = "https://api.deepseek.com"
     timeout_seconds: float = 60.0
+    bypass_proxy: bool = True
     client_factory: DeepSeekClientFactory | None = field(
         default=None,
         repr=False,
@@ -27,10 +28,15 @@ class DeepSeekOpenAITransport:
     def __call__(self, payload: dict[str, Any]) -> Any:
         factory = self.client_factory or self._openai_factory()
         try:
+            client_options: dict[str, Any] = {
+                "api_key": payload["api_key"],
+                "base_url": self.base_url,
+                "timeout": self.timeout_seconds,
+            }
+            if self.bypass_proxy:
+                client_options["http_client"] = self._direct_http_client()
             client = factory(
-                api_key=payload["api_key"],
-                base_url=self.base_url,
-                timeout=self.timeout_seconds,
+                **client_options,
             )
             return client.chat.completions.create(
                 model=payload["model_name"],
@@ -86,6 +92,17 @@ class DeepSeekOpenAITransport:
                 "DeepSeek requires the openai package",
             ) from None
         return OpenAI
+
+    @staticmethod
+    def _direct_http_client() -> Any:
+        try:
+            import httpx
+        except ImportError:
+            raise DeepSeekTransportError(
+                "provider_unavailable",
+                "Direct DeepSeek networking requires the httpx package",
+            ) from None
+        return httpx.Client(trust_env=False)
 
 
 @dataclass(frozen=True, slots=True)

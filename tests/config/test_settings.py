@@ -15,6 +15,7 @@ def test_default_settings_are_mock_safe():
             "ELLA_DEBUG_STORE_RAW_MEDIA": False,
             "ELLA_MIC_ENABLED": False,
             "ELLA_CAMERA_ENABLED": False,
+            "ELLA_DEEPSEEK_REASONING_EFFORT": "high",
         }
     )
 
@@ -26,6 +27,7 @@ def test_default_settings_are_mock_safe():
     assert settings.deepseek_api_key is None
     assert settings.deepseek_llm_model == "deepseek-v4-pro"
     assert settings.deepseek_thinking_enabled is True
+    assert settings.deepseek_bypass_proxy is True
     assert settings.deepseek_reasoning_effort == "high"
     assert settings.use_real_providers is False
     assert settings.debug_store_raw_media is False
@@ -89,6 +91,7 @@ def test_programmatic_overrides_are_applied():
             "ELLA_CAMERA_ENABLED": False,
             "ELLA_USE_REAL_PROVIDERS": False,
             "ELLA_DEBUG_STORE_RAW_MEDIA": False,
+            "ELLA_DEEPSEEK_REASONING_EFFORT": "high",
         }
     )
 
@@ -101,6 +104,7 @@ def test_programmatic_overrides_are_applied():
         deepseek_api_key=None,
         deepseek_llm_model="deepseek-v4-pro",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_bypass_proxy=True,
         deepseek_thinking_enabled=True,
         deepseek_reasoning_effort="high",
         mic_enabled=False,
@@ -176,6 +180,7 @@ def test_deepseek_runtime_options_are_configurable():
             "ELLA_MODEL_PROVIDER": "deepseek",
             "ELLA_DEEPSEEK_LLM_MODEL": "deepseek-v4-flash",
             "ELLA_DEEPSEEK_THINKING_ENABLED": False,
+            "ELLA_DEEPSEEK_BYPASS_PROXY": False,
             "ELLA_DEEPSEEK_REASONING_EFFORT": "max",
         }
     )
@@ -183,6 +188,7 @@ def test_deepseek_runtime_options_are_configurable():
     assert settings.model_provider == "deepseek"
     assert settings.deepseek_llm_model == "deepseek-v4-flash"
     assert settings.deepseek_thinking_enabled is False
+    assert settings.deepseek_bypass_proxy is False
     assert settings.deepseek_reasoning_effort == "max"
 
 

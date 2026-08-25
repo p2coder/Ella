@@ -26,6 +26,7 @@ CONFIG_NAMES = {
     "ELLA_DEEPSEEK_API_KEY": "DEEPSEEK_API_KEY",
     "ELLA_DEEPSEEK_LLM_MODEL": "DEEPSEEK_LLM_MODEL",
     "ELLA_DEEPSEEK_BASE_URL": "DEEPSEEK_BASE_URL",
+    "ELLA_DEEPSEEK_BYPASS_PROXY": "DEEPSEEK_BYPASS_PROXY",
     "ELLA_DEEPSEEK_THINKING_ENABLED": "DEEPSEEK_THINKING_ENABLED",
     "ELLA_DEEPSEEK_REASONING_EFFORT": "DEEPSEEK_REASONING_EFFORT",
     "ELLA_MIC_ENABLED": "MIC_ENABLED",
@@ -60,6 +61,7 @@ SAFE_DEFAULTS = {
     "ELLA_DEEPSEEK_API_KEY": None,
     "ELLA_DEEPSEEK_LLM_MODEL": "deepseek-v4-pro",
     "ELLA_DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "ELLA_DEEPSEEK_BYPASS_PROXY": True,
     "ELLA_DEEPSEEK_THINKING_ENABLED": True,
     "ELLA_DEEPSEEK_REASONING_EFFORT": "high",
     "ELLA_MIC_ENABLED": False,
@@ -100,6 +102,7 @@ class EllaSettings:
     deepseek_api_key: str | None
     deepseek_llm_model: str | None
     deepseek_base_url: str
+    deepseek_bypass_proxy: bool
     deepseek_thinking_enabled: bool
     deepseek_reasoning_effort: str
     mic_enabled: bool
@@ -175,6 +178,11 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
             "ELLA_DEEPSEEK_BASE_URL",
             "https://api.deepseek.com",
         ).rstrip("/"),
+        deepseek_bypass_proxy=_boolean(
+            values,
+            "ELLA_DEEPSEEK_BYPASS_PROXY",
+            True,
+        ),
         deepseek_thinking_enabled=_boolean(
             values,
             "ELLA_DEEPSEEK_THINKING_ENABLED",
