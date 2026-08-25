@@ -327,6 +327,15 @@ class TaskRuntime:
                 "released",
                 {"state": task.state.value},
             )
+            if (
+                task.state not in TERMINAL_TASK_STATES
+                and task.state is not TaskState.PAUSED
+                and not self._stop_event.is_set()
+            ):
+                if self.task_queue is None:
+                    self.task_queue = TaskQueue()
+                self.task_queue.enqueue(task.task_id)
+                self._wake_event.set()
 
     def _process_scheduled_task(self, creation: TaskCreationResult) -> None:
         task = creation.task
@@ -362,6 +371,17 @@ class TaskRuntime:
     def _handle_worker_exception(self, task: Task, error: Exception) -> None:
         in_flight = task.task_local_state.get("in_flight_action")
         if in_flight and task.state is TaskState.TOOL_EXECUTION:
+            if bool(in_flight.get("safe_to_retry")):
+                task.task_local_state.pop("in_flight_action", None)
+                task.transition_to(TaskState.REASONING)
+                self._persist(task)
+                self._trace_task(
+                    task,
+                    "recovery",
+                    "safe_action_retry_requested",
+                    {"error": str(error), **dict(in_flight)},
+                )
+                return
             task.failure = {
                 "code": "uncertain_in_flight_action",
                 "message": (
@@ -418,6 +438,8 @@ class TaskRuntime:
             if in_flight and task.state is TaskState.TOOL_EXECUTION:
                 if bool(in_flight.get("safe_to_retry")):
                     task.task_local_state.pop("in_flight_action", None)
+                    if task.state is TaskState.TOOL_EXECUTION:
+                        task.transition_to(TaskState.REASONING)
                     self._persist(task)
                     self._trace_task(
                         task,
@@ -942,6 +964,17 @@ class TaskRuntime:
 
         self.timing_recorder.record_execution_started(creation.context.trace_id)
         self._persist(task)
+        pending_reasoning = task.task_local_state.get("pending_reasoning")
+        if (
+            isinstance(pending_reasoning, Mapping)
+            and pending_reasoning.get("purpose") == "verification"
+            and task.task_local_state.get("draft_final_response") is not None
+        ):
+            completed = self._verify_candidate(creation)
+            return self._result(
+                creation,
+                stop_reason="completed" if completed else None,
+            )
         saved_decision = task.task_local_state.get("current_decision")
         if isinstance(saved_decision, Mapping):
             decision = ExecutionDecision.from_dict(saved_decision)
@@ -1282,11 +1315,15 @@ class TaskRuntime:
 
     def _verify_candidate(self, creation: TaskCreationResult) -> bool:
         task = creation.task
+        in_progress = bool(
+            task.task_local_state.get("verification_in_progress", False)
+        )
         verification_round = int(
             task.task_local_state.get("verification_round", 0)
-        ) + 1
+        ) + (0 if in_progress else 1)
         task.task_local_state["verification_round"] = verification_round
         task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
+        task.task_local_state["verification_in_progress"] = True
         self._persist(task)
         verifier = self.verification_agent
         if verifier is None:
@@ -1320,11 +1357,18 @@ class TaskRuntime:
                     "tool_name": action.tool_name,
                     "arguments": action.arguments or {},
                 }
+                task.task_local_state["in_flight_action"] = {
+                    "purpose": "verification",
+                    "tool_name": action.tool_name,
+                    "arguments": action.arguments or {},
+                    "safe_to_retry": True,
+                }
                 task.transition_to(TaskState.TOOL_EXECUTION)
                 self._persist(task)
                 execution = executor.execute(decision, creation.context, task)
                 task.transition_to(TaskState.REASONING)
                 task.task_local_state.pop("pending_tool", None)
+                task.task_local_state.pop("in_flight_action", None)
                 existing = tuple(
                     task.task_local_state.get("verification_results", ())
                 )
@@ -1379,6 +1423,8 @@ class TaskRuntime:
             task.completion = None
             task.task_local_state.pop("draft_final_response", None)
             task.task_local_state.pop("completion_summary", None)
+            task.task_local_state.pop("verification_in_progress", None)
+            task.task_local_state["pending_reasoning"] = {"purpose": "execution"}
             self._persist(task)
             return False
         self.timing_recorder.record_execution_completed(creation.context.trace_id)
@@ -1386,6 +1432,8 @@ class TaskRuntime:
         task.transition_to(TaskState.COMPLETED)
         task.set_goal_state(verdict.goal_state)
         task.terminal_execution_state = TaskState.COMPLETED
+        task.task_local_state.pop("verification_in_progress", None)
+        task.task_local_state.pop("pending_reasoning", None)
         self._persist(task)
         self._trace_task(
             task,
