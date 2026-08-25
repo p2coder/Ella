@@ -65,6 +65,8 @@ class TaskEventPublisher:
                 task.task_id,
                 {
                     "state": state,
+                    "goal_state": _goal_state(task),
+                    "terminal_execution_state": _terminal_execution_state(task),
                     "trace_id": task.trace_id,
                     "user_input_summary": _user_input_summary(task),
                 },
@@ -75,6 +77,8 @@ class TaskEventPublisher:
             {
                 "previous_state": previous,
                 "current_state": state,
+                "goal_state": _goal_state(task),
+                "terminal_execution_state": _terminal_execution_state(task),
                 "updated_at": task.updated_at.isoformat(),
             },
         )
@@ -91,6 +95,8 @@ class TaskEventPublisher:
             task.task_id,
             {
                 "state": task.state.value,
+                "goal_state": _goal_state(task),
+                "terminal_execution_state": _terminal_execution_state(task),
                 "execution_stage": execution_stage,
                 "active_step_ids": task.active_step_ids,
                 "tool_name": tool_name,
@@ -119,6 +125,8 @@ class TaskEventPublisher:
             task.task_id,
             {
                 "state": task.state.value,
+                "goal_state": _goal_state(task),
+                "terminal_execution_state": _terminal_execution_state(task),
                 "finished_at": task.updated_at.isoformat(),
                 "final_response": final_response,
                 "failure": task.failure,
@@ -181,3 +189,12 @@ def _user_input_summary(task: Task, maximum: int = 120) -> str:
         return ""
     text = str(event.payload.get("text", "")).strip()
     return text if len(text) <= maximum else f"{text[: maximum - 1]}…"
+
+
+def _goal_state(task: Task) -> str | None:
+    return None if task.goal_state is None else task.goal_state.value
+
+
+def _terminal_execution_state(task: Task) -> str | None:
+    state = task.terminal_execution_state
+    return None if state is None else state.value

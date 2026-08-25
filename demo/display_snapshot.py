@@ -48,6 +48,8 @@ class RunDisplaySnapshot:
     final_response: str
     memory_status: str
     execution_decision_prompt_text: str = ""
+    first_decision_prompt_text: str = ""
+    verification_prompt_text: str = ""
     timing_summary: str = ""
     task_id: str = ""
     task_state: str = ""
@@ -55,10 +57,13 @@ class RunDisplaySnapshot:
     paused_from_state: str = ""
     terminal_outcome: str = ""
     delivery_status: str = ""
+    goal_state: str = ""
+    terminal_execution_state: str = ""
 
     prompt_display_fields: ClassVar[tuple[str, ...]] = (
-        "task_formulation_prompt_text",
+        "first_decision_prompt_text",
         "execution_decision_prompt_text",
+        "verification_prompt_text",
         "final_response_prompt_text",
     )
 
@@ -82,6 +87,16 @@ class RunDisplaySnapshot:
         )
         object.__setattr__(
             self,
+            "first_decision_prompt_text",
+            redact_prompt_text(self.first_decision_prompt_text),
+        )
+        object.__setattr__(
+            self,
+            "verification_prompt_text",
+            redact_prompt_text(self.verification_prompt_text),
+        )
+        object.__setattr__(
+            self,
             "execution_decision_prompt_text",
             redact_prompt_text(self.execution_decision_prompt_text),
         )
@@ -96,7 +111,9 @@ class RunDisplaySnapshot:
             "visible_items": self.visible_items,
             "task_goal": self.task_goal,
             "task_formulation_prompt_text": self.task_formulation_prompt_text,
+            "first_decision_prompt_text": self.first_decision_prompt_text,
             "execution_decision_prompt_text": self.execution_decision_prompt_text,
+            "verification_prompt_text": self.verification_prompt_text,
             "final_response_prompt_text": self.final_response_prompt_text,
             "tool_results_summary": self.tool_results_summary,
             "final_response": self.final_response,
@@ -108,6 +125,8 @@ class RunDisplaySnapshot:
             "paused_from_state": self.paused_from_state,
             "terminal_outcome": self.terminal_outcome,
             "delivery_status": self.delivery_status,
+            "goal_state": self.goal_state,
+            "terminal_execution_state": self.terminal_execution_state,
             "prompt_display_fields": self.prompt_display_fields,
         }
 

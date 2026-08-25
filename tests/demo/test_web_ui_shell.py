@@ -16,6 +16,9 @@ def make_snapshot() -> RunDisplaySnapshot:
         tool_results_summary="camera_scene: phone and keys visible",
         final_response="<answer>Remember your phone and keys.</answer>",
         memory_status="recorded",
+        first_decision_prompt_text="FIRST DECISION PROMPT",
+        execution_decision_prompt_text="EXECUTION DECISION PROMPT",
+        verification_prompt_text="VERIFICATION PROMPT",
     )
 
 
@@ -27,7 +30,7 @@ def test_web_ui_shell_renders_required_sections():
     assert "Agent" in html
     assert "Tool results" in html
     assert "Answer" in html
-    assert "Prompt Sent to LLM" not in html
+    assert "Prompt Sent to LLM" in html
 
 
 def test_text_input_and_submit_placeholder_are_present():
@@ -41,12 +44,15 @@ def test_text_input_and_submit_placeholder_are_present():
     assert "aria-busy" in html
 
 
-def test_prompt_section_is_not_rendered():
+def test_prompt_section_renders_runtime_boundaries():
     html = render_web_ui_shell(make_snapshot())
 
-    assert "Prompt Sent to LLM" not in html
+    assert "Prompt Sent to LLM" in html
     assert "TASK FORMULATION PROMPT" not in html
-    assert "FINAL RESPONSE PROMPT" not in html
+    assert "FIRST DECISION PROMPT" in html
+    assert "EXECUTION DECISION PROMPT" in html
+    assert "VERIFICATION PROMPT" in html
+    assert "FINAL RESPONSE PROMPT" in html
     assert "Reasoning" not in html
     assert "Chain of Thought" not in html
     assert "Model Thinking" not in html
@@ -83,4 +89,4 @@ def test_renderer_does_not_call_runtime_providers_devices_tools_or_memory():
     assert not hasattr(shell, "memory_manager")
 
     html = shell.render(make_snapshot())
-    assert "Prompt Sent to LLM" not in html
+    assert "Prompt Sent to LLM" in html

@@ -85,6 +85,10 @@ class LocalWebUI:
                 "user_input": data.get("user_input", user_input),
                 "task_id": task_id,
                 "task_state": task["state"],
+                "goal_state": task.get("goal_state") or "",
+                "terminal_execution_state": (
+                    task.get("terminal_execution_state") or ""
+                ),
                 "active_step_ids": task.get("active_step_ids", ()),
                 "pending_questions": task.get("pending_questions") or (),
                 "paused_from_state": task.get("paused_from_state") or "",
@@ -265,14 +269,13 @@ def render_web_ui_shell(
     task_id = str(data.get("task_id") or "")
     pause_enabled = task_state in {
         "created",
-        "formulating",
         "ready",
         "reasoning",
         "tool_execution",
     }
     resume_enabled = task_state == "paused"
     kill_enabled = bool(task_id) and task_state not in {
-        "succeeded",
+        "completed",
         "failed",
         "uncertain",
         "pause_requested",
@@ -291,13 +294,17 @@ def render_web_ui_shell(
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
         "task_goal": _value(data, "task_goal"),
-        "task_formulation_prompt_text": _prompt_value(
+        "first_decision_prompt_text": _prompt_value(
             data,
-            "task_formulation_prompt_text",
+            "first_decision_prompt_text",
         ),
         "execution_decision_prompt_text": _prompt_value(
             data,
             "execution_decision_prompt_text",
+        ),
+        "verification_prompt_text": _prompt_value(
+            data,
+            "verification_prompt_text",
         ),
         "final_response_prompt_text": _prompt_value(
             data,
@@ -310,6 +317,8 @@ def render_web_ui_shell(
         "task_id": _value(data, "task_id"),
         "task_state": _value(data, "task_state"),
         "task_state_label": escape(task_state or "No active task"),
+        "goal_state": _value(data, "goal_state"),
+        "terminal_execution_state": _value(data, "terminal_execution_state"),
         "controls_hidden": "" if task_id else "hidden",
         "pause_disabled": "" if pause_enabled else "disabled",
         "resume_disabled": "" if resume_enabled else "disabled",

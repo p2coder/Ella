@@ -338,6 +338,12 @@ class AppRuntime:
             "trace_id": task.trace_id,
             "user_input_summary": _task_user_input(task),
             "state": task.state.value,
+            "goal_state": None if task.goal_state is None else task.goal_state.value,
+            "terminal_execution_state": (
+                None
+                if task.terminal_execution_state is None
+                else task.terminal_execution_state.value
+            ),
             "execution_stage": _execution_stage(task),
             "active_step_ids": task.active_step_ids,
             "pending_questions": tuple(
@@ -569,7 +575,6 @@ def _execution_stage(task) -> str:
         return "tool_execution"
     return {
         "created": "created",
-        "formulating": "task_formulation",
         "ready": "queued",
         "reasoning": "reasoning",
         "tool_execution": "tool_execution",
@@ -613,14 +618,18 @@ def _build_display_snapshot(
         scene_summary=_scene_summary(camera_result),
         visible_items=_visible_items(camera_result),
         task_goal=str(process.get("task_goal", "")),
-        task_formulation_prompt_text=str(
-            process.get("task_formulation_prompt_text", "")
+        task_formulation_prompt_text="",
+        first_decision_prompt_text=str(
+            task_result.task.task_local_state.get("first_decision_prompt_text", "")
         ),
         execution_decision_prompt_text=str(
             process.get("execution_decision_prompt_text", "")
         ),
         final_response_prompt_text=str(
             process.get("final_response_prompt_text", "")
+        ),
+        verification_prompt_text=str(
+            task_result.task.task_local_state.get("verification_prompt_text", "")
         ),
         tool_results_summary=_tool_results_summary(tool_results),
         final_response=output.final_response,
@@ -636,6 +645,16 @@ def _build_display_snapshot(
         ),
         terminal_outcome=_display_value(task_result.task.terminal_outcome),
         delivery_status=_display_value(task_result.task.delivery),
+        goal_state=(
+            ""
+            if task_result.task.goal_state is None
+            else task_result.task.goal_state.value
+        ),
+        terminal_execution_state=(
+            ""
+            if task_result.task.terminal_execution_state is None
+            else task_result.task.terminal_execution_state.value
+        ),
     )
 
 

@@ -1832,14 +1832,19 @@ class TaskRuntime:
                 "tool_results": tuple(
                     result.tool_name for result in tool_results
                 ),
-                "task_formulation_prompt_text": (
-                    session.handoff.task_formulation_prompt_text
+                "first_decision_prompt_text": session.task_local_state.get(
+                    "first_decision_prompt_text",
+                    "",
                 ),
                 "execution_decision_prompt_text": session.task_local_state.get(
                     "execution_decision_prompt_text",
                     "",
                 ),
                 "final_response_prompt_text": final_response_prompt_text,
+                "verification_prompt_text": session.task_local_state.get(
+                    "verification_prompt_text",
+                    "",
+                ),
                 "timing": self._timing_dict(creation),
             },
             final_response=final_response,

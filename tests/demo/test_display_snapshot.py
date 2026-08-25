@@ -54,7 +54,9 @@ def test_snapshot_serialization_is_deterministic():
         "visible_items": ("wallet", "phone"),
         "task_goal": "Answer the user.",
         "task_formulation_prompt_text": "formulation prompt",
+        "first_decision_prompt_text": "",
         "execution_decision_prompt_text": "",
+        "verification_prompt_text": "",
         "final_response_prompt_text": "final prompt",
         "tool_results_summary": "",
         "final_response": "Done.",
@@ -66,9 +68,12 @@ def test_snapshot_serialization_is_deterministic():
         "paused_from_state": "",
         "terminal_outcome": "",
         "delivery_status": "",
+        "goal_state": "",
+        "terminal_execution_state": "",
         "prompt_display_fields": (
-            "task_formulation_prompt_text",
+            "first_decision_prompt_text",
             "execution_decision_prompt_text",
+            "verification_prompt_text",
             "final_response_prompt_text",
         ),
     }
@@ -106,8 +111,9 @@ def test_prompt_fields_are_present_and_redacted():
     assert "sk-1234567890abcdef1234567890abcdef" not in str(serialized)
     assert "abcdef1234567890abcdef1234567890" not in str(serialized)
     assert serialized["prompt_display_fields"] == (
-        "task_formulation_prompt_text",
+        "first_decision_prompt_text",
         "execution_decision_prompt_text",
+        "verification_prompt_text",
         "final_response_prompt_text",
     )
 
