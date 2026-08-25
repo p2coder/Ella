@@ -48,6 +48,9 @@ def run_web_app(
     except KeyboardInterrupt:
         print("\nStopping Ella Runtime.")
     finally:
+        close = getattr(app_runtime, "close", None)
+        if callable(close):
+            close()
         server.server_close()
 
 

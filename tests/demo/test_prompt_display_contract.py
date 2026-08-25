@@ -19,7 +19,6 @@ def make_snapshot() -> RunDisplaySnapshot:
         tool_results_summary="camera_scene: <tool>",
         final_response="<final>",
         memory_status="recorded",
-        strategy_selection_prompt_text="STRATEGY prompt",
         execution_decision_prompt_text="EXECUTION prompt",
     )
 
@@ -29,12 +28,10 @@ def test_snapshot_carries_all_prompt_display_fields():
 
     assert data["prompt_display_fields"] == (
         "task_formulation_prompt_text",
-        "strategy_selection_prompt_text",
         "execution_decision_prompt_text",
         "final_response_prompt_text",
     )
     assert data["task_formulation_prompt_text"] == "TASK prompt [REDACTED]"
-    assert data["strategy_selection_prompt_text"] == "STRATEGY prompt"
     assert data["execution_decision_prompt_text"] == "EXECUTION prompt"
     assert data["final_response_prompt_text"] == "FINAL prompt <answer>"
 
@@ -44,11 +41,9 @@ def test_page_viewer_displays_all_prompts_with_safe_title():
 
     assert "Prompt Sent to LLM" in html
     assert "Task formulation prompt" in html
-    assert "Strategy selection prompt" in html
     assert "Execution decision prompt" in html
     assert "Final response prompt" in html
     assert "TASK prompt [REDACTED]" in html
-    assert "STRATEGY prompt" in html
     assert "EXECUTION prompt" in html
     assert "FINAL prompt &lt;answer&gt;" in html
 
@@ -58,11 +53,9 @@ def test_web_ui_displays_all_prompts_from_snapshot():
 
     assert "Prompt Sent to LLM" in html
     assert "Task formulation prompt" in html
-    assert "Strategy selection prompt" in html
     assert "Execution decision prompt" in html
     assert "Final response prompt" in html
     assert "TASK prompt [REDACTED]" in html
-    assert "STRATEGY prompt" in html
     assert "EXECUTION prompt" in html
     assert "FINAL prompt &lt;answer&gt;" in html
 

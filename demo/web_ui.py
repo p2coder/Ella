@@ -3,9 +3,9 @@ from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
+import json
 import re
-from threading import Lock, Thread
-from time import sleep
+from threading import Lock
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
@@ -34,7 +34,6 @@ class LocalWebUI:
         self._lock = Lock()
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._task_inputs: dict[str, str] = {}
-        self._running_tasks: set[str] = set()
         self._task_errors: dict[str, str] = {}
 
     def submit_text(self, input_text: str) -> WebUIResponse:
@@ -64,7 +63,6 @@ class LocalWebUI:
             )
         with self._lock:
             self._task_inputs[handle.task_id] = normalized_text
-        self._start_task(handle.task_id)
         return self.task_status(handle.task_id)
 
     def task_status(self, task_id: str) -> WebUIResponse:
@@ -79,13 +77,16 @@ class LocalWebUI:
             data = dict(self._snapshots.get(task_id, {}))
             user_input = self._task_inputs.get(task_id, "")
             task_error = self._task_errors.get(task_id, "")
+        display_snapshot = task.get("display_snapshot")
+        if isinstance(display_snapshot, Mapping):
+            data.update(display_snapshot)
         data.update(
             {
                 "user_input": data.get("user_input", user_input),
                 "task_id": task_id,
                 "task_state": task["state"],
                 "active_step_ids": task.get("active_step_ids", ()),
-                "waiting_condition": task.get("waiting_condition") or "",
+                "pending_questions": task.get("pending_questions") or (),
                 "paused_from_state": task.get("paused_from_state") or "",
                 "terminal_outcome": task.get("terminal_outcome") or "",
             }
@@ -119,68 +120,20 @@ class LocalWebUI:
                 self._task_errors[task_id] = result.message
             response = self.task_status(task_id)
             return WebUIResponse(status=409, body=response.body)
-        if action == "resume":
-            self._resume_task(task_id)
         return self.task_status(task_id)
-
-    def _resume_task(self, task_id: str) -> None:
-        with self._lock:
-            still_finishing = task_id in self._running_tasks
-        if not still_finishing:
-            self._start_task(task_id)
-            return
-        Thread(
-            target=self._start_after_current_run,
-            args=(task_id,),
-            name=f"ella-resume-{task_id}",
-            daemon=True,
-        ).start()
-
-    def _start_after_current_run(self, task_id: str) -> None:
-        while True:
-            with self._lock:
-                if task_id not in self._running_tasks:
-                    break
-            sleep(0.01)
-        self._start_task(task_id)
-
-    def _start_task(self, task_id: str) -> None:
-        with self._lock:
-            if task_id in self._running_tasks:
-                return
-            self._running_tasks.add(task_id)
-            self._task_errors.pop(task_id, None)
-        Thread(
-            target=self._run_task,
-            args=(task_id,),
-            name=f"ella-task-{task_id}",
-            daemon=True,
-        ).start()
-
-    def _run_task(self, task_id: str) -> None:
-        with self._lock:
-            user_input = self._task_inputs.get(task_id, "")
-        try:
-            result = self._app_runtime.run_submitted_task_with_display(
-                task_id,
-                user_input=user_input,
-            )
-        except Exception as error:
-            state = self._app_runtime.get_task(task_id)["state"]
-            if state not in {"paused", "pause_requested", "killed"}:
-                with self._lock:
-                    self._task_errors[task_id] = (
-                        f"Ella could not complete the task: {error}"
-                    )
-        else:
-            with self._lock:
-                self._snapshots[task_id] = result.snapshot.to_dict()
-        finally:
-            with self._lock:
-                self._running_tasks.discard(task_id)
 
     def submit_microphone(self) -> WebUIResponse:
         try:
+            submit_microphone = getattr(
+                self._app_runtime,
+                "submit_microphone",
+                None,
+            )
+            if callable(submit_microphone):
+                handle, transcript = submit_microphone()
+                with self._lock:
+                    self._task_inputs[handle.task_id] = transcript
+                return self.task_status(handle.task_id)
             result = self._app_runtime.run_microphone_with_display()
         except Exception as error:
             return WebUIResponse(
@@ -212,8 +165,67 @@ class LocalWebUI:
         if normalized_method == "GET" and parsed.path == "/task":
             task_id = parse_qs(parsed.query).get("task_id", [""])[0]
             return self.task_status(task_id)
+        if normalized_method == "GET" and parsed.path == "/tasks":
+            return WebUIResponse(
+                status=200,
+                body=json.dumps(
+                    self._app_runtime.task_snapshot(),
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                content_type="application/json; charset=utf-8",
+            )
         if normalized_method == "POST" and parsed.path == "/microphone":
             return self.submit_microphone()
+        if normalized_method == "POST" and parsed.path == "/tasks":
+            if content_type.split(";", 1)[0] != "application/json":
+                return WebUIResponse(
+                    415,
+                    json.dumps({"error": "unsupported_content_type"}),
+                    "application/json; charset=utf-8",
+                )
+            try:
+                document = json.loads(body.decode("utf-8"))
+                handle = self._app_runtime.submit_text(str(document["input"]))
+                task = self._app_runtime.get_task(handle.task_id)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                return WebUIResponse(
+                    400,
+                    json.dumps({"error": str(error)}),
+                    "application/json; charset=utf-8",
+                )
+            return WebUIResponse(
+                202,
+                json.dumps(
+                    {
+                        "task_id": handle.task_id,
+                        "trace_id": handle.trace_id,
+                        "state": task["state"],
+                        "auto_start": True,
+                    },
+                    ensure_ascii=False,
+                ),
+                "application/json; charset=utf-8",
+            )
+        if normalized_method == "POST" and parsed.path == "/tasks/input":
+            try:
+                document = json.loads(body.decode("utf-8"))
+                accepted = self._app_runtime.provide_input(
+                    str(document["task_id"]),
+                    str(document["correlation_key"]),
+                    str(document["value"]),
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                return WebUIResponse(
+                    400,
+                    json.dumps({"error": str(error)}),
+                    "application/json; charset=utf-8",
+                )
+            return WebUIResponse(
+                202 if accepted else 409,
+                json.dumps({"accepted": accepted}),
+                "application/json; charset=utf-8",
+            )
         if normalized_method == "POST" and parsed.path in {"/submit", "/task/control"}:
             if content_type.split(";", 1)[0] != "application/x-www-form-urlencoded":
                 return WebUIResponse(
@@ -255,8 +267,8 @@ def render_web_ui_shell(
         "created",
         "formulating",
         "ready",
-        "running",
-        "waiting",
+        "reasoning",
+        "tool_execution",
     }
     resume_enabled = task_state == "paused"
     kill_enabled = bool(task_id) and task_state not in {
@@ -283,10 +295,6 @@ def render_web_ui_shell(
             data,
             "task_formulation_prompt_text",
         ),
-        "strategy_selection_prompt_text": _prompt_value(
-            data,
-            "strategy_selection_prompt_text",
-        ),
         "execution_decision_prompt_text": _prompt_value(
             data,
             "execution_decision_prompt_text",
@@ -307,7 +315,6 @@ def render_web_ui_shell(
         "resume_disabled": "" if resume_enabled else "disabled",
         "kill_disabled": "" if kill_enabled else "disabled",
         "active_step_ids": _join_items(data.get("active_step_ids", ())),
-        "waiting_condition": _value(data, "waiting_condition"),
         "paused_from_state": _value(data, "paused_from_state"),
         "terminal_outcome": _value(data, "terminal_outcome"),
         "delivery_status": _value(data, "delivery_status"),
@@ -329,9 +336,46 @@ def create_server(
 
     class RequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if urlsplit(self.path).path == "/task-events":
+                self._stream_task_events()
+                return
             self._write_response(
                 web_ui.handle_request(method="GET", path=self.path)
             )
+
+        def _stream_task_events(self) -> None:
+            raw_last_event_id = self.headers.get("Last-Event-ID")
+            try:
+                last_event_id = (
+                    None
+                    if raw_last_event_id is None
+                    else int(raw_last_event_id)
+                )
+            except ValueError:
+                last_event_id = None
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            try:
+                for event in app_runtime.subscribe_task_events(last_event_id):
+                    payload = json.dumps(
+                        event,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    event_id = event.get("event_id", "")
+                    event_type = event.get("event_type", "message")
+                    message = (
+                        f"id: {event_id}\n"
+                        f"event: {event_type}\n"
+                        f"data: {payload}\n\n"
+                    ).encode("utf-8")
+                    self.wfile.write(message)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def do_POST(self) -> None:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -355,7 +399,9 @@ def create_server(
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-    return ThreadingHTTPServer((host, port), RequestHandler)
+    server = ThreadingHTTPServer((host, port), RequestHandler)
+    server.daemon_threads = True
+    return server
 
 
 def _snapshot_data(

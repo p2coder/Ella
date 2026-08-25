@@ -52,7 +52,7 @@ from .task_store import TaskStore
 from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
 from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
-from .interactions import InteractionBroker, UserAnswer
+from .interactions import InteractionBroker, UserAnswer, UserQuestion
 
 
 @dataclass(frozen=True, slots=True)
@@ -615,6 +615,13 @@ class TaskRuntime:
                 {"question_id": question.question_id},
             )
         return accepted
+
+    def pending_questions(self, task_id: str) -> tuple[UserQuestion, ...]:
+        """Return pending interactions without exposing the broker boundary."""
+        broker = self._interaction_broker()
+        if broker is None:
+            return ()
+        return broker.pending_for_task(task_id)
 
     def _interaction_broker(self) -> InteractionBroker | None:
         if self.executor is None:

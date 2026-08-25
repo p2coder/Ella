@@ -122,3 +122,10 @@ class InteractionBroker:
     def reset_task(self, task_id: str) -> None:
         with self._condition:
             self._cancelled_tasks.discard(task_id)
+
+    def set_question_handler(
+        self,
+        handler: Callable[[UserQuestion], None] | None,
+    ) -> None:
+        with self._condition:
+            self._on_question = handler
