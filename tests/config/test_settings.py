@@ -5,13 +5,28 @@ from config.settings import EllaSettings, load_settings
 
 
 def test_default_settings_are_mock_safe():
-    settings = load_settings({})
+    settings = load_settings(
+        {
+            "ELLA_QWEN_API_KEY": None,
+            "ELLA_QWEN_LLM_MODEL": None,
+            "ELLA_QWEN_MULTIMODAL_MODEL": None,
+            "ELLA_QWEN_SPEECH_MODEL": None,
+            "ELLA_USE_REAL_PROVIDERS": False,
+            "ELLA_DEBUG_STORE_RAW_MEDIA": False,
+            "ELLA_MIC_ENABLED": False,
+            "ELLA_CAMERA_ENABLED": False,
+        }
+    )
 
     assert settings.model_provider == "qwen"
     assert settings.qwen_api_key is None
     assert settings.qwen_llm_model is None
     assert settings.qwen_multimodal_model is None
     assert settings.qwen_speech_model is None
+    assert settings.deepseek_api_key is None
+    assert settings.deepseek_llm_model == "deepseek-v4-pro"
+    assert settings.deepseek_thinking_enabled is True
+    assert settings.deepseek_reasoning_effort == "high"
     assert settings.use_real_providers is False
     assert settings.debug_store_raw_media is False
     assert settings.mic_enabled is False
@@ -70,6 +85,10 @@ def test_programmatic_overrides_are_applied():
             "ELLA_QWEN_SPEECH_MODEL": "qwen-asr",
             "ELLA_MIC_DEVICE": "studio-mic",
             "ELLA_CAMERA_DEVICE": "front-camera",
+            "ELLA_MIC_ENABLED": False,
+            "ELLA_CAMERA_ENABLED": False,
+            "ELLA_USE_REAL_PROVIDERS": False,
+            "ELLA_DEBUG_STORE_RAW_MEDIA": False,
         }
     )
 
@@ -79,6 +98,11 @@ def test_programmatic_overrides_are_applied():
         qwen_llm_model="qwen-llm",
         qwen_multimodal_model="qwen-vl",
         qwen_speech_model="qwen-asr",
+        deepseek_api_key=None,
+        deepseek_llm_model="deepseek-v4-pro",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_thinking_enabled=True,
+        deepseek_reasoning_effort="high",
         mic_enabled=False,
         mic_device="studio-mic",
         mic_always_listening=True,
@@ -135,6 +159,31 @@ def test_project_api_key_environment_name_has_priority(monkeypatch):
     settings = load_settings()
 
     assert settings.qwen_api_key == "ella-secret"
+
+
+def test_deepseek_api_key_uses_provider_environment_name(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setattr(user_config, "DEEPSEEK_API_KEY", None)
+
+    settings = load_settings()
+
+    assert settings.deepseek_api_key == "deepseek-secret"
+
+
+def test_deepseek_runtime_options_are_configurable():
+    settings = load_settings(
+        {
+            "ELLA_MODEL_PROVIDER": "deepseek",
+            "ELLA_DEEPSEEK_LLM_MODEL": "deepseek-v4-flash",
+            "ELLA_DEEPSEEK_THINKING_ENABLED": False,
+            "ELLA_DEEPSEEK_REASONING_EFFORT": "max",
+        }
+    )
+
+    assert settings.model_provider == "deepseek"
+    assert settings.deepseek_llm_model == "deepseek-v4-flash"
+    assert settings.deepseek_thinking_enabled is False
+    assert settings.deepseek_reasoning_effort == "max"
 
 
 def test_importing_config_package_has_no_runtime_side_effect():
