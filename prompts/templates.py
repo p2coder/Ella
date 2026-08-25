@@ -176,14 +176,18 @@ VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
         "action happened without evidence and do not expose hidden reasoning."
     ),
     instruction=(
-        "Return one strict JSON VERIFICATION_VERDICT with goal_state equal to "
+        "Return one strict JSON action. If a visible read-only verification "
+        "Tool is required, return CALL_TOOL with tool_name and arguments. "
+        "Otherwise return VERIFICATION_VERDICT with goal_state equal to "
         "achieved, partially_achieved, or not_achieved; criterion_results, "
         "deliverable_results, draft_quality_issues, recoverable, "
         "feedback_for_execution, and public_summary. achieved requires all "
         "necessary criteria and deliverables. partially_achieved requires "
         "real completion of at least one goal portion. not_achieved means no "
         "goal portion was achieved. Also check that the actual draft is "
-        "truthful, complete, and consistent with evidence."
+        "truthful, complete, and consistent with evidence. Never call a Tool "
+        "outside visible_verification_tools and never request a write or a new "
+        "external observation."
     ),
 )
 

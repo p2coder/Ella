@@ -55,6 +55,11 @@ from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 from .interactions import InteractionBroker, UserAnswer, UserQuestion
 
 
+VERIFICATION_TOOL_NAMES = frozenset(
+    {"artifact_exists", "document_read", "tool_observation_check"}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TaskHandle:
     task_id: str
@@ -1292,7 +1297,51 @@ class TaskRuntime:
                 timing_recorder=self.timing_recorder,
             )
         try:
-            verdict = verifier.verify(task)
+            _, executor = self._execution_components()
+            definitions = tuple(
+                item
+                for item in executor.tool_manager.list_definitions(creation.context)
+                if item.name in VERIFICATION_TOOL_NAMES
+            )
+            verdict = None
+            for _ in range(4):
+                action = verifier.decide(task, definitions)
+                if action.verdict is not None:
+                    verdict = action.verdict
+                    break
+                decision = ExecutionDecision(
+                    CALL_TOOL,
+                    action.tool_name,
+                    action.arguments or {},
+                    "Verification requires a read-only mechanical check.",
+                )
+                task.task_local_state["pending_tool"] = {
+                    "purpose": "verification",
+                    "tool_name": action.tool_name,
+                    "arguments": action.arguments or {},
+                }
+                task.transition_to(TaskState.TOOL_EXECUTION)
+                self._persist(task)
+                execution = executor.execute(decision, creation.context, task)
+                task.transition_to(TaskState.REASONING)
+                task.task_local_state.pop("pending_tool", None)
+                existing = tuple(
+                    task.task_local_state.get("verification_results", ())
+                )
+                if execution.failure is not None:
+                    mechanical_result = {
+                        "tool_name": action.tool_name,
+                        "failure": execution.failure.to_dict(),
+                    }
+                else:
+                    mechanical_result = execution.tool_result.to_dict()
+                task.task_local_state["verification_results"] = (
+                    *existing,
+                    mechanical_result,
+                )
+                self._persist(task)
+            if verdict is None:
+                raise RuntimeError("verification tool-call budget exhausted")
         except Exception as error:
             task.failure = {
                 "code": "verification_failed",

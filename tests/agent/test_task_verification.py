@@ -4,6 +4,8 @@ from agent.context import AgentExecutionContext, CapabilityScope
 from agent.verification import VerificationAgent, VerificationVerdict
 from events import StandardizedEvent
 from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
+from providers.base import ProviderResult
+from tools.verification import ArtifactExistsTool
 
 
 def _task(*, draft: str = "A clear answer.") -> Task:
@@ -67,3 +69,30 @@ def test_verdict_serialization_uses_three_value_goal_state() -> None:
     )
 
     assert verdict.to_dict()["goal_state"] == "partially_achieved"
+
+
+def test_verifier_may_request_only_a_visible_read_only_tool(tmp_path) -> None:
+    class Provider:
+        provider_name = "verification-test"
+        model_name = "test"
+
+        def generate(self, prompt, *, trace_id=None, metadata=None):
+            return ProviderResult(
+                self.provider_name,
+                self.model_name,
+                trace_id,
+                {
+                    "action": "CALL_TOOL",
+                    "tool_name": "artifact_exists",
+                    "arguments": {"relative_path": "report.md"},
+                },
+            )
+
+    action = VerificationAgent(llm_provider=Provider()).decide(
+        _task(),
+        (ArtifactExistsTool(tmp_path).definition,),
+    )
+
+    assert action.action == "CALL_TOOL"
+    assert action.tool_name == "artifact_exists"
+    assert action.arguments == {"relative_path": "report.md"}

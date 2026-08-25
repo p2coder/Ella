@@ -4,6 +4,7 @@ from time import perf_counter
 from typing import Any, Mapping
 
 from prompts.engine import PromptEngine, PromptType
+from providers.llm import serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from tasks.task import Task, TaskGoalState
 
@@ -35,6 +36,22 @@ class VerificationVerdict:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationAction:
+    action: str
+    tool_name: str | None = None
+    arguments: dict[str, object] | None = None
+    verdict: VerificationVerdict | None = None
+
+    def __post_init__(self) -> None:
+        if self.action == "CALL_TOOL":
+            if not self.tool_name or self.verdict is not None:
+                raise ValueError("verification CALL_TOOL requires only tool_name")
+            return
+        if self.action != "VERIFICATION_VERDICT" or self.verdict is None:
+            raise ValueError("verification action must be CALL_TOOL or VERIFICATION_VERDICT")
+
+
+@dataclass(frozen=True, slots=True)
 class VerificationAgent:
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
     llm_provider: Any | None = None
@@ -42,7 +59,7 @@ class VerificationAgent:
         default_factory=NoOpRuntimeTimingRecorder
     )
 
-    def verify(self, task: Task) -> VerificationVerdict:
+    def decide(self, task: Task, definitions: tuple[Any, ...] = ()) -> VerificationAction:
         if task.intent is None:
             raise VerificationDecisionError("verification requires TaskIntent")
         draft = str(task.task_local_state.get("draft_final_response", "")).strip()
@@ -69,12 +86,16 @@ class VerificationAgent:
                 "verification_results": tuple(
                     task.task_local_state.get("verification_results", ())
                 ),
+                "visible_verification_tools": serialize_tool_definitions(definitions),
             },
         }
         prompt = self.prompt_engine.build(PromptType.VERIFICATION_DECISION, context)
         task.task_local_state["verification_prompt_text"] = prompt.prompt
         if self.llm_provider is None:
-            return self._deterministic_verdict(draft)
+            return VerificationAction(
+                "VERIFICATION_VERDICT",
+                verdict=self._deterministic_verdict(draft),
+            )
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
@@ -89,11 +110,20 @@ class VerificationAgent:
         if result.failed:
             raise VerificationDecisionError("verification provider failed")
         try:
-            return self._verdict_from_output(result.output)
+            return self._action_from_output(result.output, definitions)
         except VerificationDecisionError:
             if bool(getattr(result, "metadata", {}).get("mock")):
-                return self._deterministic_verdict(draft)
+                return VerificationAction(
+                    "VERIFICATION_VERDICT",
+                    verdict=self._deterministic_verdict(draft),
+                )
             raise
+
+    def verify(self, task: Task) -> VerificationVerdict:
+        action = self.decide(task)
+        if action.verdict is None:
+            raise VerificationDecisionError("verification requested an unavailable Tool")
+        return action.verdict
 
     def _record_timing(self, task: Task, started: float, success: bool, result: Any) -> None:
         self.timing_recorder.record_llm_call(
@@ -106,7 +136,10 @@ class VerificationAgent:
         )
 
     @staticmethod
-    def _verdict_from_output(output: Any) -> VerificationVerdict:
+    def _action_from_output(
+        output: Any,
+        definitions: tuple[Any, ...],
+    ) -> VerificationAction:
         if isinstance(output, Mapping) and isinstance(output.get("text"), str):
             output = output["text"]
         if isinstance(output, str):
@@ -116,10 +149,20 @@ class VerificationAgent:
                 raise VerificationDecisionError("invalid verification JSON") from error
         if not isinstance(output, Mapping):
             raise VerificationDecisionError("verification verdict must be an object")
-        if output.get("action", "VERIFICATION_VERDICT") != "VERIFICATION_VERDICT":
+        action = output.get("action", "VERIFICATION_VERDICT")
+        if action == "CALL_TOOL":
+            tool_name = output.get("tool_name")
+            visible = {item.name for item in definitions}
+            arguments = output.get("arguments", {})
+            if not isinstance(tool_name, str) or tool_name not in visible:
+                raise VerificationDecisionError("verification Tool is not visible")
+            if not isinstance(arguments, dict):
+                raise VerificationDecisionError("verification arguments must be an object")
+            return VerificationAction("CALL_TOOL", tool_name, arguments)
+        if action != "VERIFICATION_VERDICT":
             raise VerificationDecisionError("unsupported verification action")
         try:
-            return VerificationVerdict(
+            verdict = VerificationVerdict(
                 goal_state=TaskGoalState(str(output["goal_state"]).lower()),
                 criterion_results=tuple(output.get("criterion_results", ())),
                 deliverable_results=tuple(output.get("deliverable_results", ())),
@@ -128,6 +171,7 @@ class VerificationAgent:
                 feedback_for_execution=str(output.get("feedback_for_execution", "")),
                 public_summary=str(output.get("public_summary", "")),
             )
+            return VerificationAction("VERIFICATION_VERDICT", verdict=verdict)
         except (KeyError, TypeError, ValueError) as error:
             raise VerificationDecisionError(f"invalid verification verdict: {error}") from error
 
