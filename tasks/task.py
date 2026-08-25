@@ -21,10 +21,17 @@ class TaskState(StrEnum):
     PAUSED = "paused"
     KILL_REQUESTED = "kill_requested"
     SUCCEEDED = "succeeded"
+    COMPLETED = "completed"
     FAILED = "failed"
     UNCERTAIN = "uncertain"
     KILLED = "killed"
     DELIVERED = "delivered"
+
+
+class TaskGoalState(StrEnum):
+    ACHIEVED = "achieved"
+    PARTIALLY_ACHIEVED = "partially_achieved"
+    NOT_ACHIEVED = "not_achieved"
 
 
 ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
@@ -57,6 +64,7 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.PAUSE_REQUESTED,
             TaskState.KILL_REQUESTED,
             TaskState.SUCCEEDED,
+            TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.UNCERTAIN,
         }
@@ -88,6 +96,7 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.KILL_REQUESTED: frozenset({TaskState.KILLED}),
     TaskState.SUCCEEDED: frozenset({TaskState.DELIVERED}),
+    TaskState.COMPLETED: frozenset({TaskState.DELIVERED}),
     TaskState.FAILED: frozenset({TaskState.DELIVERED}),
     TaskState.UNCERTAIN: frozenset({TaskState.FAILED}),
     TaskState.KILLED: frozenset(),
@@ -101,6 +110,8 @@ class Task:
     session_id: InitVar[str | None] = None
     handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
+    goal_state: TaskGoalState | None = None
+    terminal_execution_state: TaskState | None = None
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
     tool_trace: tuple[dict[str, Any], ...] = ()
@@ -153,6 +164,18 @@ class Task:
                 f"{self.state.value} -> {next_state.value}"
             )
         self.state = next_state
+        self.updated_at = datetime.now(timezone.utc)
+
+    def set_goal_state(self, goal_state: TaskGoalState) -> None:
+        if self.state not in {
+            TaskState.COMPLETED,
+            TaskState.FAILED,
+            TaskState.UNCERTAIN,
+            TaskState.KILLED,
+            TaskState.DELIVERED,
+        }:
+            raise ValueError("goal state may only be committed at a terminal boundary")
+        self.goal_state = goal_state
         self.updated_at = datetime.now(timezone.utc)
 
 
