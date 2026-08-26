@@ -110,16 +110,10 @@ class DashScopeOpenAITransport:
         body: dict[str, Any] = {
             "model": payload["model_name"],
             "messages": [{"role": "user", "content": content}],
-            
         }
         if "tools" in input_payload:
             body["tools"] = input_payload["tools"]
             body["tool_choice"] = "auto"
-
-        # if "response_format" in input_payload:
-        #     body["response_format"] = input_payload["response_format"]
-        body["response_format"]= {"type": "json_object"}
-        body["extra_body"]={"enable_thinking": False}
         return body
 
     def _speech_request_body(
@@ -309,8 +303,6 @@ class _QwenProviderBase:
                 }
             )
             output = self._normalize_output(raw_output)
-            if isinstance(raw_output, dict) and isinstance(raw_output.get("usage"), dict):
-                result_metadata["usage"] = dict(raw_output["usage"])
         except QwenTransportError as error:
             error_metadata: dict[str, Any] = {}
             if error.status_code is not None:
