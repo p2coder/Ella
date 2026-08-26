@@ -7,3 +7,4 @@ venv/
 outputs/
 test.py
 trace/
+output/
