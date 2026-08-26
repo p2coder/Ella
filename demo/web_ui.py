@@ -321,6 +321,10 @@ def render_web_ui_shell(
         ),
         "tool_results_summary": _value(data, "tool_results_summary"),
         "timing_summary": _value(data, "timing_summary"),
+        "model_output": _value(data, "model_output") or _value(data, "final_response"),
+        "total_duration": _total_duration(data),
+        "token_usage": _metric_value(data.get("token_usage")),
+        "cache_hit_rate": _metric_value(data.get("cache_hit_rate"), suffix="%"),
         "final_response": _value(data, "final_response"),
         "memory_status": _value(data, "memory_status"),
         "task_id": _value(data, "task_id"),
@@ -461,6 +465,25 @@ def _join_items(value: Any) -> str:
         return escape(", ".join(str(item) for item in value))
     except TypeError:
         return escape(str(value))
+
+
+def _metric_value(value: Any, *, suffix: str = "") -> str:
+    if value is None:
+        return "暂无数据"
+    return escape(f"{value:,}{suffix}" if isinstance(value, int) else f"{value}{suffix}")
+
+
+def _total_duration(data: Mapping[str, Any]) -> str:
+    timing = data.get("timing")
+    if not isinstance(timing, Mapping):
+        return "执行中" if data.get("task_id") else "--"
+    value = timing.get("end_to_end_duration_ms")
+    if value is None:
+        value = timing.get("total_execution_duration_ms")
+    if value is None:
+        return "执行中"
+    seconds = max(0, round(float(value) / 1000))
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
 def _transcript_markup(data: Mapping[str, Any]) -> str:

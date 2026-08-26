@@ -323,3 +323,51 @@ Ella 最明显的 3 个短板；
 - final_response: 你好！👋 我是Ella，温暖、稳定，也始终专注地为你提供清晰而有分寸的支持。  
 很高兴见到你～ 😊
 
+## Task task-4651d0fc8ea44d42914016f3963cd9b1
+- trace_id: trace-app-2a79a1698c4e484e980bf9b02e847a2b
+- user_input: 你好
+- summary: Responded to user's greeting with a friendly, natural reply.
+- final_response: 你好！很高兴见到你～今天有什么想聊的，或者需要我帮忙的吗？
+
+## Task task-ef3124d8c7be403dbe8122d90fdae3af
+- trace_id: trace-app-d559873fe7d14266b40b97e1088cbf3a
+- user_input: 你是谁
+- summary: Provided a clear, grounded self-introduction aligned with the system prompt and user's request.
+- final_response: 我是Ella，你的长期陪伴型助手。我既关心你的情绪和 intent，也注重把事情可靠地完成——比如帮你理清思路、分解任务，或执行具体操作。我不依赖夸张的情感表达，也不虚构能力；我会如实说明我能做什么、不能做什么，以及为什么。
+
+## Task task-7e689452700749f4ac621dd7bb9f74e6
+- trace_id: trace-app-aa445049ef284246b92e5270bf4245a7
+- user_input: 你好
+- summary: Greeted the user warmly as requested.
+- final_response: 你好！很高兴见到你。有什么我可以帮你的吗，或者想聊点什么？
+
+## Task task-2b63dfe7e9fa4be78da957b8c1c3b8ac
+- trace_id: trace-app-4e5dcc363e07409a9c787ccc10bfd34a
+- user_input: 你好
+- summary: Responded to the greeting and prompted the user for their next request.
+- final_response: 你好！我是Ella。今天有什么我可以帮你的吗？请随时告诉我你需要处理的任务或想聊的话题。
+
+## Task task-ba5721f2587c4bd59ef844e46f79e6c4
+- trace_id: trace-app-3e6d54fcc3e24c6e8037d9b1ec1b25ad
+- user_input: 你好
+- summary: 已生成符合Ella陪伴风格的简洁问候语，准备直接交付给用户。
+- final_response: 你好！很高兴见到你。有什么我可以帮你的，或者想聊聊什么都可以告诉我。
+
+## Task task-e5367de7e6b74ad4a290f40a7786d8b2
+- trace_id: trace-app-3408698cd5f34d51b005aa648382675e
+- user_input: 你好
+- summary: Acknowledge the greeting and prompt the user for their needs.
+- final_response: 你好！我是Ella。有什么我可以帮你的吗？
+
+## Task task-962d6208b07a43ddb2acb673bfe6d32d
+- trace_id: trace-app-793457569ab0494997e05858443e09ba
+- user_input: 你好
+- summary: 已准备简短中文问候回应。
+- final_response: 你好！我是 Ella，可以陪你聊天，也可以帮你执行具体任务。今天想做什么？
+
+## Task task-67c1f482bba34c109a704b0efe89aa04
+- trace_id: trace-app-1944af2a471b49babc58db79d25598eb
+- user_input: 你好
+- summary: 已回应用户问候。
+- final_response: 你好，我在。有什么我可以帮你的吗？
+

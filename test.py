@@ -16,4 +16,4 @@ response = client.chat.completions.create(
     extra_body={"thinking": {"type": "enabled"}}
 )
 
-print(response.choices[0].message.content)
+print(response)
