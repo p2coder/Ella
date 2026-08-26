@@ -34,8 +34,30 @@ class PlanWrittenTool:
             name=self.name,
             description=(
                 "Create or structurally replace the current Task plan. Use only "
-                "when the goal requires multiple dependent steps. Do not use for "
-                "simple direct tasks or progress updates."
+                "when the goal requires multiple staged outcomes; do not use for "
+                "simple direct tasks or progress updates. Each step must represent "
+                "one independently executable and observable intermediate goal, "
+                "not one Tool call. Split independent work items, such as research "
+                "for separate projects, into separate steps so they can run in the "
+                "same wave. Keep closely related actions for one item and stage in "
+                "one step; do not split searching, opening, and reading the same "
+                "source into separate steps. Describe the outcome in goal without "
+                "binding it to a Tool name. completion_criteria must describe "
+                "observable output facts rather than whether a Tool ran. Enumerate "
+                "criteria whenever expected facts can be enumerated, and do not use "
+                "vague words such as sufficient, comprehensive, complete, or "
+                "high-quality as the only criterion. Criteria may be empty for a "
+                "non-critical step, but a critical, irreplaceable step must have "
+                "verifiable criteria. depends_on expresses real success dependency: "
+                "a step runs only after every dependency succeeds. Independent "
+                "steps must not depend on each other. If an existing plan is blocked "
+                "by a failed step, write a revised plan that preserves reusable "
+                "successful work, replaces the blocked path, and keeps failed or "
+                "missing evidence visible to later reasoning. Reuse a successful "
+                "step_id only when its goal, criteria, and dependencies are "
+                "unchanged; otherwise use a new step_id. For factual work, preserve "
+                "traceable sources in Tool observations rather than copying source "
+                "content into the plan."
             ),
             schema_version="2.0",
             input_schema={

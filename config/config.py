@@ -28,6 +28,8 @@ MODEL_PROVIDER = "qwen"
 
 QWEN_API_KEY = None
 QWEN_LLM_MODEL = "qwen-plus"
+QWEN_LLM_RESPONSE_FORMAT = "json_object"
+QWEN_LLM_ENABLE_THINKING = False
 QWEN_MULTIMODAL_MODEL = "qwen-vl-plus"
 QWEN_SPEECH_MODEL = "qwen3-asr-flash"
 

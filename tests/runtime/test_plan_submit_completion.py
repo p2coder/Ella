@@ -5,6 +5,7 @@ from runtime.task_runtime import TaskRuntime
 from skill.manager import SkillManager
 from tasks.factory import TaskFactory
 from tasks.graph import (
+    GraphEdge,
     TaskGraphDefinition,
     TaskGraphNodeDefinition,
     TaskGraphNodeType,
@@ -116,3 +117,41 @@ def test_completed_plan_without_submit_schedules_one_normal_reasoning() -> None:
 
     assert result.stop_reason == "completed"
     assert result.completion.user_visible_output.final_response == "计划已经执行完成。"
+
+
+def test_blocked_plan_schedules_recovery_reasoning_instead_of_failing() -> None:
+    runtime, task = _runtime()
+    definition = TaskGraphDefinition(
+        graph_id="blocked-plan",
+        version="v1",
+        nodes=(
+            TaskGraphNodeDefinition(
+                "research",
+                TaskGraphNodeType.STEP,
+                {"goal": "Research", "completion_criteria": ()},
+            ),
+            TaskGraphNodeDefinition(
+                "compare",
+                TaskGraphNodeType.STEP,
+                {"goal": "Compare", "completion_criteria": ()},
+            ),
+        ),
+        edges=(GraphEdge("research", "compare"),),
+        entry_node_ids=("research",),
+        terminal_node_ids=("compare",),
+    )
+    task.graph = TaskGraphRun(
+        definition,
+        {"research": {"state": "failed", "code": "source_unavailable"}},
+    )
+
+    result = runtime.step(task.task_id)
+
+    assert result.stop_reason is None
+    assert task.state is TaskState.REASONING
+    assert task.task_local_state["plan_recovery_reasoning_pending"] is True
+    assert task.task_local_state["plan_recovery_reason"] == {
+        "code": "no_reachable_success_terminal",
+        "failed_node_ids": ("research",),
+    }
+    assert task.task_local_state["pending_reasoning"]["purpose"] == "execution"

@@ -909,6 +909,9 @@ class TaskRuntime:
             task.graph is not None
             and task.state is TaskState.REASONING
             and not task.task_local_state.get("plan_execution_complete", False)
+            and not task.task_local_state.get(
+                "plan_recovery_reasoning_pending", False
+            )
         ):
             return self._step_task_graph(creation)
         self.timing_recorder.record_task_processing_started(
@@ -1195,7 +1198,11 @@ class TaskRuntime:
                         else None
                     ),
                 )
-            return self._fail_graph_task(creation, "no_reachable_success_terminal")
+            return self._schedule_plan_recovery_reasoning(
+                creation,
+                runs,
+                "no_reachable_success_terminal",
+            )
         wave_id = int(task.task_local_state.get("wave_number", 0)) + 1
         task.task_local_state["wave_number"] = wave_id
         node_by_id = {node.node_id: node for node in graph.definition.nodes}
@@ -1676,15 +1683,71 @@ class TaskRuntime:
             entry_node_ids=entries,
             terminal_node_ids=terminals,
         )
-        previous_runs = {} if task.graph is None else task.graph.node_runs
-        migrated = {
-            node.node_id: previous_runs[node.node_id]
-            for node in nodes
-            if node.node_id in previous_runs
-            and _graph_run_state(previous_runs[node.node_id]) == "succeeded"
-        }
+        previous_graph = task.graph
+        previous_runs = {} if previous_graph is None else previous_graph.node_runs
+        previous_nodes = (
+            {}
+            if previous_graph is None
+            else {node.node_id: node for node in previous_graph.definition.nodes}
+        )
+        node_by_id = {node.node_id: node for node in nodes}
+        migrated = {}
+        for node_id in definition.topological_order():
+            node = node_by_id[node_id]
+            previous_node = previous_nodes.get(node_id)
+            if (
+                previous_node is None
+                or previous_node.payload != node.payload
+                or previous_graph.definition.predecessors(node_id)
+                != definition.predecessors(node_id)
+                or _graph_run_state(previous_runs.get(node_id)) != "succeeded"
+                or any(
+                    dependency not in migrated
+                    for dependency in definition.predecessors(node_id)
+                )
+            ):
+                continue
+            migrated[node_id] = previous_runs[node_id]
         task.graph = TaskGraphRun(definition, migrated)
         task.task_local_state["active_plan_version"] = version_id
+        task.task_local_state.pop("plan_execution_complete", None)
+        task.task_local_state.pop("plan_recovery_reasoning_pending", None)
+        task.task_local_state.pop("plan_recovery_reason", None)
+
+    def _schedule_plan_recovery_reasoning(
+        self,
+        creation: TaskCreationResult,
+        runs: Mapping[str, Any],
+        reason: str,
+    ) -> TaskRuntimeResult:
+        task = creation.task
+        failed_nodes = tuple(
+            node_id
+            for node_id, run in runs.items()
+            if _graph_run_state(run) == "failed"
+        )
+        task.task_local_state["plan_recovery_reasoning_pending"] = True
+        task.task_local_state["plan_recovery_reason"] = {
+            "code": reason,
+            "failed_node_ids": failed_nodes,
+        }
+        task.task_local_state["pending_reasoning"] = {
+            "purpose": "execution",
+            "reason": "plan_requires_revision_or_partial_submission",
+        }
+        task.task_local_state.pop("current_decision", None)
+        self._trace_task(
+            task,
+            "reasoning.execution_decision",
+            "scheduled_after_plan_failure",
+            {
+                "plan_version": task.graph.definition.version,
+                "failure_code": reason,
+                "failed_node_ids": failed_nodes,
+            },
+        )
+        self._persist(task)
+        return self._result(creation)
 
     def _fail_graph_task(self, creation, code: str) -> TaskRuntimeResult:
         task = creation.task

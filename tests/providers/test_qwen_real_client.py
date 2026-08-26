@@ -67,6 +67,74 @@ def test_provider_repr_never_exposes_api_key():
     assert "sk-do-not-log" not in repr(provider)
 
 
+def test_llm_transport_sends_json_object_and_disables_thinking():
+    requests = []
+
+    def opener(request, timeout):
+        requests.append(request)
+        return FakeResponse(
+            {"choices": [{"message": {"content": '{"action":"ok"}'}}]}
+        )
+
+    provider = QwenLLMProvider(
+        api_key="sk-secret",
+        model_name="qwen3.7-flash",
+        client=DashScopeOpenAITransport(
+            opener=opener,
+            response_format="json_object",
+            enable_thinking=False,
+        ),
+    )
+
+    result = provider.generate("Return JSON")
+
+    assert result.succeeded
+    body = json.loads(requests[0].data)
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["enable_thinking"] is False
+    assert "extra_body" not in body
+
+
+def test_llm_output_options_are_not_added_to_multimodal_requests():
+    requests = []
+
+    def opener(request, timeout):
+        requests.append(request)
+        return FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"scene_summary":"desk",'
+                                '"visible_items":[]}'
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    provider = QwenMultimodalProvider(
+        api_key="sk-secret",
+        model_name="qwen-vl-plus",
+        client=DashScopeOpenAITransport(
+            opener=opener,
+            response_format="json_object",
+            enable_thinking=False,
+        ),
+    )
+
+    result = provider.describe(
+        {"frames": ({"bytes": b"jpeg", "mime_type": "image/jpeg"},)}
+    )
+
+    assert result.succeeded
+    body = json.loads(requests[0].data)
+    assert "response_format" not in body
+    assert "enable_thinking" not in body
+
+
 def test_multimodal_transport_accepts_encoded_frames_and_normalizes_scene():
     requests = []
 

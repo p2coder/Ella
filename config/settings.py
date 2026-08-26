@@ -21,6 +21,8 @@ CONFIG_NAMES = {
     "ELLA_MODEL_PROVIDER": "MODEL_PROVIDER",
     "ELLA_QWEN_API_KEY": "QWEN_API_KEY",
     "ELLA_QWEN_LLM_MODEL": "QWEN_LLM_MODEL",
+    "ELLA_QWEN_LLM_RESPONSE_FORMAT": "QWEN_LLM_RESPONSE_FORMAT",
+    "ELLA_QWEN_LLM_ENABLE_THINKING": "QWEN_LLM_ENABLE_THINKING",
     "ELLA_QWEN_MULTIMODAL_MODEL": "QWEN_MULTIMODAL_MODEL",
     "ELLA_QWEN_SPEECH_MODEL": "QWEN_SPEECH_MODEL",
     "ELLA_DEEPSEEK_API_KEY": "DEEPSEEK_API_KEY",
@@ -56,6 +58,8 @@ SAFE_DEFAULTS = {
     "ELLA_MODEL_PROVIDER": "qwen",
     "ELLA_QWEN_API_KEY": None,
     "ELLA_QWEN_LLM_MODEL": None,
+    "ELLA_QWEN_LLM_RESPONSE_FORMAT": "json_object",
+    "ELLA_QWEN_LLM_ENABLE_THINKING": False,
     "ELLA_QWEN_MULTIMODAL_MODEL": None,
     "ELLA_QWEN_SPEECH_MODEL": None,
     "ELLA_DEEPSEEK_API_KEY": None,
@@ -97,6 +101,8 @@ class EllaSettings:
     model_provider: str
     qwen_api_key: str | None
     qwen_llm_model: str | None
+    qwen_llm_response_format: str | None
+    qwen_llm_enable_thinking: bool
     qwen_multimodal_model: str | None
     qwen_speech_model: str | None
     deepseek_api_key: str | None
@@ -158,11 +164,25 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         raise ValueError(
             "DEEPSEEK_REASONING_EFFORT must be low, high, or max"
         )
+    qwen_response_format = _optional_string(
+        values,
+        "ELLA_QWEN_LLM_RESPONSE_FORMAT",
+    )
+    if qwen_response_format not in {None, "json_object"}:
+        raise ValueError(
+            "QWEN_LLM_RESPONSE_FORMAT must be json_object or None"
+        )
 
     return EllaSettings(
         model_provider=model_provider,
         qwen_api_key=api_key,
         qwen_llm_model=_optional_string(values, "ELLA_QWEN_LLM_MODEL"),
+        qwen_llm_response_format=qwen_response_format,
+        qwen_llm_enable_thinking=_boolean(
+            values,
+            "ELLA_QWEN_LLM_ENABLE_THINKING",
+            False,
+        ),
         qwen_multimodal_model=_optional_string(
             values,
             "ELLA_QWEN_MULTIMODAL_MODEL",

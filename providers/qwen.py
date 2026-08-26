@@ -35,6 +35,8 @@ class DashScopeOpenAITransport:
     endpoint: str = DEFAULT_DASHSCOPE_ENDPOINT
     timeout_seconds: float = 30.0
     opener: HttpOpener = urlopen
+    response_format: str | None = None
+    enable_thinking: bool | None = None
 
     def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
         api_key = payload["api_key"]
@@ -98,7 +100,8 @@ class DashScopeOpenAITransport:
 
     def _request_body(self, payload: dict[str, Any]) -> dict[str, Any]:
         input_payload = payload["input"]
-        if "prompt" in input_payload:
+        is_text_prompt = "prompt" in input_payload
+        if is_text_prompt:
             content: Any = input_payload["prompt"]
         elif "audio" in input_payload:
             return self._speech_request_body(
@@ -114,6 +117,11 @@ class DashScopeOpenAITransport:
         if "tools" in input_payload:
             body["tools"] = input_payload["tools"]
             body["tool_choice"] = "auto"
+        if is_text_prompt:
+            if self.response_format is not None:
+                body["response_format"] = {"type": self.response_format}
+            if self.enable_thinking is not None:
+                body["enable_thinking"] = self.enable_thinking
         return body
 
     def _speech_request_body(

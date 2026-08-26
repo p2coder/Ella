@@ -158,6 +158,14 @@ class SubAgent:
                                     "plan_execution_complete", False
                                 )
                             ),
+                            "recovery_required": bool(
+                                task.task_local_state.get(
+                                    "plan_recovery_reasoning_pending", False
+                                )
+                            ),
+                            "recovery_reason": task.task_local_state.get(
+                                "plan_recovery_reason"
+                            ),
                         }
                     ),
                     "current_step": self._step_context(task),
