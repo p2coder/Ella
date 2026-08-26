@@ -36,9 +36,12 @@ class ArtifactExistsTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Read-only verification capability. Check whether a user-visible "
-                "artifact exists under the controlled output directory. Use only "
-                "during result verification. Never use for arbitrary local paths."
+                "Purpose: Check whether a user-visible artifact exists under the "
+                "controlled output directory. Use when: Result verification must "
+                "mechanically confirm an expected artifact. Do not use when: The "
+                "task does not claim an artifact or the target is an arbitrary "
+                "local path. Execution behavior: Perform a read-only existence and "
+                "file-type check; never create or modify the artifact."
             ),
             schema_version="1.0",
             input_schema={
@@ -89,9 +92,13 @@ class DocumentReadTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Read-only verification capability. Read a bounded UTF-8 document "
-                "under the controlled document directory to verify a produced "
-                "deliverable. Do not use for arbitrary filesystem access."
+                "Purpose: Read a bounded UTF-8 document under the controlled "
+                "document directory. Use when: Result verification must inspect a "
+                "produced text deliverable. Do not use when: The target is outside "
+                "the controlled directory or arbitrary filesystem access is "
+                "requested. Execution behavior: Read without modifying the file. "
+                "Failure and limitations: Content may be truncated at the configured "
+                "byte limit and non-UTF-8 documents are unsupported."
             ),
             schema_version="1.0",
             input_schema={
@@ -152,9 +159,13 @@ class ToolObservationCheckTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Read-only verification capability. Query persisted observations "
-                "for this Task by observation_id or tool_name. It never executes "
-                "the original Tool again."
+                "Purpose: Query persisted Tool observations for the current Task. "
+                "Use when: Result verification needs to confirm an observation by "
+                "observation_id or tool_name. Do not use when: New external evidence "
+                "is required. Execution behavior: Read matching persisted "
+                "observations without executing the original Tool again. Failure "
+                "and limitations: An unmatched query only proves that no matching "
+                "persisted observation was found."
             ),
             schema_version="1.0",
             input_schema={

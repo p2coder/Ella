@@ -27,13 +27,16 @@ class ScreenSceneTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Use to capture the current screen and summarize visible app, "
+                "Purpose: Capture the current screen and summarize visible app, "
                 "window, document, web page, or UI content through a multimodal "
-                "model. Use when the user asks what is on the current screen, "
-                "needs help understanding an on-screen error, or asks for UI "
-                "guidance. Do not use for the physical room environment, "
-                "continuous screen monitoring, hidden windows, credentials, or "
-                "when the task can be answered without screen context."
+                "model. Use when: The request depends on what is currently visible "
+                "on screen, including an on-screen error or UI guidance. Do not "
+                "use when: The request concerns the physical room, hidden windows, "
+                "credentials, continuous monitoring, or can be answered without "
+                "screen context. Execution behavior: Capture only the configured "
+                "bounded number of screenshots. Failure and limitations: The result "
+                "covers visible screen content only and cannot establish what is "
+                "hidden, occluded, or outside the captured display."
             ),
             schema_version="1.0",
             input_schema={

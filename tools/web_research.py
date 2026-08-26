@@ -52,11 +52,15 @@ class WebSearchTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Use to find current public web sources for research, comparison, "
-                "or fact verification. Returns bounded result titles, URLs, and "
-                "snippets; follow important results with web_page_read before "
-                "making detailed claims. Do not use for private networks, local "
-                "files, authenticated content, or as proof that a snippet is true."
+                "Purpose: Find current public web sources for research, comparison, "
+                "or fact verification. Use when: The task requires current or "
+                "source-backed public information. Do not use when: The answer is "
+                "already supported by available evidence, or the target is a local "
+                "file, private network, or authenticated resource. Execution "
+                "behavior: Return bounded titles, URLs, and snippets; follow "
+                "important results with web_page_read before making detailed "
+                "claims. Failure and limitations: Search snippets identify "
+                "candidate sources and are not proof that a claim is true."
             ),
             schema_version="1.0",
             input_schema={
@@ -231,11 +235,13 @@ class WebPageReadTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Use after web_search to read and verify one public source page. "
-                "Returns the final URL, title, and bounded visible text suitable "
-                "for evidence-based analysis and citations. Do not use for local "
-                "or private-network URLs, authenticated pages, binary downloads, "
-                "or claims not supported by the returned text."
+                "Purpose: Read and verify one public source page. Use when: A "
+                "candidate URL from web_search or existing context must be checked "
+                "for evidence-based analysis or citation. Do not use when: The URL "
+                "is local, private-network, authenticated, or a binary download. "
+                "Execution behavior: Return the final URL, title, and bounded "
+                "visible text. Failure and limitations: Claims remain unsupported "
+                "when they do not appear in the returned text."
             ),
             schema_version="1.0",
             input_schema={
