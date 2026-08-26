@@ -6,7 +6,6 @@ from time import monotonic, sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from agent.final_response import FinalResponseGenerator
 from agent.verification import VerificationAgent
 from config.config import PROJECT_ROOT
 from config.settings import load_settings
@@ -156,11 +155,6 @@ class AppRuntime:
                 timing_recorder=timing_recorder,
             ),
             memory_manager=MemoryManager(memory_path or settings.memory_path),
-            final_response_generator=FinalResponseGenerator(
-                prompt_engine=PromptEngine(),
-                llm_provider=llm_provider,
-                timing_recorder=timing_recorder,
-            ),
             verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
@@ -688,7 +682,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
         ("queue_wait", snapshot.queue_wait_duration_ms),
         ("planning", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
-        ("final_response_stage", snapshot.final_response_generation_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
     )
     for label, value in values:
@@ -700,7 +693,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
         "first_decision",
         "execution_decision",
         "verification_decision",
-        "final_response",
     ):
         value = llm_by_boundary.get(boundary)
         if value is not None:

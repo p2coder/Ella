@@ -8,8 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from agent.context import AgentExecutionContext
-from agent.final_response import FinalResponseGenerator
-from agent.verification import VerificationAgent
+from agent.verification import VerificationAgent, VerificationVerdict
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
@@ -85,7 +84,6 @@ class TaskRuntime:
     task_factory: TaskFactory = field(default_factory=TaskFactory)
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
-    final_response_generator: FinalResponseGenerator | None = None
     verification_agent: VerificationAgent | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     max_step_retries: int = 2
@@ -129,7 +127,6 @@ class TaskRuntime:
         subagent: SubAgent | None = None,
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
-        final_response_generator: FinalResponseGenerator | None = None,
         verification_agent: VerificationAgent | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         max_step_retries: int = 2,
@@ -154,7 +151,6 @@ class TaskRuntime:
         self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
-        self.final_response_generator = final_response_generator
         self.verification_agent = verification_agent
         self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         self.max_step_retries = max_step_retries
@@ -892,7 +888,8 @@ class TaskRuntime:
             reason=task.failure_reason or str(failure.get("message", "task failed")),
             unknown_side_effects=unknown,
         ).to_dict()
-        payload["message"] = FinalResponseGenerator.failure_report_text(payload)
+        reason = str(payload.get("reason", "task failed")).strip()
+        payload["message"] = f"Ella could not complete the task: {reason}"
         return TaskDeliveryRecord(
             DeliveryOutcome.FAILED,
             payload_type,
@@ -908,7 +905,11 @@ class TaskRuntime:
     def step(self, task_id: str) -> TaskRuntimeResult:
         creation = self._tasks[task_id]
         task = creation.task
-        if task.graph is not None and task.state is TaskState.REASONING:
+        if (
+            task.graph is not None
+            and task.state is TaskState.REASONING
+            and not task.task_local_state.get("plan_execution_complete", False)
+        ):
             return self._step_task_graph(creation)
         self.timing_recorder.record_task_processing_started(
             creation.context.trace_id
@@ -1004,6 +1005,7 @@ class TaskRuntime:
                     "tool_name": decision.tool_name,
                     "decision_reason": decision.decision_reason,
                     "completion_summary": decision.completion_summary,
+                    "final_response_draft": decision.final_response_draft,
                     "evidence_refs": decision.evidence_refs,
                     "prompt_text": task.task_local_state.get(
                         (
@@ -1111,6 +1113,7 @@ class TaskRuntime:
             task.task_local_state.pop("current_decision", None)
             task.task_local_state["completion_summary"] = decision.completion_summary
             task.task_local_state["completion_evidence_refs"] = decision.evidence_refs
+            task.task_local_state["draft_final_response"] = decision.final_response_draft
             self._archive_and_advance(task)
             completed = self._finalize_candidate(creation)
             return self._result(
@@ -1132,7 +1135,9 @@ class TaskRuntime:
                 "retry_index": task.current_step.retry_index,
                 "instruction": (
                     "Return the same decision protocol with all required fields. "
-                    "Every action requires a non-empty decision_reason."
+                    "Every action requires a non-empty decision_reason. "
+                    "SUBMIT_RESULT also requires non-empty completion_summary "
+                    "and final_response_draft fields."
                 ),
             }
             self._trace_task(
@@ -1278,42 +1283,55 @@ class TaskRuntime:
         runs: Mapping[str, Any],
     ) -> None:
         task = creation.task
-        terminal_summaries = tuple(
-            str(runs[node_id].get("completion_summary", "")).strip()
+        terminal_candidates = tuple(
+            runs[node_id]
             for node_id in task.graph.definition.terminal_node_ids
             if isinstance(runs.get(node_id), Mapping)
             and _graph_run_state(runs[node_id]) == "succeeded"
-            and str(runs[node_id].get("completion_summary", "")).strip()
         )
-        task.task_local_state["completion_summary"] = (
-            "\n".join(terminal_summaries)
-            if terminal_summaries
-            else "The planned task reached a successful terminal node."
+        submitted = next(
+            (
+                candidate
+                for candidate in terminal_candidates
+                if str(candidate.get("completion_summary", "")).strip()
+                and str(candidate.get("final_response_draft", "")).strip()
+            ),
+            None,
         )
-        task.task_local_state["completion_evidence_refs"] = tuple(
-            observation.get("observation_id")
-            for observation in task.tool_trace
-            if isinstance(observation, Mapping)
-            and isinstance(observation.get("observation_id"), str)
+        if submitted is not None:
+            task.task_local_state["completion_summary"] = submitted[
+                "completion_summary"
+            ]
+            task.task_local_state["draft_final_response"] = submitted[
+                "final_response_draft"
+            ]
+            task.task_local_state["completion_evidence_refs"] = tuple(
+                submitted.get("evidence_refs", ())
+            )
+            self._finalize_candidate(creation)
+            return
+        task.task_local_state["plan_execution_complete"] = True
+        task.task_local_state["pending_reasoning"] = {
+            "purpose": "execution",
+            "reason": "plan_graph_completed_without_submit_result",
+        }
+        task.task_local_state.pop("current_decision", None)
+        self._trace_task(
+            task,
+            "reasoning.execution_decision",
+            "scheduled_after_plan",
+            {"plan_version": task.graph.definition.version},
         )
-        task.completion = self._build_completion(creation)
-        task.task_local_state["draft_final_response"] = (
-            task.completion.user_visible_output.final_response
-        )
-        self._verify_candidate(creation)
 
     def _finalize_candidate(self, creation: TaskCreationResult) -> bool:
         task = creation.task
-        task.task_local_state["pending_reasoning"] = {"purpose": "draft_response"}
+        task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
         self._persist(task)
         task.completion = self._build_completion(creation)
-        task.task_local_state["draft_final_response"] = (
-            task.completion.user_visible_output.final_response
-        )
         self._trace_task(
             task,
-            "reasoning.draft_response",
-            "generated",
+            "reasoning.submit_result",
+            "candidate_persisted",
             {
                 "response_length": len(
                     task.task_local_state["draft_final_response"]
@@ -1340,6 +1358,24 @@ class TaskRuntime:
             "started",
             {"round": verification_round},
         )
+        if task.intent is not None and not task.intent.minimum_acceptance_criteria:
+            verdict = VerificationVerdict(
+                goal_state=TaskGoalState.ACHIEVED,
+                criterion_results=(),
+                deliverable_results=(),
+                draft_quality_issues=(),
+                recoverable=False,
+                feedback_for_execution="",
+                public_summary=(
+                    "No minimum acceptance criteria were required; the submitted "
+                    "response passed deterministic verification."
+                ),
+            )
+            return self._commit_verification_verdict(
+                creation,
+                verdict,
+                verification_round,
+            )
         verifier = self.verification_agent
         if verifier is None:
             subagent, _ = self._execution_components()
@@ -1438,6 +1474,19 @@ class TaskRuntime:
             )
             self._persist(task)
             return False
+        return self._commit_verification_verdict(
+            creation,
+            verdict,
+            verification_round,
+        )
+
+    def _commit_verification_verdict(
+        self,
+        creation: TaskCreationResult,
+        verdict: VerificationVerdict,
+        verification_round: int,
+    ) -> bool:
+        task = creation.task
         results = tuple(task.task_local_state.get("verification_results", ()))
         task.task_local_state["verification_results"] = (
             *results,
@@ -1449,7 +1498,8 @@ class TaskRuntime:
             "verdict",
             verdict.to_dict(),
         )
-        if verdict.recoverable and verification_round < self.max_verification_rounds:
+        requires_revision = verdict.recoverable or bool(verdict.draft_quality_issues)
+        if requires_revision and verification_round < self.max_verification_rounds:
             task.tool_trace += ({
                 "observation_id": (
                     f"{task.task_id}:verification_feedback:{verification_round}"
@@ -1465,6 +1515,7 @@ class TaskRuntime:
             task.completion = None
             task.task_local_state.pop("draft_final_response", None)
             task.task_local_state.pop("completion_summary", None)
+            task.task_local_state.pop("completion_evidence_refs", None)
             task.task_local_state.pop("verification_in_progress", None)
             task.task_local_state["pending_reasoning"] = {"purpose": "execution"}
             self._trace_task(
@@ -1474,6 +1525,32 @@ class TaskRuntime:
                 {
                     "round": verification_round,
                     "feedback": verdict.feedback_for_execution,
+                },
+            )
+            self._persist(task)
+            return False
+        if verdict.draft_quality_issues:
+            task.completion = None
+            task.failure = {
+                "code": "unverified_response_draft",
+                "message": (
+                    "The candidate response remained unsafe or inconsistent "
+                    "after the verification budget was exhausted."
+                ),
+                "draft_quality_issues": verdict.draft_quality_issues,
+            }
+            task.failure_reason = task.failure["message"]
+            task.task_local_state.pop("verification_in_progress", None)
+            task.task_local_state.pop("pending_reasoning", None)
+            task.transition_to(TaskState.FAILED)
+            task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
+            self._trace_task(
+                task,
+                "reasoning.verification",
+                "draft_rejected",
+                {
+                    "round": verification_round,
+                    "issues": verdict.draft_quality_issues,
                 },
             )
             self._persist(task)
@@ -1533,6 +1610,7 @@ class TaskRuntime:
                     "state": "succeeded",
                     "wave_id": wave_id,
                     "completion_summary": decision.completion_summary,
+                    "final_response_draft": decision.final_response_draft,
                     "evidence_refs": decision.evidence_refs,
                     "observations": local.tool_trace[start_trace_len:],
                 }
@@ -1855,26 +1933,11 @@ class TaskRuntime:
             )
             for entry in session.tool_trace
         )
-        self._trace_task(
-            session,
-            "reasoning.final_response",
-            "started",
-            {"tool_result_count": len(tool_results)},
-        )
-        final_response, final_response_prompt_text = self._generate_final_response(
-            creation,
-            tool_results,
-        )
-        self._trace_task(
-            session,
-            "reasoning.final_response",
-            "completed",
-            {
-                "response_length": len(final_response),
-                "prompt_text": final_response_prompt_text,
-                "final_response": final_response,
-            },
-        )
+        final_response = str(
+            session.task_local_state.get("draft_final_response", "")
+        ).strip()
+        if not final_response:
+            raise RuntimeError("SUBMIT_RESULT requires a persisted final response draft")
         output = UserVisibleAgentOutput(
             process={
                 "task_goal": session.handoff.task_goal,
@@ -1891,7 +1954,7 @@ class TaskRuntime:
                     "execution_decision_prompt_text",
                     "",
                 ),
-                "final_response_prompt_text": final_response_prompt_text,
+                "final_response_prompt_text": "",
                 "verification_prompt_text": session.task_local_state.get(
                     "verification_prompt_text",
                     "",
@@ -1902,100 +1965,10 @@ class TaskRuntime:
         )
         return TaskCompletionPackage(
             context=creation.context,
-            summary=f"Completed task: {session.handoff.task_goal}",
+            summary=str(session.task_local_state.get("completion_summary", "")),
             user_visible_output=output,
             tool_results=tool_results,
         )
-
-    def _generate_final_response(
-        self,
-        creation: TaskCreationResult,
-        tool_results: tuple[ToolResult, ...],
-    ) -> tuple[str, str]:
-        session = creation.task
-        handoff = session.handoff
-        trigger_payload = handoff.trigger_event.payload
-        user_input = trigger_payload.get("text", "")
-        if not isinstance(user_input, str):
-            user_input = str(user_input)
-
-        if self.final_response_generator is None:
-            return (
-                self._default_final_response(
-                    task_goal=handoff.task_goal,
-                    tool_results=tool_results,
-                ),
-                "",
-            )
-
-        result = self.final_response_generator.generate(
-            trace_id=creation.context.trace_id,
-            user_input=user_input,
-            task_goal=handoff.task_goal,
-            task_constraints=handoff.constraints,
-            completion_criteria=handoff.completion_criteria,
-            tool_results=tool_results,
-            user_preference_summary=handoff.user_preference_summary,
-            environment_summary=handoff.environment_summary,
-            memory_context=self._memory_context(),
-            execution_failures=self._execution_failures(session),
-            completion_summary=str(
-                session.task_local_state.get("completion_summary", "")
-            ),
-            evidence_refs=tuple(
-                session.task_local_state.get("completion_evidence_refs", ())
-            ),
-        )
-        prompt_text = result.prompt_trace.get("prompt_text", "")
-        return result.final_response, (
-            prompt_text if isinstance(prompt_text, str) else str(prompt_text)
-        )
-
-    @staticmethod
-    def _execution_failures(
-        session: Task,
-    ) -> tuple[ToolFailureObservation, ...]:
-        historical = tuple(
-            failure
-            for step in session.step_history
-            for failure in step.failures
-        )
-        return (*historical, *session.current_step.failures)
-
-    def _memory_context(self) -> str:
-        query = getattr(self._memory_manager, "query", None)
-        if query is None:
-            return ""
-        try:
-            result = query()
-        except Exception:
-            return ""
-        content = getattr(result, "content", "")
-        if not isinstance(content, str):
-            return str(content)
-        return content
-
-    @staticmethod
-    def _default_final_response(
-        *,
-        task_goal: str,
-        tool_results: tuple[ToolResult, ...],
-    ) -> str:
-        if tool_results:
-            summaries = []
-            for result in tool_results:
-                summary = result.payload.get("summary") or result.payload.get(
-                    "scene_summary"
-                )
-                if isinstance(summary, str) and summary.strip():
-                    summaries.append(f"{result.tool_name}: {summary.strip()}")
-                else:
-                    summaries.append(result.tool_name)
-            return (
-                "我已经根据当前信息完成了检查："
-                f"{'; '.join(summaries)}。任务目标是：{task_goal}"
-            )
-        return f"我已经根据当前信息完成了任务。任务目标是：{task_goal}"
 
     def _result(
         self,

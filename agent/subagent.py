@@ -145,6 +145,19 @@ class SubAgent:
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": observations,
+                    "plan": (
+                        None
+                        if task.graph is None
+                        else {
+                            "version": task.graph.definition.version,
+                            "node_runs": task.graph.node_runs,
+                            "execution_complete": bool(
+                                task.task_local_state.get(
+                                    "plan_execution_complete", False
+                                )
+                            ),
+                        }
+                    ),
                     "current_step": self._step_context(task),
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"
@@ -334,6 +347,7 @@ class SubAgent:
             decision_reason = f"Model selected {action or 'an unspecified action'}."
         if action == SUBMIT_RESULT:
             summary = payload.get("completion_summary")
+            draft = payload.get("final_response_draft")
             refs = payload.get("evidence_refs", ())
             if not isinstance(refs, (list, tuple)):
                 raise DecisionValidationError("evidence_refs must be an array")
@@ -347,6 +361,7 @@ class SubAgent:
                 decision_reason,
                 summary,
                 tuple(refs),
+                draft,
             )
         if action != CALL_TOOL:
             raise DecisionValidationError(f"unsupported action: {action}")
@@ -373,6 +388,7 @@ class SubAgent:
                 "Available observations support a final response.",
                 "Use the available observations to answer the user honestly.",
                 refs,
+                "I completed the request as far as the available observations allow.",
             )
         return ExecutionDecision(
             SUBMIT_RESULT,
@@ -381,4 +397,5 @@ class SubAgent:
             "The request can be answered without a capability call.",
             "Respond directly to the user's request.",
             (),
+            "I can answer this request directly without an external capability.",
         )

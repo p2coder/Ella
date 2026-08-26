@@ -33,6 +33,7 @@ class CapturingProvider:
                     "tool_input": None,
                     "decision_reason": "No Tool is required.",
                     "completion_summary": "Answer directly.",
+                    "final_response_draft": "Here is a direct answer.",
                     "evidence_refs": [],
                 },
             },
@@ -72,5 +73,11 @@ def test_first_decision_prompt_contains_exact_action_contract_and_repair() -> No
 
     assert decision.action.decision_reason == "No Tool is required."
     assert '"decision_reason":"<non-empty reason>"' in provider.prompt
+    assert '"goal":"<one concrete outcome>"' in provider.prompt
+    assert "use [] when none apply" in provider.prompt
+    assert "never emit blank strings or placeholder entries" in provider.prompt
+    assert "not an execution plan" in provider.prompt
+    assert "set minimum_acceptance_criteria to []" in provider.prompt
+    assert '"final_response_draft":"<complete user-facing answer>"' in provider.prompt
     assert "decision_reason is required" in provider.prompt
     assert "retry_index" in provider.prompt

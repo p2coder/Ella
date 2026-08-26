@@ -29,8 +29,7 @@ Ella 必须分别回答两个问题：
 -> Task 入队（goal=None）
 -> First Decision：识别意图并选择第一个 Action
 -> Decide -> Act -> Observe
--> SUBMIT_RESULT
--> 生成回答草稿
+-> SUBMIT_RESULT（同时提交任务摘要与用户回答草稿）
 -> VerificationAgent 验证目标与回答
 -> COMPLETED 或 FAILED
 -> DELIVERED
@@ -59,7 +58,7 @@ Ella 必须分别回答两个问题：
 
 ### 3.3 完成前必须验证
 
-模型输出 `SUBMIT_RESULT` 只表示提交候选结果，不表示任务完成。Runtime 必须先生成实际回答草稿，再由 VerificationAgent 检查目标、产物、证据和回答质量。
+模型输出 `SUBMIT_RESULT` 只表示提交候选结果，不表示任务完成。`SUBMIT_RESULT` 必须同时包含内部任务摘要和实际用户回答草稿。Runtime 不得在其后调用独立 FinalResponseGenerator 再次生成回答；它必须把模型提交的原始草稿交给 VerificationAgent 检查目标、产物、证据和回答质量。
 
 ### 3.4 流程失败与目标未达到分离
 
@@ -118,6 +117,9 @@ minimum_acceptance_criteria
 - `deliverables` 描述应交付的结果或产物。
 - `minimum_acceptance_criteria` 只描述“什么事实成立才算达到目标”。
 - 验收条件必须是声明式条件，不包含 checker 名、Tool 名或具体执行方案。
+- `constraints` 和 `minimum_acceptance_criteria` 均允许为空数组；模型不得为了填充字段而虚构限制或验收条件。
+- 上述数组非空时，每个元素必须是非空字符串，不得包含空字符串或占位项。
+- 简单问候或无需外部事实验证的直接回答应使用最小 Intent。
 - Replan 只能修改 Plan，不得修改 Intent。
 - 如果用户提出新的目标，应创建新 Task 或走后续明确设计的意图变更流程，不得暗中覆盖原 Intent。
 
@@ -210,7 +212,7 @@ NOT_ACHIEVED
 
 禁止用 `PARTIALLY_ACHIEVED` 表示“不确定”“执行出错”或“无法判断”。
 
-GoalState 由 VerificationAgent 提议，由 Runtime 校验并提交。SubAgent、FinalResponseGenerator 和 Tool 均不得直接写入。
+GoalState 由 VerificationAgent 提议，由 Runtime 校验并提交。SubAgent 和 Tool 均不得直接写入。
 
 ## 8. First Decision
 
@@ -303,10 +305,27 @@ Decision
 
 ### 9.2 SUBMIT_RESULT
 
-`SUBMIT_RESULT` 表示模型认为已有信息足以提交候选结果。Runtime 随后必须：
+`SUBMIT_RESULT` 表示模型认为已有信息足以提交候选结果。动作协议必须包含：
 
-1. 生成实际回答草稿；
-2. 进入验证推理；
+```text
+action = SUBMIT_RESULT
+completion_summary = 非空内部任务摘要
+final_response_draft = 非空用户可见候选回答
+evidence_refs = 与当前 observations 对应的证据引用，可为空
+decision_reason = 非空决策原因
+```
+
+其中：
+
+- `completion_summary` 用于 Task 内部摘要、Trace 和 Memory，不直接作为用户回答。
+- `final_response_draft` 必须已经是可以交给用户阅读的完整候选回答，不得只写“稍后生成”“正在处理”或未来承诺。
+- `evidence_refs` 必须引用已经存在的 observation，不得伪造。
+- 缺少 `final_response_draft`、草稿为空或字段类型非法均属于动作协议错误，按 decision repair 预算处理。
+
+Runtime 收到合法 `SUBMIT_RESULT` 后必须：
+
+1. 原子持久化 `completion_summary`、`final_response_draft`、`evidence_refs` 和 pending verification；
+2. 进入 Verification；
 3. 根据验证结果完成、返回执行或流程失败。
 
 `SUBMIT_RESULT` 不得直接将 Task 标记为 `COMPLETED`。
@@ -318,13 +337,19 @@ Decision
 - 新版本迁移旧版本中仍有效的未完成节点。
 - `plan_update` 只更新节点进度和完成情况，不负责改变图结构。
 - 如果执行中发现原计划不可行，模型应调用计划修改能力；这本身是一个正常 Step，而不是 `REPLAN` 状态或动作。
-- Task Graph 的 terminal 表示当前目标是否有任一路径达到；任一合法路径达到 terminal 即可进入候选结果阶段。
+- Task Graph 的 terminal 表示当前目标是否有任一路径达到；任一合法路径达到 terminal 即可结束当前图执行。
+- 如果 Plan 执行期间模型已经输出合法 `SUBMIT_RESULT`，Runtime 立即进入 Verification，不再安排额外汇总推理。
+- 如果 Plan Graph 已明确结束，且仍没有合法 `SUBMIT_RESULT`，Runtime 必须自动安排一次普通 `REASONING`。该推理接收完整 Plan 状态、节点结果、failures 和 observations，并由模型返回 `SUBMIT_RESULT` 或继续选择合法 Action。
+- “Plan Graph 已明确结束”是自动安排上述 Reasoning 的唯一条件。不得因为单个节点完成、当前 ready node 暂时为空或一次 Tool 返回就推断整个 Plan 已结束。
+- 非 Plan 的 React 任务没有预定节点集合和 terminal node。每次 Tool 完成后只产生 observation 并回到普通 Reasoning；Runtime 不得应用 Plan Graph 的自动汇总规则。
+- React 任务是否继续调用 Tool 或提交结果，只由下一次模型决策决定。
+- 流程失败、Tool 失败或 Plan 无可用路径时，失败信息作为结构化 observation 进入同一 Reasoning 链。如果尚未产生 `SUBMIT_RESULT`，模型必须基于这些事实形成诚实结果；不得增加独立 Failure Response 流程。
 
-## 11. 草稿生成
+## 11. 候选结果与回答草稿
 
-收到 `SUBMIT_RESULT` 后，FinalResponseGenerator 生成真正准备交付用户的 `draft_final_response`。
+`SUBMIT_RESULT.final_response_draft` 是 Verification 和最终交付使用的唯一候选回答来源。Runtime 不再拥有独立 FinalResponseGenerator，也不得在 Verification 前后对已提交草稿进行一次无条件 LLM 改写。
 
-草稿上下文至少包含：
+模型生成 `SUBMIT_RESULT` 时可见上下文至少包含：
 
 - 原始用户输入；
 - TaskIntent；
@@ -335,6 +360,8 @@ Decision
 - 当前 Memory 摘要（如适用）。
 
 草稿不得先发送给用户。验证对象必须是实际草稿，而不是一句候选摘要。
+
+Verification 通过后，Runtime 直接交付被验证的 `final_response_draft`。仅当 LLM 边界完全不可用且无法形成合法 `SUBMIT_RESULT` 时，Runtime 才可使用 deterministic failure fallback；fallback 必须如实说明流程失败，不得声称任务目标已经完成。
 
 ## 12. VerificationAgent
 
@@ -390,10 +417,14 @@ public_summary
 
 ### 12.4 验证轮数
 
-- 每个 Task 至少验证一次。
+- 每个 Task 都必须经过 Verification 边界。
+- 如果 `minimum_acceptance_criteria` 为空，Verification 直接通过，不调用 LLM，也不调用验证 Tool；Runtime 将 GoalState 设为 `ACHIEVED` 并交付原始 `final_response_draft`。
+- 非空验收标准必须进入 VerificationAgent 判断；不得因为任务看起来简单而绕过。
 - 最多 2 个 verification round。
 - 如果问题可修复且预算未耗尽：丢弃旧草稿，将验证反馈作为 observation，回到 `REASONING`。
-- 如果问题不可修复或预算耗尽：使用诚实草稿完成，GoalState 为 `PARTIALLY_ACHIEVED` 或 `NOT_ACHIEVED`。
+- 如果问题不可修复，但现有草稿真实、明确说明未达到或部分达到：使用该草稿完成，GoalState 为 `PARTIALLY_ACHIEVED` 或 `NOT_ACHIEVED`。
+- 如果问题不可修复且草稿包含虚假完成声明、与产物矛盾或不能安全交付：返回一次受预算限制的普通 `REASONING`，把 verdict 作为 observation，要求模型生成诚实的 `SUBMIT_RESULT`，然后重新验证。
+- 所有 Verification 返回执行的路径都受 verification round 和 Runtime 总迭代预算约束，不得无限循环。
 - 验证 Provider 连续失败属于 Runtime 流程失败：`FAILED + NOT_ACHIEVED`。
 
 ## 13. 验证工具
@@ -450,7 +481,6 @@ ask_user_question
 pending_reasoning.purpose:
 - first_decision
 - execution
-- draft_response
 - verification
 
 pending_tool.purpose:
@@ -538,7 +568,7 @@ Trace 必须记录：
 - 每次 Action；
 - Tool 调用、参数、结果引用和 failure；
 - Plan version 和 node 状态变化；
-- 回答草稿生成；
+- SUBMIT_RESULT 中的任务摘要、回答草稿和证据引用；
 - Verification decision、Tool 和 verdict；
 - ExecutionState 与 GoalState 的每次变化；
 - checkpoint sequence 和恢复来源；
@@ -555,7 +585,6 @@ input_to_task_submitted
 queue_wait
 llm:first_decision
 llm:execution_decision
-llm:draft_response
 llm:verification_decision
 tool:<tool_name>
 verification_total
@@ -632,7 +661,8 @@ Terminal Execution State（DELIVERED 时）
 
 ### PR 4：回答草稿与 VerificationAgent
 
-- SUBMIT_RESULT 后生成实际草稿。
+- SUBMIT_RESULT 同时生成 completion_summary 和 final_response_draft。
+- 删除独立 FinalResponseGenerator 及 FINAL_RESPONSE LLM 调用。
 - 新增 VerificationAgent、VERIFICATION_DECISION 和 verdict。
 - Runtime 提交 GoalState。
 
@@ -664,8 +694,12 @@ Terminal Execution State（DELIVERED 时）
 - 复杂任务通过 plan_written 创建计划。
 - Replan 不修改 Intent。
 - SUBMIT_RESULT 不直接进入 COMPLETED。
-- 实际回答草稿进入验证上下文。
-- 无机械检查需求时仍执行回答质量验证。
+- SUBMIT_RESULT 缺少非空 final_response_draft 时进入 decision repair。
+- Plan Graph 结束但尚未 SUBMIT_RESULT 时只自动安排一次普通 Reasoning。
+- React Tool 完成不会触发 Plan Graph 的自动汇总规则。
+- 实际回答草稿进入验证上下文，Verification 通过后不再次生成回答。
+- minimum_acceptance_criteria 为空时 Verification 确定性直接通过且不调用 LLM。
+- minimum_acceptance_criteria 非空时必须执行 VerificationAgent 判断。
 - VerificationAgent 只能调用白名单只读工具。
 - 验证失败可返回执行，最多 2 轮。
 - GoalState 只有三种终值，活跃期为 None。
@@ -685,8 +719,11 @@ Terminal Execution State（DELIVERED 时）
 - 第一次决策同时识别意图并选择 Action。
 - 规划通过内部 capability 完成，不再依赖 strategy mode。
 - Runtime 状态和目标状态职责完全分离。
-- 模型提交候选结果后必须先生成草稿并完成验证。
+- 模型通过 SUBMIT_RESULT 同时提交摘要与完整回答草稿。
+- 生产链路中不存在独立 FinalResponseGenerator 或无条件 FINAL_RESPONSE LLM 调用。
+- Plan 与 React 的结束判定严格分离，不会把 React 的单次 Tool 完成误判为任务结束。
+- 所有任务都经过 Verification 边界；空验收标准确定性通过，非空验收标准由 VerificationAgent 判断。
 - 机械验证由模型选择只读验证工具完成。
-- 无机械检查的任务仍验证回答质量。
+- Verification 通过后直接交付已验证草稿。
 - Runtime 能从最新 checkpoint 按真实执行阶段恢复。
 - 用户看到的最终状态能区分流程结果、目标达成和交付结果。

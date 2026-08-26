@@ -808,7 +808,7 @@
     function updateTask(task) {
       if (!task || !task.task_id) return;
       taskCache.set(task.task_id, task);
-      updateDisplayedTaskTiming(task);
+      updateDisplayedTask(task);
       const terminalStates = new Set([
         "completed", "failed", "uncertain", "killed", "delivered",
       ]);
@@ -822,13 +822,40 @@
       bindTaskButtons();
     }
 
-    function updateDisplayedTaskTiming(task) {
+    function updateDisplayedTask(task) {
       const board = document.querySelector(".task-state-board[data-task-id]");
       if (!board || board.dataset.taskId !== task.task_id) return;
+      board.dataset.taskState = task.state || "";
+      const stateValue = board.querySelector(".task-state-value");
+      if (stateValue) stateValue.textContent = task.state || "No task submitted";
+      const pause = board.querySelector('[data-task-action="pause"]');
+      const resume = board.querySelector('[data-task-action="resume"]');
+      const kill = board.querySelector('[data-task-action="kill"]');
+      if (pause) {
+        pause.disabled = ![
+          "ready", "reasoning", "tool_execution",
+        ].includes(task.state);
+      }
+      if (resume) resume.disabled = task.state !== "paused";
+      if (kill) {
+        kill.disabled = [
+          "completed", "failed", "uncertain", "killed", "delivered",
+          "pause_requested", "kill_requested",
+        ].includes(task.state);
+      }
       const timing = document.getElementById("timing-summary");
       if (!timing) return;
       const display = task.display_snapshot || {};
       timing.textContent = task.timing_summary || display.timing_summary || "";
+    }
+
+    async function refreshDisplayedTask(task) {
+      const board = document.querySelector(".task-state-board[data-task-id]");
+      if (!board || board.dataset.taskId !== task.task_id) return;
+      const response = await fetch(
+        `/task?task_id=${encodeURIComponent(task.task_id)}`,
+      );
+      if (response.ok) await replacePage(response);
     }
 
     let taskEventSource = null;
@@ -849,7 +876,11 @@
         .forEach((eventName) => {
           taskEventSource.addEventListener(eventName, (event) => {
             const message = JSON.parse(event.data);
-            updateTask(message.payload ? message.payload.task : null);
+            const task = message.payload ? message.payload.task : null;
+            updateTask(task);
+            if (eventName === "task_terminal" && task) {
+              refreshDisplayedTask(task).catch(() => {});
+            }
           });
         });
     }
