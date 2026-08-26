@@ -10,6 +10,7 @@ from prompts.engine import PromptEngine, PromptType
 from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
+from runtime.provider_usage import record_provider_usage
 from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
 from tasks.task import Task, TaskIntent
@@ -78,6 +79,13 @@ class SubAgent:
             self._record_boundary_timing(
                 context, "first_decision", started, False, None
             )
+            record_provider_usage(
+                task.task_local_state,
+                boundary="first_decision",
+                provider=self.llm_provider,
+                result=None,
+                success=False,
+            )
             raise
         self._record_boundary_timing(
             context,
@@ -86,8 +94,13 @@ class SubAgent:
             not result.failed,
             result,
         )
-        if isinstance(result.metadata.get("usage"), dict):
-            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
+        record_provider_usage(
+            task.task_local_state,
+            boundary="first_decision",
+            provider=self.llm_provider,
+            result=result,
+            success=not result.failed,
+        )
         if result.failed:
             raise DecisionValidationError("first decision provider failed")
         try:
@@ -201,6 +214,13 @@ class SubAgent:
             )
         except Exception:
             self._record_llm_timing(context, started, False, None)
+            record_provider_usage(
+                task.task_local_state,
+                boundary="execution_decision",
+                provider=self.llm_provider,
+                result=None,
+                success=False,
+            )
             raise
         self._record_llm_timing(
             context,
@@ -208,8 +228,13 @@ class SubAgent:
             not result.failed,
             result,
         )
-        if isinstance(result.metadata.get("usage"), dict):
-            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
+        record_provider_usage(
+            task.task_local_state,
+            boundary="execution_decision",
+            provider=self.llm_provider,
+            result=result,
+            success=not result.failed,
+        )
         if result.failed:
             raise DecisionValidationError("execution decision provider failed")
         try:

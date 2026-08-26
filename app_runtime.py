@@ -25,6 +25,7 @@ from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.plan_store import PlanStore
+from runtime.provider_usage import aggregate_provider_usage
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.task_queue import TaskQueue
 from runtime.task_store import TaskStore
@@ -606,7 +607,14 @@ def _current_model_output(task) -> str:
 
 
 def _usage_projection(task) -> dict[str, object]:
-    """Normalize token usage if an OpenAI-compatible provider preserved it."""
+    """Aggregate real text usage, falling back to the latest legacy payload."""
+    calls = task.task_local_state.get("provider_usage_calls")
+    aggregate = aggregate_provider_usage(calls, modality="text")
+    if aggregate is not None:
+        return {
+            **aggregate,
+            "provider_usage_calls": _public_value(calls),
+        }
     usage = task.task_local_state.get("usage")
     if not isinstance(usage, Mapping):
         usage = task.task_local_state.get("provider_usage")
@@ -617,6 +625,7 @@ def _usage_projection(task) -> dict[str, object]:
             "completion_tokens": None,
             "cached_tokens": None,
             "cache_hit_rate": None,
+            "provider_usage_calls": _public_value(calls or ()),
         }
     prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
     completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
@@ -631,6 +640,7 @@ def _usage_projection(task) -> dict[str, object]:
         "completion_tokens": completion,
         "cached_tokens": cached,
         "cache_hit_rate": round(cached / prompt * 100, 1) if prompt else None,
+        "provider_usage_calls": _public_value(calls or ()),
     }
 
 

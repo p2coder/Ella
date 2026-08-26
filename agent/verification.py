@@ -7,6 +7,7 @@ from prompts.engine import PromptEngine, PromptType
 from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
+from runtime.provider_usage import record_provider_usage
 from tasks.task import Task, TaskGoalState
 from tools.base import ToolDefinition
 
@@ -111,10 +112,22 @@ class VerificationAgent:
             )
         except Exception:
             self._record_timing(task, started, False, None)
+            record_provider_usage(
+                task.task_local_state,
+                boundary="verification_decision",
+                provider=self.llm_provider,
+                result=None,
+                success=False,
+            )
             raise
         self._record_timing(task, started, not result.failed, result)
-        if isinstance(result.metadata.get("usage"), dict):
-            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
+        record_provider_usage(
+            task.task_local_state,
+            boundary="verification_decision",
+            provider=self.llm_provider,
+            result=result,
+            success=not result.failed,
+        )
         if result.failed:
             raise VerificationDecisionError("verification provider failed")
         try:

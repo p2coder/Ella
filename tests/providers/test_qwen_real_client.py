@@ -57,6 +57,27 @@ def test_real_llm_transport_calls_dashscope_and_normalizes_text():
     assert "sk-secret" not in repr(result)
 
 
+def test_qwen_provider_preserves_usage_returned_by_transport():
+    provider = QwenLLMProvider(
+        api_key="sk-secret",
+        model_name="qwen-plus",
+        client=lambda payload: {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 42,
+                "completion_tokens": 3,
+                "total_tokens": 45,
+                "prompt_tokens_details": {"cached_tokens": 21},
+            },
+        },
+    )
+
+    result = provider.generate("hello")
+
+    assert result.metadata["usage"]["prompt_tokens"] == 42
+    assert result.metadata["usage"]["prompt_tokens_details"]["cached_tokens"] == 21
+
+
 def test_provider_repr_never_exposes_api_key():
     provider = QwenLLMProvider(
         api_key="sk-do-not-log",
