@@ -33,6 +33,7 @@ class FirstDecisionProvider:
                     "action": "SUBMIT_RESULT",
                     "decision_reason": "No external capability is needed.",
                     "completion_summary": "Reply with a greeting.",
+                    "final_response_draft": "你好，很高兴见到你。",
                     "evidence_refs": [],
                 },
             },

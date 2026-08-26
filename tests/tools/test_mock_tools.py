@@ -13,7 +13,6 @@ def make_context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-tools",
         task_id="task-tools",
         trace_id="trace-tools",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
@@ -39,7 +38,6 @@ def test_mock_weather_tool_returns_deterministic_tool_result():
     assert result == ToolResult(
         tool_name="mock_weather",
         task_id="task-tools",
-        session_id="session-tools",
         trace_id="trace-tools",
         payload={
             "summary": "Light rain is possible later today.",

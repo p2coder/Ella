@@ -14,7 +14,6 @@ def make_context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-camera",
         task_id="task-camera",
         trace_id="trace-camera",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
@@ -37,7 +36,6 @@ def test_camera_scene_tool_captures_bounded_frames_with_max_frames():
     assert isinstance(result, ToolResult)
     assert result.tool_name == "camera_scene"
     assert result.task_id == "task-camera"
-    assert result.session_id == "session-camera"
     assert result.trace_id == "trace-camera"
     assert camera.capture_count == 2
 
@@ -65,7 +63,6 @@ def test_multimodal_provider_called_with_captured_frames():
                 {"type": "image", "frame": "frame-3"},
             ),
             "task_id": "task-camera",
-            "session_id": "session-camera",
             "handoff_goal": (
                 "Give the user a short, necessary reminder before leaving."
             ),

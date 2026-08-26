@@ -17,6 +17,7 @@ class ExecutionDecision:
     decision_reason: str
     completion_summary: str | None = None
     evidence_refs: tuple[str, ...] = ()
+    final_response_draft: str | None = None
 
     def __post_init__(self) -> None:
         if self.action not in SUPPORTED_EXECUTION_ACTIONS:
@@ -29,7 +30,11 @@ class ExecutionDecision:
         if self.action == CALL_TOOL:
             if not self.tool_name:
                 raise ValueError("CALL_TOOL requires tool_name")
-            if self.completion_summary is not None or self.evidence_refs:
+            if (
+                self.completion_summary is not None
+                or self.evidence_refs
+                or self.final_response_draft is not None
+            ):
                 raise ValueError("CALL_TOOL must not include completion fields")
             return
         if self.tool_name is not None:
@@ -38,6 +43,11 @@ class ExecutionDecision:
             raise ValueError("SUBMIT_RESULT must not include tool_input")
         if not isinstance(self.completion_summary, str) or not self.completion_summary.strip():
             raise ValueError("SUBMIT_RESULT requires completion_summary")
+        if (
+            not isinstance(self.final_response_draft, str)
+            or not self.final_response_draft.strip()
+        ):
+            raise ValueError("SUBMIT_RESULT requires final_response_draft")
         if any(not isinstance(ref, str) or not ref.strip() for ref in self.evidence_refs):
             raise ValueError("evidence_refs must contain non-empty strings")
 
@@ -53,6 +63,7 @@ class ExecutionDecision:
             "decision_reason": self.decision_reason,
             "completion_summary": self.completion_summary,
             "evidence_refs": self.evidence_refs,
+            "final_response_draft": self.final_response_draft,
         }
 
     @classmethod
@@ -70,6 +81,7 @@ class ExecutionDecision:
             decision_reason=str(value.get("decision_reason", "")),
             completion_summary=value.get("completion_summary"),
             evidence_refs=tuple(evidence_refs),
+            final_response_draft=value.get("final_response_draft"),
         )
 
 

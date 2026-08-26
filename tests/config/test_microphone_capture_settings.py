@@ -16,13 +16,13 @@ def test_default_microphone_capture_settings_are_bounded_and_speech_safe():
 
 
 def test_microphone_capture_settings_load_from_user_config(monkeypatch):
-    monkeypatch.setattr(user_config, "MIC_CAPTURE_DURATION_SECONDS", 8)
+    monkeypatch.setattr(user_config, "MIC_CAPTURE_DURATION_SECONDS", 4)
     monkeypatch.setattr(user_config, "MIC_SAMPLE_RATE", 48_000)
     monkeypatch.setattr(user_config, "MIC_CHANNELS", 2)
 
     settings = load_settings()
 
-    assert settings.mic_capture_duration_seconds == 8
+    assert settings.mic_capture_duration_seconds == 4
     assert settings.mic_sample_rate == 48_000
     assert settings.mic_channels == 2
 
@@ -30,7 +30,7 @@ def test_microphone_capture_settings_load_from_user_config(monkeypatch):
 def test_microphone_capture_environment_variables_are_ignored(
     monkeypatch,
 ):
-    monkeypatch.setattr(user_config, "MIC_CAPTURE_DURATION_SECONDS", 6)
+    monkeypatch.setattr(user_config, "MIC_CAPTURE_DURATION_SECONDS", 5)
     monkeypatch.setattr(user_config, "MIC_SAMPLE_RATE", 16_000)
     monkeypatch.setattr(user_config, "MIC_CHANNELS", 1)
     monkeypatch.setenv("ELLA_MIC_CAPTURE_DURATION_SECONDS", "12")
@@ -39,7 +39,7 @@ def test_microphone_capture_environment_variables_are_ignored(
 
     settings = load_settings()
 
-    assert settings.mic_capture_duration_seconds == 6
+    assert settings.mic_capture_duration_seconds == 5
     assert settings.mic_sample_rate == 16_000
     assert settings.mic_channels == 1
 

@@ -42,6 +42,7 @@ def test_tool_definition_construction_and_serialization() -> None:
             "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
+        "capability_kind": "external",
     }
 
 
@@ -153,7 +154,6 @@ def test_existing_tool_result_construction_still_works() -> None:
     result = ToolResult(
         tool_name="mock_weather",
         task_id="task-1",
-        session_id="session-1",
         trace_id="trace-1",
         payload={"summary": "Light rain is possible later today."},
     )
@@ -161,7 +161,6 @@ def test_existing_tool_result_construction_still_works() -> None:
     assert result.to_dict() == {
         "tool_name": "mock_weather",
         "task_id": "task-1",
-        "session_id": "session-1",
         "trace_id": "trace-1",
         "payload": {"summary": "Light rain is possible later today."},
     }

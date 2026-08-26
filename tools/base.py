@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-import inspect
 from typing import Any, Protocol, Sequence
-import warnings
 
 from agent.context import AgentExecutionContext
 
@@ -101,29 +99,12 @@ class EffectiveToolExecutionMetadata:
     overridden_fields: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class ToolResult:
     tool_name: str
     task_id: str
     trace_id: str
     payload: dict[str, Any]
-
-    def __init__(
-        self,
-        tool_name: str,
-        task_id: str,
-        trace_id: str,
-        payload: dict[str, Any],
-        session_id: str | None = None,
-    ) -> None:
-        object.__setattr__(self, "tool_name", tool_name)
-        object.__setattr__(self, "task_id", task_id)
-        object.__setattr__(self, "trace_id", trace_id)
-        object.__setattr__(self, "payload", payload)
-
-    @property
-    def session_id(self) -> str:
-        return self.task_id
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,27 +125,3 @@ class Tool(Protocol):
         arguments: dict[str, object] | None = None,
     ) -> ToolResult:
         ...
-
-
-def invoke_tool(
-    tool: Tool,
-    context: AgentExecutionContext,
-    arguments: dict[str, object],
-) -> ToolResult:
-    parameters = inspect.signature(tool.run).parameters.values()
-    supports_arguments = any(
-        parameter.name == "arguments"
-        or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters
-    )
-    if supports_arguments:
-        return tool.run(context=context, arguments=arguments)
-
-    if arguments:
-        warnings.warn(
-            f"tool {tool.name} uses deprecated run(context) and cannot consume "
-            "validated arguments",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    return tool.run(context)

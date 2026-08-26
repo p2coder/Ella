@@ -1,20 +1,16 @@
 from dataclasses import dataclass
 from time import perf_counter
 
-from agent.main_agent import MainAgent
-from agent.handoff import HandoffRequest
 from events import RawSignal, StandardizedEvent
 from events.trigger_pipeline import (
     CliTextToStandardizedEventStage,
     EventTriggerPipeline,
 )
-from providers.llm import LLMProvider
-
 from .event_queue import PresenceQueue
 from .event_router import (
     PRESENCE_QUEUE,
     EventRouteResult,
-    SessionAwareEventRouter,
+    TaskAwareEventRouter,
 )
 from .presence_runtime import PresenceRuntime
 from .task_runtime import TaskHandle, TaskRuntime
@@ -33,11 +29,9 @@ class EventRuntimeResult:
 @dataclass(slots=True, init=False)
 class EventRuntime:
     trigger_pipeline: EventTriggerPipeline
-    event_router: SessionAwareEventRouter
+    event_router: TaskAwareEventRouter
     presence_queue: PresenceQueue
     presence_runtime: PresenceRuntime
-    main_agent: MainAgent
-    llm_provider: LLMProvider | None
     task_runtime: TaskRuntime
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     user_preference_summary: str
@@ -46,11 +40,9 @@ class EventRuntime:
     def __init__(
         self,
         trigger_pipeline: EventTriggerPipeline | None = None,
-        event_router: SessionAwareEventRouter | None = None,
+        event_router: TaskAwareEventRouter | None = None,
         presence_queue: PresenceQueue | None = None,
         presence_runtime: PresenceRuntime | None = None,
-        main_agent: MainAgent | None = None,
-        llm_provider: LLMProvider | None = None,
         task_runtime: TaskRuntime | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         user_preference_summary: str = "No user preference summary provided.",
@@ -71,25 +63,9 @@ class EventRuntime:
         self.trigger_pipeline = trigger_pipeline or EventTriggerPipeline(
             stages=(CliTextToStandardizedEventStage(),),
         )
-        self.event_router = event_router or SessionAwareEventRouter()
+        self.event_router = event_router or TaskAwareEventRouter()
         self.presence_queue = queue
         self.presence_runtime = runtime
-        if main_agent is None:
-            active_agent = MainAgent(
-                llm_provider=llm_provider,
-                timing_recorder=recorder,
-            )
-        else:
-            active_agent = main_agent
-            if (
-                llm_provider is not None
-                and active_agent.llm_provider is not llm_provider
-            ):
-                raise ValueError(
-                    "llm_provider must match the explicitly supplied main_agent"
-                )
-        self.main_agent = active_agent
-        self.llm_provider = active_agent.llm_provider
         self.task_runtime = task_runtime or TaskRuntime()
         self.timing_recorder = recorder
         self.user_preference_summary = user_preference_summary
@@ -155,30 +131,7 @@ class EventRuntime:
                 reason="presence runtime did not allow event",
             )
 
-        create_task = getattr(self.task_runtime, "create_task", None)
-        if not callable(create_task):
-            stage_started = perf_counter()
-            handoff = self.main_agent.create_handoff(
-                trigger_event=event,
-                user_preference_summary=self.user_preference_summary,
-                environment_summary=self.environment_summary,
-            )
-            self.timing_recorder.record_stage_duration(
-                event.trace_id,
-                "task_formulation_duration_ms",
-                stage_started,
-            )
-            task_handle = self.task_runtime.submit(handoff)
-            self.timing_recorder.record_input_to_task_submitted(event.trace_id)
-            return EventRuntimeResult(
-                event=event,
-                route=route,
-                submitted=True,
-                task_handle=task_handle,
-                reason="event submitted to task runtime",
-            )
-
-        task_handle = create_task(
+        task_handle = self.task_runtime.create_task(
             event,
             user_preference_summary=self.user_preference_summary,
             environment_summary=self.environment_summary,

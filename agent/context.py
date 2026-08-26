@@ -44,7 +44,6 @@ class AgentExecutionContext:
         allowed_tools: tuple[str, ...] = (),
         permissions: tuple[str, ...] = (),
         capability_scope: CapabilityScope | None = None,
-        session_id: str | None = None,
     ) -> None:
         if capability_scope is None:
             capability_scope = CapabilityScope(
@@ -72,11 +71,6 @@ class AgentExecutionContext:
     @property
     def allowed_tools(self) -> tuple[str, ...]:
         return self.capability_scope.allowed_tools
-
-    @property
-    def session_id(self) -> str:
-        """Read-only compatibility view; task_id is the sole runtime identity."""
-        return self.task_id
 
     def to_dict(self) -> dict[str, Any]:
         return {

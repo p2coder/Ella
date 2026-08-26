@@ -8,9 +8,7 @@ from .base import (
     Tool,
     ToolDefinition,
     ToolIdempotency,
-    ToolResult,
     ToolUncertainPolicy,
-    invoke_tool,
 )
 
 
@@ -112,25 +110,6 @@ class ToolManager:
             return None
         return tool
 
-    def execute(
-        self,
-        tool_name: str,
-        context: AgentExecutionContext,
-        arguments: dict[str, object] | None = None,
-    ) -> ToolResult:
-        if tool_name not in context.allowed_tools:
-            raise CapabilityUnavailableError(tool_name, "not allowed")
-
-        tool = self.registry.get(tool_name)
-        if tool is None:
-            raise CapabilityUnavailableError(tool_name, "not registered")
-        if context.agent_role not in self._allowed_roles(tool):
-            raise CapabilityUnavailableError(
-                tool_name,
-                f"not visible to agent role {context.agent_role}",
-            )
-        return invoke_tool(tool, context, arguments or {})
-
     @staticmethod
     def _allowed_roles(tool: Tool) -> tuple[str, ...]:
-        return getattr(tool, "allowed_roles", ("main_agent",))
+        return tool.allowed_roles

@@ -23,7 +23,6 @@ def make_snapshot(
         scene_summary="Desk scene.",
         visible_items=("phone",),
         task_goal="Inspect the scene.",
-        task_formulation_prompt_text="TASK PROMPT",
         final_response_prompt_text="FINAL PROMPT",
         tool_results_summary="camera_scene: phone visible",
         final_response="Your phone is visible.",

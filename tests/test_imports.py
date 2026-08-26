@@ -37,7 +37,6 @@ def test_main_module_exposes_web_entrypoint(monkeypatch):
 
 def test_final_ownership_modules_importable():
     from agent.decision import ExecutionDecision
-    from agent.strategy import StrategyDecision
     from agent.subagent import SubAgent
     from runtime.executor import CapabilityExecutor
     from tasks.factory import TaskFactory
@@ -48,7 +47,6 @@ def test_final_ownership_modules_importable():
     assert all(
         (
             ExecutionDecision,
-            StrategyDecision,
             SubAgent,
             CapabilityExecutor,
             TaskFactory,

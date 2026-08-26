@@ -9,7 +9,6 @@ def make_context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-frame",
         task_id="task-frame",
         trace_id="trace-frame",
         handoff_goal="Inspect the current scene.",

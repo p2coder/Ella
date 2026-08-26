@@ -2,8 +2,8 @@ from pathlib import Path
 
 from agent.context import AgentExecutionContext
 from memory import MemoryManagementRequest, MemoryManager
-from sessions.completion import TaskCompletionPackage
-from sessions.output import UserVisibleAgentOutput
+from tasks.completion import TaskCompletionPackage
+from tasks.output import UserVisibleAgentOutput
 from tools import ToolResult
 
 
@@ -12,7 +12,6 @@ def make_package() -> TaskCompletionPackage:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-memory",
         task_id="task-memory",
         trace_id="trace-memory",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
@@ -34,7 +33,6 @@ def make_package() -> TaskCompletionPackage:
             ToolResult(
                 tool_name="mock_checklist",
                 task_id="task-memory",
-                session_id="session-memory",
                 trace_id="trace-memory",
                 payload={"items": ("phone", "keys", "wallet", "umbrella")},
             ),
@@ -49,7 +47,6 @@ def test_memory_management_request_wraps_completion_package():
 
     assert request.completion == package
     assert request.task_id == "task-memory"
-    assert request.session_id == "session-memory"
     assert request.trace_id == "trace-memory"
 
 
@@ -64,7 +61,6 @@ def test_memory_manager_appends_deterministic_memory_record(tmp_path: Path):
     assert result.memory_path == memory_path
     assert memory_path.read_text(encoding="utf-8") == (
         "## Task task-memory\n"
-        "- session_id: session-memory\n"
         "- trace_id: trace-memory\n"
         "- user_input: Ella，我要出门了，需要带什么？\n"
         "- summary: Prepared and delivered a short pre-leaving reminder.\n"

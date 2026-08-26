@@ -42,7 +42,6 @@ class RunDisplaySnapshot:
     scene_summary: str
     visible_items: tuple[str, ...]
     task_goal: str
-    task_formulation_prompt_text: str
     final_response_prompt_text: str
     tool_results_summary: str
     final_response: str
@@ -77,11 +76,6 @@ class RunDisplaySnapshot:
             )
         object.__setattr__(
             self,
-            "task_formulation_prompt_text",
-            redact_prompt_text(self.task_formulation_prompt_text),
-        )
-        object.__setattr__(
-            self,
             "final_response_prompt_text",
             redact_prompt_text(self.final_response_prompt_text),
         )
@@ -110,7 +104,6 @@ class RunDisplaySnapshot:
             "scene_summary": self.scene_summary,
             "visible_items": self.visible_items,
             "task_goal": self.task_goal,
-            "task_formulation_prompt_text": self.task_formulation_prompt_text,
             "first_decision_prompt_text": self.first_decision_prompt_text,
             "execution_decision_prompt_text": self.execution_decision_prompt_text,
             "verification_prompt_text": self.verification_prompt_text,

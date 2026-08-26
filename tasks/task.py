@@ -1,4 +1,4 @@
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Mapping
@@ -121,7 +121,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 @dataclass(slots=True)
 class Task:
     task_id: str
-    session_id: InitVar[str | None] = None
     handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
     goal_state: TaskGoalState | None = None
@@ -146,11 +145,6 @@ class Task:
     control_request: Any | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def __getattribute__(self, name: str) -> Any:
-        if name == "session_id":
-            raise AttributeError("Task has no session identity; use task_id")
-        return object.__getattribute__(self, name)
 
     @property
     def active_step_ids(self) -> tuple[str, ...]:

@@ -5,8 +5,8 @@ from runtime.event_runtime import EventRuntime
 from runtime.task_queue import TaskQueue
 from runtime.task_runtime import TaskRuntime
 from runtime.task_store import TaskStore
-from sessions.session import TaskState
-from sessions.session_manager import TaskFactory
+from tasks.task import TaskState
+from tasks.factory import TaskFactory
 
 
 def signal() -> RawSignal:
@@ -19,11 +19,11 @@ def signal() -> RawSignal:
     )
 
 
-def test_task_is_created_and_persisted_before_formulation_then_enqueued(tmp_path):
+def test_task_is_created_without_intent_and_enqueued_for_first_decision(tmp_path):
     store = TaskStore(tmp_path)
     queue = TaskQueue()
     runtime = TaskRuntime(
-        session_manager=TaskFactory(task_id_factory=lambda: "task-flow"),
+        task_factory=TaskFactory(task_id_factory=lambda: "task-flow"),
         task_store=store,
         task_queue=queue,
     )
@@ -35,30 +35,7 @@ def test_task_is_created_and_persisted_before_formulation_then_enqueued(tmp_path
     assert result.submitted is True
     assert result.task_handle.task_id == "task-flow"
     assert record.task.state is TaskState.READY
-    assert record.task.handoff is not None
+    assert record.task.handoff is None
+    assert record.task.intent is None
     assert record.task.execution_context.task_id == "task-flow"
-    assert queue.snapshot() == ("task-flow",)
-
-
-class FailingAgent:
-    llm_provider = None
-
-    def create_handoff(self, **kwargs):
-        raise RuntimeError("formulation unavailable")
-
-
-def test_formulation_failure_persists_failed_and_does_not_enqueue(tmp_path):
-    store = TaskStore(tmp_path)
-    queue = TaskQueue()
-    runtime = TaskRuntime(
-        session_manager=TaskFactory(task_id_factory=lambda: "task-failed"),
-        task_store=store,
-        task_queue=queue,
-    )
-    event_runtime = EventRuntime(task_runtime=runtime, main_agent=FailingAgent())
-
-    result = event_runtime.publish(signal())
-
-    assert result.submitted is False
-    assert store.load("task-failed").task.state is TaskState.FAILED
     assert queue.snapshot() == ()

@@ -14,7 +14,6 @@ def make_context(
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-scope",
         task_id="task-scope",
         trace_id="trace-scope",
         handoff_goal="Complete one scoped task.",

@@ -14,7 +14,6 @@ def make_snapshot() -> RunDisplaySnapshot:
         scene_summary="<scene>",
         visible_items=("<phone>",),
         task_goal="Answer the user.",
-        task_formulation_prompt_text="TASK prompt sk-1234567890abcdef",
         final_response_prompt_text="FINAL prompt <answer>",
         tool_results_summary="camera_scene: <tool>",
         final_response="<final>",
@@ -34,7 +33,7 @@ def test_snapshot_carries_all_prompt_display_fields():
         "verification_prompt_text",
         "final_response_prompt_text",
     )
-    assert data["task_formulation_prompt_text"] == "TASK prompt [REDACTED]"
+    assert data["first_decision_prompt_text"] == "FIRST prompt"
     assert data["execution_decision_prompt_text"] == "EXECUTION prompt"
     assert data["final_response_prompt_text"] == "FINAL prompt <answer>"
 
@@ -43,10 +42,10 @@ def test_page_viewer_displays_all_prompts_with_safe_title():
     html = render_snapshot_html(make_snapshot())
 
     assert "Prompt Sent to LLM" in html
-    assert "Task formulation prompt" in html
+    assert "First decision prompt" in html
     assert "Execution decision prompt" in html
     assert "Final response prompt" in html
-    assert "TASK prompt [REDACTED]" in html
+    assert "FIRST prompt" in html
     assert "EXECUTION prompt" in html
     assert "FINAL prompt &lt;answer&gt;" in html
 

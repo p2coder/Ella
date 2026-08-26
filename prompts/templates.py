@@ -67,16 +67,6 @@ DECISION_POLICY_PROMPT = (
 )
 
 
-TASK_FORMULATION_TEMPLATE = PromptTemplate(
-    name="task_formulation",
-    system_prompt=ELLA_SYSTEM_PROMPT,
-    instruction=(
-        "Use the provided context to answer: 应该做什么？ Return a concise "
-        "task goal and any necessary constraints."
-    ),
-)
-
-
 FINAL_RESPONSE_TEMPLATE = PromptTemplate(
     name="final_response",
     system_prompt=ELLA_SYSTEM_PROMPT,
@@ -105,9 +95,13 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
         "must be CALL_TOOL or SUBMIT_RESULT. CALL_TOOL must include "
         "a visible tool_name and an arguments object matching that tool's "
         "schema. Include decision_reason for every action. SUBMIT_RESULT must also "
-        "include a non-empty completion_summary and evidence_refs containing "
+        "include a non-empty completion_summary, a non-empty "
+        "final_response_draft, and evidence_refs containing "
         "only observation IDs from WorkSpace; evidence_refs may be empty only "
-        "when the task does not depend on a capability result. Read concrete "
+        "when the task does not depend on a capability result. "
+        "final_response_draft must be the complete answer ready to show the "
+        "user now; it must not promise that an answer or artifact will be "
+        "produced later. Read concrete "
         "visible Skill summaries, visible CapabilityDefinition "
         "summaries, and observations only from WorkSpace. Other actions must "
         "not include a tool name. Use the provided "
@@ -155,15 +149,33 @@ FIRST_DECISION_TEMPLATE = PromptTemplate(
     instruction=(
         f"{DECISION_POLICY_PROMPT} This is the first decision for a raw user "
         "request. Return one strict JSON object containing intent and action. "
-        "intent must contain goal, constraints, deliverables, and "
-        "minimum_acceptance_criteria. Acceptance criteria describe what must "
-        "be true, not checker or tool names. action must be exactly one of "
+        "intent captures the user's intended outcome for this task; it is not "
+        "a restatement of Ella's personality and not an execution plan. Use "
+        "this exact intent shape: {\"goal\":\"<one concrete outcome>\","
+        "\"constraints\":[\"<restriction that actually applies>\"],"
+        "\"deliverables\":[\"<result the user should receive>\"],"
+        "\"minimum_acceptance_criteria\":[\"<observable condition that must "
+        "be true>\"]}. goal must be one non-empty string describing what the "
+        "user wants achieved. constraints contains only explicit user limits "
+        "or necessary safety and factual restrictions; use [] when none apply. "
+        "deliverables contains the concrete outputs expected from this task. "
+        "minimum_acceptance_criteria contains the smallest observable conditions "
+        "needed to judge the result, not checker names, Tool names, implementation "
+        "steps, or general response-style aspirations. Every array element must "
+        "be a non-empty string; never emit blank strings or placeholder entries. "
+        "For a greeting or another directly answerable request, keep intent "
+        "minimal instead of inventing constraints or multiple deliverables. "
+        "For a greeting or direct conversational response that needs no factual, "
+        "artifact, or capability validation, set minimum_acceptance_criteria to "
+        "[]. "
+        "action must be exactly one of "
         "these shapes: CALL_TOOL: {\"action\":\"CALL_TOOL\","
         "\"tool_name\":\"<visible name>\",\"tool_input\":{},"
         "\"decision_reason\":\"<non-empty reason>\"}; SUBMIT_RESULT: "
         "{\"action\":\"SUBMIT_RESULT\",\"tool_name\":null,"
         "\"tool_input\":null,\"decision_reason\":\"<non-empty reason>\","
         "\"completion_summary\":\"<non-empty candidate summary>\","
+        "\"final_response_draft\":\"<complete user-facing answer>\","
         "\"evidence_refs\":[]}. decision_reason is mandatory for every "
         "action. Do not rename action to type, tool_input to arguments, or "
         "decision_reason to reason. For a complex task, create a plan by calling "
@@ -204,7 +216,6 @@ VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
 
 TEMPLATES_BY_TYPE = {
     "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
-    "TASK_FORMULATION": TASK_FORMULATION_TEMPLATE,
     "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
     "VERIFICATION_DECISION": VERIFICATION_DECISION_TEMPLATE,

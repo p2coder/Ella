@@ -72,7 +72,7 @@ def test_standardized_event_has_routing_relevant_contract_fields_only():
         event_type="USER_UTTERANCE",
         confidence=1.0,
         priority=0.9,
-        target_session_id="task-123",
+        target_task_id="task-123",
         caused_by_task_id="task-123",
     )
 
@@ -86,7 +86,7 @@ def test_standardized_event_has_routing_relevant_contract_fields_only():
         "stage": "standardized_event",
         "confidence": 1.0,
         "priority": 0.9,
-        "target_session_id": "task-123",
+        "target_task_id": "task-123",
         "caused_by_task_id": "task-123",
         "metadata": {},
     }

@@ -1,9 +1,9 @@
 from prompts.engine import PromptBuildResult, PromptEngine, PromptType, redact_prompt_text
 
 
-def test_building_task_formulation_prompt_returns_result():
+def test_building_first_decision_prompt_returns_result():
     result = PromptEngine().build(
-        PromptType.TASK_FORMULATION,
+        PromptType.FIRST_DECISION,
         {
             "trace_id": "trace-prompt",
             "user_input": "Ella，我要出门了",
@@ -14,8 +14,8 @@ def test_building_task_formulation_prompt_returns_result():
     )
 
     assert isinstance(result, PromptBuildResult)
-    assert result.prompt_type == PromptType.TASK_FORMULATION
-    assert result.prompt_name == "task_formulation"
+    assert result.prompt_type == PromptType.FIRST_DECISION
+    assert result.prompt_name == "first_decision"
     assert isinstance(result.prompt, str)
     assert "Ella" in result.prompt
     assert "Ella，我要出门了" in result.prompt
@@ -51,11 +51,11 @@ def test_context_values_change_prompt_without_changing_external_call_shape():
     engine = PromptEngine()
 
     first = engine.build(
-        PromptType.TASK_FORMULATION,
+        PromptType.FIRST_DECISION,
         {"user_input": "我要出门了", "environment_summary": "No visual context."},
     )
     second = engine.build(
-        PromptType.TASK_FORMULATION,
+        PromptType.FIRST_DECISION,
         {"user_input": "提醒我喝水", "environment_summary": "No visual context."},
     )
 

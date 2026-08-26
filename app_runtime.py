@@ -6,7 +6,6 @@ from time import monotonic, sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from agent.final_response import FinalResponseGenerator
 from agent.verification import VerificationAgent
 from config.config import PROJECT_ROOT
 from config.settings import load_settings
@@ -39,7 +38,7 @@ from tasks.state import (
 from agent.subagent import SubAgent
 from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
     DocumentWriteTool,
@@ -62,7 +61,7 @@ from tools.verification import (
 )
 from runtime.interactions import InteractionBroker
 
-MAX_APP_STEPS = 20
+MAX_APP_STEPS = 200
 APP_TASK_TIMEOUT_SECONDS = 120.0
 
 
@@ -100,12 +99,7 @@ class AppRuntime:
         skill_manager.refresh()
 
         tool_manager = ToolManager()
-        screen_factory = getattr(device_factory, "screen", None)
-        screen_provider = (
-            screen_factory()
-            if screen_factory is not None
-            else ScreenSceneTool().screen_provider
-        )
+        screen_provider = device_factory.screen()
 
         # tool改成热插拔
         tool_manager.register(
@@ -161,11 +155,6 @@ class AppRuntime:
                 timing_recorder=timing_recorder,
             ),
             memory_manager=MemoryManager(memory_path or settings.memory_path),
-            final_response_generator=FinalResponseGenerator(
-                prompt_engine=PromptEngine(),
-                llm_provider=llm_provider,
-                timing_recorder=timing_recorder,
-            ),
             verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
@@ -186,7 +175,6 @@ class AppRuntime:
         )
         event_runtime = EventRuntime(
             task_runtime=task_runtime,
-            llm_provider=llm_provider,
             timing_recorder=timing_recorder,
         )
         microphone_source = MicrophoneSource.from_factories(
@@ -618,7 +606,6 @@ def _build_display_snapshot(
         scene_summary=_scene_summary(camera_result),
         visible_items=_visible_items(camera_result),
         task_goal=str(process.get("task_goal", "")),
-        task_formulation_prompt_text="",
         first_decision_prompt_text=str(
             task_result.task.task_local_state.get("first_decision_prompt_text", "")
         ),
@@ -676,7 +663,6 @@ def _microphone_failure_result(message: str) -> AppDisplayResult:
             scene_summary="",
             visible_items=(),
             task_goal="",
-            task_formulation_prompt_text="",
             final_response_prompt_text="",
             tool_results_summary="",
             final_response=message,
@@ -694,9 +680,8 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("first_decision_stage", snapshot.planning_duration_ms),
+        ("planning", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
-        ("final_response_stage", snapshot.final_response_generation_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
     )
     for label, value in values:
@@ -708,7 +693,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
         "first_decision",
         "execution_decision",
         "verification_decision",
-        "final_response",
     ):
         value = llm_by_boundary.get(boundary)
         if value is not None:

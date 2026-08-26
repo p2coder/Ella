@@ -19,13 +19,17 @@ def render_snapshot_html(snapshot: RunDisplaySnapshot | Mapping[str, Any]) -> st
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
         "task_goal": _value(data, "task_goal"),
-        "task_formulation_prompt_text": _value(
+        "first_decision_prompt_text": _value(
             data,
-            "task_formulation_prompt_text",
+            "first_decision_prompt_text",
         ),
         "execution_decision_prompt_text": _value(
             data,
             "execution_decision_prompt_text",
+        ),
+        "verification_prompt_text": _value(
+            data,
+            "verification_prompt_text",
         ),
         "final_response_prompt_text": _value(data, "final_response_prompt_text"),
         "tool_results_summary": _value(data, "tool_results_summary"),

@@ -23,7 +23,7 @@ from tasks.graph import (
     ToolNodeDefinition,
 )
 from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 from tasks.state import StepExecutionState, ToolFailureKind, ToolFailureObservation
 from tasks.completion import TaskCompletionPackage
 from tools import ToolResult
@@ -193,7 +193,6 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
     context_data = data.get("execution_context")
     context = _decode_context(context_data) if context_data else None
     task = Task(
-        session_id=data["task_id"],
         task_id=data["task_id"],
         handoff=handoff,
         trace_id=data["trace_id"],
@@ -346,7 +345,6 @@ def _encode_handoff(handoff: HandoffRequest | None) -> dict[str, Any] | None:
         return None
     data = handoff.to_dict()
     data.pop("trigger_event", None)
-    data.pop("task_formulation_prompt_text", None)
     return _json_safe(data)
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from sessions.graph import (
+from tasks.graph import (
     DynamicGraphCapacity,
     GraphEdge,
     TaskGraphDefinition,

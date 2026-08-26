@@ -60,7 +60,10 @@ def test_web_ui_uses_sse_and_has_no_task_polling_loop():
     assert '"task_interaction_required"' in source
     assert 'fetch("/tasks/input"' in source
     assert 'id="timing-summary"' in source
-    assert "updateDisplayedTaskTiming(task)" in source
+    assert "updateDisplayedTask(task)" in source
     assert "task.timing_summary || display.timing_summary" in source
+    assert 'eventName === "task_terminal"' in source
+    assert "refreshDisplayedTask(task)" in source
+    assert "`/task?task_id=${encodeURIComponent(task.task_id)}`" in source
     assert "scheduleTaskRefresh" not in source
     assert "setTimeout" not in source

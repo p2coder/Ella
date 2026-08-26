@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import app_runtime
 from memory import MemoryWriteResult
-from sessions.completion import TaskCompletionPackage
-from sessions.output import UserVisibleAgentOutput
+from tasks.completion import TaskCompletionPackage
+from tasks.output import UserVisibleAgentOutput
 
 
 class _DisplayTaskResult:
@@ -87,7 +87,6 @@ def test_formal_app_runtime_snapshot_preserves_all_generated_prompts():
         _DisplayTaskResult(),
     )
 
-    assert snapshot.task_formulation_prompt_text == ""
     assert snapshot.first_decision_prompt_text == "FIRST"
     assert snapshot.execution_decision_prompt_text == "EXECUTION"
     assert snapshot.verification_prompt_text == "VERIFY"

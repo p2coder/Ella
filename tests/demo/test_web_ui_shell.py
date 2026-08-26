@@ -11,7 +11,6 @@ def make_snapshot() -> RunDisplaySnapshot:
         scene_summary="<b>Desk scene with phone and keys.</b>",
         visible_items=("<phone>", "keys"),
         task_goal="Give the user a short reminder before leaving.",
-        task_formulation_prompt_text="TASK FORMULATION PROMPT",
         final_response_prompt_text="FINAL RESPONSE PROMPT",
         tool_results_summary="camera_scene: phone and keys visible",
         final_response="<answer>Remember your phone and keys.</answer>",
