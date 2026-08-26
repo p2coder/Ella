@@ -31,7 +31,10 @@ class ProviderFactory:
             return QwenLLMProvider(
                 api_key=self.settings.qwen_api_key,
                 model_name=self.settings.qwen_llm_model or "qwen-plus",
-                client=DashScopeOpenAITransport(),
+                client=DashScopeOpenAITransport(
+                    response_format=self.settings.qwen_llm_response_format,
+                    enable_thinking=self.settings.qwen_llm_enable_thinking,
+                ),
             )
         if (
             self.settings.model_provider == "deepseek"

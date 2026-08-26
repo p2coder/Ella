@@ -198,16 +198,35 @@ def _validate_identity(value: str) -> None:
 def _validate_steps(steps: tuple[PlanStep, ...]) -> None:
     if not steps:
         raise ValueError("plan requires at least one step")
+    if any(not isinstance(step, PlanStep) for step in steps):
+        raise TypeError("plan steps must be PlanStep values")
     ids = tuple(step.step_id for step in steps)
-    if any(not item or Path(item).name != item for item in ids):
+    if any(
+        not isinstance(item, str)
+        or not item.strip()
+        or Path(item).name != item
+        for item in ids
+    ):
         raise ValueError("step_id must be a safe non-empty name")
     if len(ids) != len(set(ids)):
         raise ValueError("plan step IDs must be unique")
     known = set(ids)
     dependencies = {step.step_id: step.depends_on for step in steps}
     for step in steps:
-        if not step.goal or not step.completion_criteria:
-            raise ValueError("each plan step needs a goal and completion criteria")
+        if not isinstance(step.goal, str) or not step.goal.strip():
+            raise ValueError("each plan step needs a non-empty goal")
+        if any(
+            not isinstance(item, str) or not item.strip()
+            for item in step.completion_criteria
+        ):
+            raise ValueError("completion criteria must be non-empty strings")
+        if any(
+            not isinstance(item, str) or not item.strip()
+            for item in step.depends_on
+        ):
+            raise ValueError("plan dependencies must be non-empty strings")
+        if len(step.depends_on) != len(set(step.depends_on)):
+            raise ValueError("plan dependencies must not contain duplicates")
         if step.step_id in step.depends_on or not set(step.depends_on) <= known:
             raise ValueError("invalid plan dependency")
     visiting: set[str] = set()

@@ -22,6 +22,8 @@ def test_default_settings_are_mock_safe():
     assert settings.model_provider == "qwen"
     assert settings.qwen_api_key is None
     assert settings.qwen_llm_model is None
+    assert settings.qwen_llm_response_format == "json_object"
+    assert settings.qwen_llm_enable_thinking is False
     assert settings.qwen_multimodal_model is None
     assert settings.qwen_speech_model is None
     assert settings.deepseek_api_key is None
@@ -83,6 +85,8 @@ def test_programmatic_overrides_are_applied():
             "ELLA_MODEL_PROVIDER": "mock",
             "ELLA_QWEN_API_KEY": "secret",
             "ELLA_QWEN_LLM_MODEL": "qwen-llm",
+            "ELLA_QWEN_LLM_RESPONSE_FORMAT": None,
+            "ELLA_QWEN_LLM_ENABLE_THINKING": True,
             "ELLA_QWEN_MULTIMODAL_MODEL": "qwen-vl",
             "ELLA_QWEN_SPEECH_MODEL": "qwen-asr",
             "ELLA_MIC_DEVICE": "studio-mic",
@@ -99,6 +103,8 @@ def test_programmatic_overrides_are_applied():
         model_provider="mock",
         qwen_api_key="secret",
         qwen_llm_model="qwen-llm",
+        qwen_llm_response_format=None,
+        qwen_llm_enable_thinking=True,
         qwen_multimodal_model="qwen-vl",
         qwen_speech_model="qwen-asr",
         deepseek_api_key=None,
@@ -190,6 +196,25 @@ def test_deepseek_runtime_options_are_configurable():
     assert settings.deepseek_thinking_enabled is False
     assert settings.deepseek_bypass_proxy is False
     assert settings.deepseek_reasoning_effort == "max"
+
+
+def test_qwen_llm_output_options_are_configurable():
+    settings = load_settings(
+        {
+            "ELLA_QWEN_LLM_RESPONSE_FORMAT": None,
+            "ELLA_QWEN_LLM_ENABLE_THINKING": True,
+        }
+    )
+
+    assert settings.qwen_llm_response_format is None
+    assert settings.qwen_llm_enable_thinking is True
+
+
+def test_invalid_qwen_response_format_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="QWEN_LLM_RESPONSE_FORMAT"):
+        load_settings({"ELLA_QWEN_LLM_RESPONSE_FORMAT": "json_schema"})
 
 
 def test_importing_config_package_has_no_runtime_side_effect():

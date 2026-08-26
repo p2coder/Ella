@@ -28,8 +28,11 @@ def test_provider_factory_uses_qwen_branch_when_real_config_is_complete():
         )
     )
 
-    assert factory.llm().model_name == "qwen-plus"
-    assert factory.llm().provider_name == "qwen_llm"
+    llm = factory.llm()
+    assert llm.model_name == "qwen-plus"
+    assert llm.provider_name == "qwen_llm"
+    assert llm.client.response_format == "json_object"
+    assert llm.client.enable_thinking is False
     assert factory.speech().model_name == "qwen-audio"
     assert factory.speech().provider_name == "qwen_speech"
     assert factory.vision().model_name == "qwen-vl-plus"

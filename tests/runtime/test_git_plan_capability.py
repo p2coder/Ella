@@ -1,9 +1,12 @@
 import subprocess
 
+import pytest
+
 from agent.context import AgentExecutionContext, CapabilityScope
 from runtime.plan_store import PlanStep, PlanStore
 from runtime.task_runtime import TaskRuntime
 from tasks.task import Task
+from tasks.graph import TaskGraphRun
 from tools.base import CapabilityKind
 from tools.plan import PlanWrittenTool
 
@@ -88,3 +91,110 @@ def test_plan_written_uses_runtime_identity_and_activates_graph(tmp_path) -> Non
     assert task.graph.definition.entry_node_ids == ("inspect",)
     assert task.graph.definition.terminal_node_ids == ("finish",)
     assert task.graph.definition.successors("inspect") == ("finish",)
+
+
+def test_plan_definition_describes_executable_outcomes_and_parallelism(tmp_path) -> None:
+    definition = PlanWrittenTool(PlanStore(tmp_path / "plans.git")).definition
+
+    assert "independently executable and observable intermediate goal" in definition.description
+    assert "same wave" in definition.description
+    assert "success dependency" in definition.description
+    assert "Tool observations" in definition.description
+    criteria_schema = definition.input_schema["properties"]["steps"]["items"][
+        "properties"
+    ]["completion_criteria"]
+    assert criteria_schema.get("minItems", 0) == 0
+
+
+def test_plan_store_accepts_step_without_mechanical_criteria(tmp_path) -> None:
+    store = PlanStore(tmp_path / "plans.git")
+
+    record = store.write(
+        task_id="task-plan",
+        steps=(PlanStep("draft", "Draft the response", ()),),
+    )
+
+    assert record.steps[0].completion_criteria == ()
+
+
+@pytest.mark.parametrize(
+    "steps",
+    (
+        (PlanStep("a", " ", ()),),
+        (PlanStep("a", "Goal", (" ",)),),
+        (
+            PlanStep("a", "First", ()),
+            PlanStep("b", "Second", (), ("a", "a")),
+        ),
+        (PlanStep("a", "Goal", (), ("missing",)),),
+        (
+            PlanStep("a", "First", (), ("b",)),
+            PlanStep("b", "Second", (), ("a",)),
+        ),
+    ),
+)
+def test_invalid_plan_does_not_replace_active_version(tmp_path, steps) -> None:
+    store = PlanStore(tmp_path / "plans.git")
+    active = store.write(
+        task_id="task-plan",
+        steps=(PlanStep("valid", "Valid goal", ()),),
+    )
+
+    with pytest.raises(ValueError):
+        store.write(task_id="task-plan", steps=steps)
+
+    assert store.active_version("task-plan") == active.version_id
+
+
+def test_plan_update_migrates_only_unchanged_successful_nodes() -> None:
+    task = Task(task_id="task-plan", trace_id="trace-plan")
+    TaskRuntime._activate_plan(
+        task,
+        {
+            "task_id": task.task_id,
+            "version_id": "v1",
+            "steps": (
+                {
+                    "step_id": "source",
+                    "goal": "Collect source",
+                    "completion_criteria": ("source captured",),
+                },
+                {
+                    "step_id": "compare",
+                    "goal": "Compare facts",
+                    "completion_criteria": ("comparison written",),
+                    "depends_on": ("source",),
+                },
+            ),
+        },
+    )
+    task.graph = TaskGraphRun(
+        task.graph.definition,
+        {
+            "source": {"state": "succeeded", "result": "source-result"},
+            "compare": {"state": "succeeded", "result": "comparison-result"},
+        },
+    )
+
+    TaskRuntime._activate_plan(
+        task,
+        {
+            "task_id": task.task_id,
+            "version_id": "v2",
+            "steps": (
+                {
+                    "step_id": "source",
+                    "goal": "Collect a different source",
+                    "completion_criteria": ("source captured",),
+                },
+                {
+                    "step_id": "compare",
+                    "goal": "Compare facts",
+                    "completion_criteria": ("comparison written",),
+                    "depends_on": ("source",),
+                },
+            ),
+        },
+    )
+
+    assert dict(task.graph.node_runs) == {}
