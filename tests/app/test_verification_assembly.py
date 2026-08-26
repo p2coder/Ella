@@ -13,7 +13,7 @@ def test_default_app_runtime_wires_verification_agent_and_tools(
 
     verifier = runtime._task_runtime.verification_agent
     assert verifier is not None
-    assert verifier.llm_provider is runtime._event_runtime.llm_provider
+    assert verifier.llm_provider is runtime._task_runtime.subagent.llm_provider
 
     tool_manager = runtime._task_runtime.executor.tool_manager
     assert tool_manager.get_tool("artifact_exists") is not None

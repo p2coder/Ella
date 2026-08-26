@@ -42,7 +42,6 @@ def make_tool_result(
     return ToolResult(
         tool_name=tool_name,
         task_id="task-final-response",
-        session_id="session-final-response",
         trace_id="trace-final-response",
         payload=payload
         or {

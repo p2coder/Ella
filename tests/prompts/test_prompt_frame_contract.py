@@ -65,7 +65,7 @@ def test_prompt_context_keys_are_deterministic():
 
 def test_callers_do_not_need_to_know_block_order_or_separators():
     result = PromptEngine().build(
-        PromptType.TASK_FORMULATION,
+        PromptType.FIRST_DECISION,
         {"user_input": "我有点乱，不知道先做什么"},
     )
 

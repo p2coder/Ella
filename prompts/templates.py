@@ -67,16 +67,6 @@ DECISION_POLICY_PROMPT = (
 )
 
 
-TASK_FORMULATION_TEMPLATE = PromptTemplate(
-    name="task_formulation",
-    system_prompt=ELLA_SYSTEM_PROMPT,
-    instruction=(
-        "Use the provided context to answer: 应该做什么？ Return a concise "
-        "task goal and any necessary constraints."
-    ),
-)
-
-
 FINAL_RESPONSE_TEMPLATE = PromptTemplate(
     name="final_response",
     system_prompt=ELLA_SYSTEM_PROMPT,
@@ -204,7 +194,6 @@ VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
 
 TEMPLATES_BY_TYPE = {
     "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
-    "TASK_FORMULATION": TASK_FORMULATION_TEMPLATE,
     "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
     "VERIFICATION_DECISION": VERIFICATION_DECISION_TEMPLATE,

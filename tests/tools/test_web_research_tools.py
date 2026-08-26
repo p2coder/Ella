@@ -9,7 +9,6 @@ def context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="task-research",
         task_id="task-research",
         trace_id="trace-research",
         handoff_goal="Compare public agent frameworks.",

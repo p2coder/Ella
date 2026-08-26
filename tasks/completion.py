@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.context import AgentExecutionContext
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 from tools import ToolResult
 
 

@@ -7,11 +7,13 @@ from agent.context import AgentExecutionContext
 from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
 from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
-from providers.llm import serialize_tool_definitions
+from providers.base import ProviderResult
+from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
 from tasks.task import Task, TaskIntent
+from tools.manager import ToolManager
 
 
 class DecisionValidationError(ValueError):
@@ -23,8 +25,8 @@ class SubAgent:
     """Produce exactly one action from the current task/step snapshot."""
 
     skill_manager: SkillManager
-    tool_directory: Any | None = None
-    llm_provider: Any | None = None
+    tool_directory: ToolManager | None = None
+    llm_provider: LLMProvider | None = None
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
@@ -81,16 +83,16 @@ class SubAgent:
             context,
             "first_decision",
             started,
-            not getattr(result, "failed", False),
+            not result.failed,
             result,
         )
-        if getattr(result, "failed", False):
+        if result.failed:
             raise DecisionValidationError("first decision provider failed")
         try:
             payload = self._extract_payload(result.output)
             return self._first_decision_from_payload(payload, serialized, ())
         except DecisionValidationError:
-            if bool(getattr(result, "metadata", {}).get("mock")):
+            if bool(result.metadata.get("mock")):
                 return self._first_decision_fallback(user_input, task, definitions)
             raise
 
@@ -100,15 +102,16 @@ class SubAgent:
         boundary: str,
         started: float,
         success: bool,
-        result: Any,
+        result: ProviderResult | None,
     ) -> None:
+        provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
             context.trace_id,
             boundary=boundary,
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,
-            provider_name=getattr(result or self.llm_provider, "provider_name", None),
-            model_name=getattr(result or self.llm_provider, "model_name", None),
+            provider_name=None if provider is None else provider.provider_name,
+            model_name=None if provider is None else provider.model_name,
         )
 
     def decide_next_action(
@@ -179,16 +182,16 @@ class SubAgent:
         self._record_llm_timing(
             context,
             started,
-            not getattr(result, "failed", False),
+            not result.failed,
             result,
         )
-        if getattr(result, "failed", False):
+        if result.failed:
             raise DecisionValidationError("execution decision provider failed")
         try:
             payload = self._extract_payload(result.output)
             return self._decision_from_payload(payload, serialized, observations)
         except DecisionValidationError:
-            if bool(getattr(result, "metadata", {}).get("mock")):
+            if bool(result.metadata.get("mock")):
                 return self._fallback(task, definitions)
             raise
 
@@ -197,7 +200,7 @@ class SubAgent:
         context: AgentExecutionContext,
         started: float,
         success: bool,
-        result: Any,
+        result: ProviderResult | None,
     ) -> None:
         self._record_boundary_timing(
             context, "execution_decision", started, success, result

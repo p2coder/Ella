@@ -28,7 +28,7 @@ from tasks.state import (
     UncertainResolutionRecord,
 )
 from runtime.executor import CapabilityExecutor
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from tasks.graph import (
     GraphEdge,
@@ -94,7 +94,7 @@ class TaskRuntime:
     task_queue: TaskQueue | None = None
     step_runtime: StepRuntime | None = None
     max_runtime_ticks: int = 100
-    max_steps: int = 20
+    max_steps: int = 200
     max_task_workers: int = 500
     max_parallel_steps_per_task: int = 8
     wave_incremental_checkpoint_threshold: int = 20
@@ -138,7 +138,7 @@ class TaskRuntime:
         task_queue: TaskQueue | None = None,
         step_runtime: StepRuntime | None = None,
         max_runtime_ticks: int = 100,
-        max_steps: int = 20,
+        max_steps: int = 200,
         max_task_workers: int = 500,
         max_parallel_steps_per_task: int = 8,
         wave_incremental_checkpoint_threshold: int = 20,
@@ -897,31 +897,6 @@ class TaskRuntime:
             DeliveryOutcome.FAILED,
             payload_type,
             payload,
-        )
-
-    def submit(self, handoff: HandoffRequest) -> TaskHandle:
-        
-        creation = self.task_factory.create_task(handoff)
-        creation.task.current_step = replace(
-            creation.task.current_step,
-            max_step_retries=self.max_step_retries,
-        )
-        task_id = creation.task.task_id
-        if task_id in self._tasks:
-            raise ValueError(f"duplicate task_id: {task_id}")
-        creation.task.transition_to(TaskState.READY)
-        self._tasks[task_id] = creation
-        self._persist(creation.task)
-        if self.task_queue is not None or self.is_running:
-            self.schedule(task_id)
-        self._trace_task(creation.task, "task", "submitted")
-        self.timing_recorder.record_task_submitted(
-            creation.context.trace_id,
-            task_id=task_id,
-        )
-        return TaskHandle(
-            task_id=task_id,
-            trace_id=creation.context.trace_id,
         )
 
     def get_task(self, task_id: str) -> Task:

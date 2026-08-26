@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from agent.final_response import FinalResponseGenerator
 from prompts.engine import PromptBuildResult
 from providers.base import ProviderResult
-from sessions.execution_state import ToolFailureKind, ToolFailureObservation
+from tasks.state import ToolFailureKind, ToolFailureObservation
 
 
 @dataclass

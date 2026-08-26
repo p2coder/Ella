@@ -2,13 +2,13 @@ from datetime import datetime, timezone
 
 from agent.context import AgentExecutionContext, CapabilityScope
 from events import StandardizedEvent
-from sessions.graph import (
+from tasks.graph import (
     TaskGraphDefinition,
     TaskGraphNodeDefinition,
     TaskGraphNodeType,
     TaskGraphRun,
 )
-from sessions.session import Task, TaskSession, TaskState
+from tasks.task import Task, Task, TaskState
 
 
 def make_event(trace_id: str = "trace-task") -> StandardizedEvent:
@@ -27,7 +27,6 @@ def make_context(task_id: str = "task-1") -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id=task_id,
         task_id=task_id,
         trace_id="trace-task",
         handoff_goal="",
@@ -40,13 +39,11 @@ def test_task_is_the_single_runtime_aggregate_with_created_invariants():
     event = make_event()
     task = Task(
         "task-1",
-        "task-1",
         trace_id=event.trace_id,
         source_event=event,
         execution_context=make_context(),
     )
 
-    assert TaskSession is Task
     assert task.state is TaskState.CREATED
     assert task.handoff is None
     assert task.graph is None
@@ -59,13 +56,11 @@ def test_task_mutable_state_is_isolated():
     event = make_event()
     first = Task(
         "task-1",
-        "task-1",
         trace_id=event.trace_id,
         source_event=event,
         execution_context=make_context("task-1"),
     )
     second = Task(
-        "task-2",
         "task-2",
         trace_id=event.trace_id,
         source_event=event,
@@ -101,7 +96,6 @@ def test_active_step_ids_are_derived_from_graph_node_runs():
         },
     )
     task = Task(
-        "task-1",
         "task-1",
         trace_id=event.trace_id,
         source_event=event,

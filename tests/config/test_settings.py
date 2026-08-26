@@ -35,7 +35,7 @@ def test_default_settings_are_mock_safe():
     assert settings.camera_enabled is False
     assert settings.mic_device == "default"
     assert settings.camera_device == "default"
-    assert settings.mic_always_listening is True
+    assert settings.mic_always_listening is False
     assert settings.camera_background_interval_seconds == 5
     assert settings.camera_task_fps == 1
 
@@ -109,7 +109,7 @@ def test_programmatic_overrides_are_applied():
         deepseek_reasoning_effort="high",
         mic_enabled=False,
         mic_device="studio-mic",
-        mic_always_listening=True,
+        mic_always_listening=False,
         camera_enabled=False,
         camera_device="front-camera",
         camera_background_interval_seconds=5,

@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic, sleep
 
-from agent.handoff import HandoffRequest
 from events import StandardizedEvent
 from runtime.interactions import InteractionBroker, UserAnswer
 from runtime.executor import CapabilityExecutor
@@ -42,17 +41,7 @@ def test_interaction_tool_blocks_until_first_matching_answer() -> None:
         payload={"text": "contact someone"},
         event_type="USER_UTTERANCE",
     )
-    handle = runtime.submit(
-        HandoffRequest(
-            "Contact the requested person",
-            event,
-            "",
-            "",
-            "",
-            (),
-            ("The person is known",),
-        )
-    )
+    handle = runtime.create_task(event)
     context = runtime.get_context(handle.task_id)
 
     with ThreadPoolExecutor(max_workers=1) as pool:

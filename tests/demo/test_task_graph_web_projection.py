@@ -7,7 +7,7 @@ def test_web_projection_distinguishes_task_state_and_failure_delivery():
         user_input="<script>alert(1)</script>", transcript=None,
         captured_frame_reference=None, image_status=TEXT_ONLY,
         scene_summary="", visible_items=(), task_goal="goal",
-        task_formulation_prompt_text="", final_response_prompt_text="",
+        final_response_prompt_text="",
         tool_results_summary="", final_response="failed safely",
         memory_status="not recorded", task_id="task-1", task_state="delivered",
         active_step_ids=("step-2",), terminal_outcome="failed",

@@ -1,7 +1,7 @@
 from agent.context import AgentExecutionContext
 from memory import MemoryManagementRequest, MemoryManager
-from sessions.completion import TaskCompletionPackage
-from sessions.output import UserVisibleAgentOutput
+from tasks.completion import TaskCompletionPackage
+from tasks.output import UserVisibleAgentOutput
 from tools import ToolResult
 
 
@@ -10,7 +10,6 @@ def make_completion() -> TaskCompletionPackage:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-memory-contract",
         task_id="task-memory-contract",
         trace_id="trace-memory-contract",
         handoff_goal="Give the user a short reminder before leaving.",
@@ -28,7 +27,6 @@ def make_completion() -> TaskCompletionPackage:
         tool_results=(
             ToolResult(
                 tool_name="mock_checklist",
-                session_id=context.session_id,
                 task_id=context.task_id,
                 trace_id=context.trace_id,
                 payload={"items": ("keys", "phone")},
@@ -59,11 +57,9 @@ def test_memory_request_and_record_retain_completion_context(tmp_path):
     MemoryManager(memory_path).handle(request)
 
     assert request.completion is completion
-    assert request.session_id == "session-memory-contract"
     assert request.task_id == "task-memory-contract"
     assert request.trace_id == "trace-memory-contract"
     record = memory_path.read_text(encoding="utf-8")
-    assert "session-memory-contract" in record
     assert "task-memory-contract" in record
     assert "trace-memory-contract" in record
     assert completion.summary in record

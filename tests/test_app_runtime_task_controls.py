@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from app_runtime import AppRuntime
 from runtime.task_runtime import TaskHandle
-from sessions.execution_state import TaskControlType
+from tasks.state import TaskControlType
 
 
 class FakeEventRuntime:

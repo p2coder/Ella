@@ -58,7 +58,6 @@ class FinalResponseGenerator:
         ] = (),
         completion_summary: str = "",
         evidence_refs: Iterable[str] = (),
-        **_: Any,
     ) -> FinalResponseResult:
         generation_started = perf_counter()
         tool_results_tuple = tuple(tool_results)
@@ -68,7 +67,7 @@ class FinalResponseGenerator:
         execution_failure_summary = self.summarize_execution_failures(
             execution_failures_tuple
         )
-        legacy_context = {
+        prompt_context = {
             "trace_id": trace_id,
             "user_input": user_input,
             "task_goal": task_goal,
@@ -88,8 +87,8 @@ class FinalResponseGenerator:
             "evidence_refs": tuple(evidence_refs),
         }
         if execution_failure_summary:
-            legacy_context["execution_failure_summary"] = execution_failure_summary
-        context = dict(legacy_context)
+            prompt_context["execution_failure_summary"] = execution_failure_summary
+        context = dict(prompt_context)
         if isinstance(self.prompt_engine, PromptEngine):
             context.update(
                 {

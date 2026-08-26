@@ -40,7 +40,7 @@ class StandardizedEvent:
     stage: EventStage = STANDARDIZED_EVENT_STAGE
     confidence: float | None = None
     priority: float | None = None
-    target_session_id: str | None = None
+    target_task_id: str | None = None
     caused_by_task_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -54,7 +54,7 @@ class StandardizedEvent:
             "stage": self.stage.name,
             "confidence": self.confidence,
             "priority": self.priority,
-            "target_session_id": self.target_session_id,
+            "target_task_id": self.target_task_id,
             "caused_by_task_id": self.caused_by_task_id,
             "metadata": self.metadata,
         }

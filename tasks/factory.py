@@ -3,11 +3,10 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from agent.context import AgentExecutionContext, CapabilityScope
-from agent.handoff import HandoffRequest
 from skill.manager import SkillManager
 from tools.manager import ToolManager
 
-from .task import Task, TaskIntent
+from .task import Task
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -44,36 +43,6 @@ class TaskFactory:
     skill_manager: SkillManager | None = None
     tool_manager: ToolManager | None = None
     task_id_factory: Callable[[], str] | None = None
-
-    def create_task(self, handoff: HandoffRequest) -> TaskCreationResult:
-        task_id = self._new_task_id()
-        context = AgentExecutionContext(
-            agent_id=self.agent_id,
-            agent_role=self.agent_role,
-            parent_agent_id=self.parent_agent_id,
-            task_id=task_id,
-            trace_id=handoff.trigger_event.trace_id,
-            handoff_goal=handoff.task_goal,
-            memory_scope=self.memory_scope,
-            permissions=self.permissions,
-            capability_scope=self._resolve_capability_scope(),
-        )
-        task = Task(
-            task_id=task_id,
-            handoff=handoff,
-            trace_id=handoff.trigger_event.trace_id,
-            source_event=handoff.trigger_event,
-            execution_context=context,
-            intent=TaskIntent(
-                goal=handoff.task_goal,
-                constraints=handoff.constraints,
-                deliverables=(handoff.context_summary,)
-                if handoff.context_summary
-                else (),
-                minimum_acceptance_criteria=handoff.completion_criteria,
-            ),
-        )
-        return TaskCreationResult(task=task)
 
     def _resolve_capability_scope(self) -> CapabilityScope:
         if self.skill_manager is None:

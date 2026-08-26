@@ -9,7 +9,7 @@ from skill import SkillManager
 from tasks.state import ToolFailureKind, ToolFailureObservation
 from tasks.task import Task
 from tools import ToolManager, ToolResult
-from tools.base import ToolUncertainPolicy, invoke_tool
+from tools.base import ToolUncertainPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +88,7 @@ class CapabilityExecutor:
 
         started = perf_counter()
         try:
-            result = invoke_tool(tool, context, arguments)
+            result = tool.run(context=context, arguments=arguments)
         except ValueError as error:
             self._record_timing(context, tool_name, started, False, "invalid_tool_input")
             return self._failure(
@@ -172,19 +172,15 @@ class CapabilityExecutor:
 
 
 def _may_have_unconfirmed_side_effect(tool: Any) -> bool:
-    definition = getattr(tool, "definition", None)
     return bool(
-        definition is not None
-        and getattr(definition, "side_effecting", False)
-        and getattr(definition, "uncertain_policy", None)
+        tool.definition.side_effecting
+        and tool.definition.uncertain_policy
         is ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH
     )
 
 
 def _tool_schema(tool: Any, schema_name: str) -> dict[str, Any]:
-    definition = getattr(tool, "definition", None)
-    schema = None if definition is None else getattr(definition, schema_name, None)
-    return schema if isinstance(schema, dict) else {"type": "object"}
+    return getattr(tool.definition, schema_name)
 
 
 def _validate_schema(value: Any, schema: dict[str, Any], *, path: str) -> str | None:

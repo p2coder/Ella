@@ -13,7 +13,6 @@ def _make_context(*, allowed_tools: tuple[str, ...]) -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-tools",
         task_id="task-tools",
         trace_id="trace-tools",
         handoff_goal="Give the user a short, necessary reminder before leaving.",

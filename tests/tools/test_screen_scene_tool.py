@@ -11,7 +11,6 @@ def make_context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="session-screen",
         task_id="task-screen",
         trace_id="trace-screen",
         handoff_goal="Identify what is currently visible on my screen.",
@@ -56,7 +55,6 @@ def test_screen_scene_captures_bounded_screenshot_and_calls_multimodal():
                 },
             ),
             "task_id": "task-screen",
-            "session_id": "session-screen",
             "handoff_goal": "Identify what is currently visible on my screen.",
         }
     ]

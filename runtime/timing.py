@@ -62,7 +62,6 @@ class RuntimeTimingSnapshot:
     trigger_pipeline_duration_ms: float | None = None
     routing_duration_ms: float | None = None
     presence_queue_duration_ms: float | None = None
-    task_formulation_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
     planning_duration_ms: float | None = None
@@ -91,7 +90,6 @@ class RuntimeTimingSnapshot:
             "trigger_pipeline_duration_ms": self.trigger_pipeline_duration_ms,
             "routing_duration_ms": self.routing_duration_ms,
             "presence_queue_duration_ms": self.presence_queue_duration_ms,
-            "task_formulation_duration_ms": self.task_formulation_duration_ms,
             "input_to_task_submitted_duration_ms": self.input_to_task_submitted_duration_ms,
             "queue_wait_duration_ms": self.queue_wait_duration_ms,
             "planning_duration_ms": self.planning_duration_ms,
@@ -121,7 +119,6 @@ class _RuntimeTimingTrace:
     trigger_pipeline_duration_ms: float | None = None
     routing_duration_ms: float | None = None
     presence_queue_duration_ms: float | None = None
-    task_formulation_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
     planning_duration_ms: float | None = None
@@ -142,7 +139,6 @@ class _RuntimeTimingTrace:
             trigger_pipeline_duration_ms=self.trigger_pipeline_duration_ms,
             routing_duration_ms=self.routing_duration_ms,
             presence_queue_duration_ms=self.presence_queue_duration_ms,
-            task_formulation_duration_ms=self.task_formulation_duration_ms,
             input_to_task_submitted_duration_ms=self.input_to_task_submitted_duration_ms,
             queue_wait_duration_ms=self.queue_wait_duration_ms,
             planning_duration_ms=self.planning_duration_ms,

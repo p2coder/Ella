@@ -57,7 +57,7 @@ def test_timing_can_attach_to_matching_boundary_without_becoming_state():
 
 
 def test_subagent_has_no_fixed_trace_file_overwrite():
-    source = Path("sessions/subagent.py").read_text(encoding="utf-8")
+    source = Path("agent/subagent.py").read_text(encoding="utf-8")
     assert 'open("trace/trace.json", "w"' not in source
 
 

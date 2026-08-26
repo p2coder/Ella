@@ -15,7 +15,6 @@ def _context(
         agent_id="ella-main",
         agent_role=agent_role,
         parent_agent_id=None,
-        session_id="session-discovery",
         task_id="task-discovery",
         trace_id="trace-discovery",
         handoff_goal="Prepare a reminder.",
@@ -152,7 +151,6 @@ class RoleLimitedTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={},
         )
@@ -183,7 +181,6 @@ class CountingTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            session_id=context.session_id,
             trace_id=context.trace_id,
             payload={},
         )

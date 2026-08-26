@@ -16,7 +16,6 @@ def test_snapshot_construction_from_explicit_values():
         scene_summary="Desk scene with phone and keys.",
         visible_items=("phone", "keys"),
         task_goal="Give the user a short reminder before leaving.",
-        task_formulation_prompt_text="formulation prompt",
         final_response_prompt_text="final prompt",
         tool_results_summary="camera_scene: phone and keys visible",
         final_response="Remember your phone and keys.",
@@ -38,7 +37,6 @@ def test_snapshot_serialization_is_deterministic():
         scene_summary="",
         visible_items=("wallet", "phone"),
         task_goal="Answer the user.",
-        task_formulation_prompt_text="formulation prompt",
         final_response_prompt_text="final prompt",
         tool_results_summary="",
         final_response="Done.",
@@ -53,7 +51,6 @@ def test_snapshot_serialization_is_deterministic():
         "scene_summary": "",
         "visible_items": ("wallet", "phone"),
         "task_goal": "Answer the user.",
-        "task_formulation_prompt_text": "formulation prompt",
         "first_decision_prompt_text": "",
         "execution_decision_prompt_text": "",
         "verification_prompt_text": "",
@@ -91,9 +88,6 @@ def test_prompt_fields_are_present_and_redacted():
         scene_summary="",
         visible_items=(),
         task_goal="Answer.",
-        task_formulation_prompt_text=(
-            "Authorization: Bearer sk-1234567890abcdef1234567890abcdef"
-        ),
         final_response_prompt_text=(
             "DASHSCOPE_API_KEY=abcdef1234567890abcdef1234567890"
         ),
@@ -104,9 +98,6 @@ def test_prompt_fields_are_present_and_redacted():
 
     serialized = snapshot.to_dict()
 
-    assert serialized["task_formulation_prompt_text"] == (
-        "Authorization: Bearer [REDACTED]"
-    )
     assert serialized["final_response_prompt_text"] == "[REDACTED]"
     assert "sk-1234567890abcdef1234567890abcdef" not in str(serialized)
     assert "abcdef1234567890abcdef1234567890" not in str(serialized)
@@ -133,7 +124,6 @@ def test_image_status_supports_required_values():
             scene_summary="",
             visible_items=(),
             task_goal="Answer.",
-            task_formulation_prompt_text="",
             final_response_prompt_text="",
             tool_results_summary="",
             final_response="Done.",
@@ -152,7 +142,6 @@ def test_invalid_image_status_raises_clear_error():
             scene_summary="",
             visible_items=(),
             task_goal="Answer.",
-            task_formulation_prompt_text="",
             final_response_prompt_text="",
             tool_results_summary="",
             final_response="Done.",
@@ -181,7 +170,6 @@ def test_snapshot_does_not_call_runtime_or_providers():
         scene_summary="",
         visible_items=(),
         task_goal="Answer.",
-        task_formulation_prompt_text="",
         final_response_prompt_text="",
         tool_results_summary="",
         final_response="Done.",
@@ -203,7 +191,6 @@ def test_snapshot_does_not_write_memory():
         scene_summary="",
         visible_items=(),
         task_goal="Answer.",
-        task_formulation_prompt_text="formulation prompt",
         final_response_prompt_text="final prompt",
         tool_results_summary="",
         final_response="Done.",

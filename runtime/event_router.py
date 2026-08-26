@@ -13,9 +13,9 @@ class RouteDestination:
             raise ValueError("route destination name must not be empty")
 
 
-SESSION_INBOX = RouteDestination(
-    "SESSION_INBOX",
-    "Route the event back to an active task session inbox.",
+TASK_INBOX = RouteDestination(
+    "TASK_INBOX",
+    "Route the event back to an active task inbox.",
 )
 AMBIENT_STATE = RouteDestination(
     "AMBIENT_STATE",
@@ -31,7 +31,7 @@ PRESENCE_QUEUE = RouteDestination(
 )
 
 DEFAULT_ROUTE_DESTINATIONS = (
-    SESSION_INBOX,
+    TASK_INBOX,
     AMBIENT_STATE,
     SUPPRESSED,
     PRESENCE_QUEUE,
@@ -60,48 +60,17 @@ class RouteDestinationRegistry:
         return tuple(self._destinations.values())
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class EventRouteResult:
     event: StandardizedEvent
     destination: RouteDestination
     reason: str
     target_task_id: str | None = None
 
-    def __init__(
-        self,
-        event: StandardizedEvent,
-        destination: RouteDestination,
-        reason: str,
-        target_task_id: str | None = None,
-        target_session_id: str | None = None,
-    ) -> None:
-        object.__setattr__(self, "event", event)
-        object.__setattr__(self, "destination", destination)
-        object.__setattr__(self, "reason", reason)
-        object.__setattr__(
-            self, "target_task_id", target_task_id or target_session_id
-        )
-
-    @property
-    def target_session_id(self) -> str | None:
-        return self.target_task_id
-
-
-@dataclass(frozen=True, slots=True, init=False)
-class SessionAwareEventRouter:
+@dataclass(frozen=True, slots=True)
+class TaskAwareEventRouter:
     active_task_ids: set[str] | None = None
     destination_registry: RouteDestinationRegistry | None = None
-
-    def __init__(
-        self,
-        active_task_ids: set[str] | None = None,
-        destination_registry: RouteDestinationRegistry | None = None,
-        active_session_ids: set[str] | None = None,
-    ) -> None:
-        object.__setattr__(
-            self, "active_task_ids", active_task_ids or active_session_ids
-        )
-        object.__setattr__(self, "destination_registry", destination_registry)
 
     def route(self, event: StandardizedEvent) -> EventRouteResult:
         active_task_ids = self.active_task_ids or set()
@@ -110,8 +79,8 @@ class SessionAwareEventRouter:
         if task_id in active_task_ids:
             return EventRouteResult(
                 event=event,
-                destination=self._destination("SESSION_INBOX"),
-                reason="event targets an active task session",
+                destination=self._destination("TASK_INBOX"),
+                reason="event targets an active task",
                 target_task_id=task_id,
             )
 
@@ -150,7 +119,7 @@ class SessionAwareEventRouter:
         )
 
     def _task_id_for(self, event: StandardizedEvent) -> str | None:
-        return event.caused_by_task_id or getattr(event, "target_task_id", None)
+        return event.caused_by_task_id or event.target_task_id
 
     def _destination(self, destination_name: str) -> RouteDestination:
         registry = self.destination_registry or RouteDestinationRegistry()

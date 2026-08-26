@@ -14,7 +14,6 @@ def make_snapshot() -> RunDisplaySnapshot:
         scene_summary="",
         visible_items=(),
         task_goal="Respond to the greeting.",
-        task_formulation_prompt_text="",
         final_response_prompt_text="",
         tool_results_summary="",
         final_response="<回答>",
@@ -75,7 +74,7 @@ def test_web_ui_renders_microphone_action_and_pending_behavior():
     assert 'id="microphone-button"' in html
     assert "Microphone" in html
     assert 'fetch("/microphone"' in html
-    assert 'pendingStatus.textContent = "Listening..."' in html
+    assert 'beginRequest("Listening...")' in html
     assert "submitButton.disabled = true" in html
     assert "microphoneButton.disabled = true" in html
     assert "submitButton.disabled = false" in html

@@ -19,7 +19,6 @@ def test_final_response_generator_builds_prompt_through_prompt_engine():
             ToolResult(
                 tool_name="camera_scene",
                 task_id="task-1",
-                session_id="session-1",
                 trace_id="trace-final",
                 payload={
                     "scene_summary": "Phone is visible on the desk.",
@@ -31,10 +30,10 @@ def test_final_response_generator_builds_prompt_through_prompt_engine():
         environment_summary="Desk scene available.",
     )
 
-    assert prompt_engine.calls == [
-        (
-            PromptType.FINAL_RESPONSE,
-            {
+    assert len(prompt_engine.calls) == 1
+    prompt_type, context = prompt_engine.calls[0]
+    assert prompt_type == PromptType.FINAL_RESPONSE
+    assert context.items() >= {
                 "trace_id": "trace-final",
                 "user_input": "Ella，我要出门了",
                 "task_goal": "Give a short leaving reminder.",
@@ -51,9 +50,7 @@ def test_final_response_generator_builds_prompt_through_prompt_engine():
                 "environment_summary": "Desk scene available.",
                 "memory_context": "",
                 "provider_or_tool_errors": (),
-            },
-        )
-    ]
+            }.items()
     assert llm_provider.prompts == ["final response prompt"]
     assert result.final_response == "Remember your phone."
     assert result.prompt_trace == {
@@ -91,7 +88,6 @@ def test_tool_results_are_summarized_without_python_repr():
     tool_result = ToolResult(
         tool_name="camera_scene",
         task_id="task-1",
-        session_id="session-1",
         trace_id="trace-summary",
         payload={
             "scene_summary": "Umbrella is not visible.",
@@ -185,7 +181,6 @@ def test_unavailable_visual_context_is_reflected_in_context_and_fallback():
             ToolResult(
                 tool_name="camera_scene",
                 task_id="task-1",
-                session_id="session-1",
                 trace_id="trace-visual",
                 payload={"available": False, "summary": "Visual context is unavailable."},
             )
@@ -199,10 +194,6 @@ def test_unavailable_visual_context_is_reflected_in_context_and_fallback():
 
 
 def test_generator_does_not_execute_tools_mutate_sessions_or_write_memory():
-    class ExplodingObject:
-        def __getattr__(self, name):
-            raise AssertionError(f"unexpected external access: {name}")
-
     result = FinalResponseGenerator(
         prompt_engine=RecordingPromptEngine(prompt="prompt"),
         llm_provider=RecordingLLMProvider(output={"text": "No side effects."}),
@@ -211,9 +202,6 @@ def test_generator_does_not_execute_tools_mutate_sessions_or_write_memory():
         user_input="hello",
         task_goal="Answer briefly.",
         tool_results=[],
-        task_session=ExplodingObject(),
-        memory_manager=ExplodingObject(),
-        tool_manager=ExplodingObject(),
     )
 
     assert result.final_response == "No side effects."

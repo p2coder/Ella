@@ -11,7 +11,6 @@ def make_snapshot() -> RunDisplaySnapshot:
         scene_summary="Desk scene with phone and keys.",
         visible_items=("phone", "keys"),
         task_goal="Give the user a short reminder before leaving.",
-        task_formulation_prompt_text="TASK FORMULATION PROMPT",
         final_response_prompt_text="FINAL RESPONSE PROMPT",
         tool_results_summary="camera_scene: phone and keys visible",
         final_response="Remember your phone and keys.",
@@ -38,7 +37,7 @@ def test_page_viewer_renders_snapshot_fields():
     assert "Desk scene with phone and keys." in html
     assert "phone, keys" in html
     assert "Give the user a short reminder before leaving." in html
-    assert "TASK FORMULATION PROMPT" in html
+    assert "FINAL RESPONSE PROMPT" in html
     assert "FINAL RESPONSE PROMPT" in html
     assert "camera_scene: phone and keys visible" in html
     assert "Remember your phone and keys." in html
@@ -58,7 +57,7 @@ def test_prompt_details_are_collapsible():
     html = render_snapshot_html(make_snapshot())
 
     assert "<details" in html
-    assert "TASK FORMULATION PROMPT" in html
+    assert "FINAL RESPONSE PROMPT" in html
     assert "FINAL RESPONSE PROMPT" in html
 
 
@@ -80,7 +79,6 @@ def test_renderer_escapes_html_content():
         scene_summary="<b>unsafe</b>",
         visible_items=("<phone>",),
         task_goal="Answer safely.",
-        task_formulation_prompt_text="<xml>",
         final_response_prompt_text="<prompt>",
         tool_results_summary="<tool>",
         final_response="<answer>",

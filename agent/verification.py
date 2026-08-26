@@ -4,9 +4,11 @@ from time import perf_counter
 from typing import Any, Mapping
 
 from prompts.engine import PromptEngine, PromptType
-from providers.llm import serialize_tool_definitions
+from providers.base import ProviderResult
+from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from tasks.task import Task, TaskGoalState
+from tools.base import ToolDefinition
 
 
 class VerificationDecisionError(ValueError):
@@ -54,12 +56,16 @@ class VerificationAction:
 @dataclass(frozen=True, slots=True)
 class VerificationAgent:
     prompt_engine: PromptEngine = field(default_factory=PromptEngine)
-    llm_provider: Any | None = None
+    llm_provider: LLMProvider | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
     )
 
-    def decide(self, task: Task, definitions: tuple[Any, ...] = ()) -> VerificationAction:
+    def decide(
+        self,
+        task: Task,
+        definitions: tuple[ToolDefinition, ...] = (),
+    ) -> VerificationAction:
         if task.intent is None:
             raise VerificationDecisionError("verification requires TaskIntent")
         draft = str(task.task_local_state.get("draft_final_response", "")).strip()
@@ -112,7 +118,7 @@ class VerificationAgent:
         try:
             return self._action_from_output(result.output, definitions)
         except VerificationDecisionError:
-            if bool(getattr(result, "metadata", {}).get("mock")):
+            if bool(result.metadata.get("mock")):
                 return VerificationAction(
                     "VERIFICATION_VERDICT",
                     verdict=self._deterministic_verdict(draft),
@@ -125,20 +131,27 @@ class VerificationAgent:
             raise VerificationDecisionError("verification requested an unavailable Tool")
         return action.verdict
 
-    def _record_timing(self, task: Task, started: float, success: bool, result: Any) -> None:
+    def _record_timing(
+        self,
+        task: Task,
+        started: float,
+        success: bool,
+        result: ProviderResult | None,
+    ) -> None:
+        provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
             task.trace_id,
             boundary="verification_decision",
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,
-            provider_name=getattr(result or self.llm_provider, "provider_name", None),
-            model_name=getattr(result or self.llm_provider, "model_name", None),
+            provider_name=None if provider is None else provider.provider_name,
+            model_name=None if provider is None else provider.model_name,
         )
 
     @staticmethod
     def _action_from_output(
         output: Any,
-        definitions: tuple[Any, ...],
+        definitions: tuple[ToolDefinition, ...],
     ) -> VerificationAction:
         if isinstance(output, Mapping) and isinstance(output.get("text"), str):
             output = output["text"]

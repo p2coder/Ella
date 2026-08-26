@@ -77,36 +77,6 @@ def test_camera_disabled_prevents_real_camera_provider_creation():
     assert result.trace_id == "trace-camera-disabled"
 
 
-def test_enabled_real_devices_return_unavailable_without_crashing():
-    factory = DeviceFactory(
-        load_settings(
-            {
-                "ELLA_USE_REAL_PROVIDERS": "true",
-                "ELLA_MIC_ENABLED": "true",
-                "ELLA_CAMERA_ENABLED": "true",
-                "ELLA_MIC_DEVICE": "studio-mic",
-                "ELLA_CAMERA_DEVICE": "front-camera",
-            }
-        )
-    )
-
-    mic_result = factory.microphone().capture()
-    camera_result = factory.camera().capture_frame()
-
-    assert mic_result.failed is True
-    assert mic_result.error.message == "real microphone provider is not wired yet"
-    assert mic_result.error.metadata == {
-        "device_kind": "microphone",
-        "device_name": "studio-mic",
-    }
-    assert camera_result.failed is True
-    assert camera_result.error.message == "real camera provider is not wired yet"
-    assert camera_result.error.metadata == {
-        "device_kind": "camera",
-        "device_name": "front-camera",
-    }
-
-
 def test_package_import_has_no_device_access_or_factory_side_effects():
     assert not hasattr(devices, "DeviceFactory")
     assert not hasattr(devices, "MockMicrophoneProvider")

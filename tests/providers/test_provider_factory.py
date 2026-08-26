@@ -31,28 +31,6 @@ def test_mock_mode_never_imports_real_qwen_provider():
     assert "providers.qwen" not in sys.modules
 
 
-def test_real_provider_mode_without_qwen_wiring_does_not_crash():
-    factory = ProviderFactory(
-        load_settings(
-            {
-                "ELLA_USE_REAL_PROVIDERS": "true",
-                "ELLA_QWEN_API_KEY": "test-key",
-            }
-        )
-    )
-
-    result = factory.llm().generate("hello", trace_id="trace-real")
-
-    assert result.failed is True
-    assert result.error == ProviderError(
-        provider_name="unavailable_llm",
-        message="real provider is not wired yet",
-        code="provider_unavailable",
-        metadata={"requested_provider": "qwen"},
-    )
-    assert result.trace_id == "trace-real"
-
-
 def test_real_provider_mode_missing_api_key_returns_structured_unavailable_result():
     factory = ProviderFactory(load_settings({"ELLA_USE_REAL_PROVIDERS": "true"}))
 

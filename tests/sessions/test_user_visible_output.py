@@ -1,4 +1,4 @@
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 
 
 def test_user_visible_output_represents_process_and_final_response():

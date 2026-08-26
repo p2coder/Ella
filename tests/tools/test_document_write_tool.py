@@ -13,7 +13,6 @@ def _context() -> AgentExecutionContext:
         agent_id="ella-main",
         agent_role="main_agent",
         parent_agent_id=None,
-        session_id="task-document",
         task_id="task-document",
         trace_id="trace-document",
         handoff_goal="Write a report",

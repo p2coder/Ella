@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from app_runtime import AppRuntime
 from events.microphone_source import MicrophoneSourceResult
 from events.signal import RawSignal
-from sessions.output import UserVisibleAgentOutput
+from tasks.output import UserVisibleAgentOutput
 
 
 class RecordingMicrophoneSource:
@@ -39,8 +39,11 @@ class RecordingTaskRuntime:
     def __init__(self) -> None:
         self.task_ids = []
 
-    def run_until_complete(self, task_id: str, max_steps: int):
-        self.task_ids.append((task_id, max_steps))
+    def get_task(self, task_id: str):
+        self.task_ids.append(task_id)
+        return SimpleNamespace(state=SimpleNamespace(value="delivered"))
+
+    def result_for(self, task_id: str):
         completion = SimpleNamespace(
             user_visible_output=UserVisibleAgentOutput(
                 process={"task_goal": "Respond to the transcript."},
@@ -56,6 +59,18 @@ class RecordingTaskRuntime:
             ),
             failure_reason=None,
             stop_reason="completed",
+            handle=SimpleNamespace(task_id=task_id),
+            task=SimpleNamespace(
+                state=SimpleNamespace(value="delivered"),
+                active_step_ids=(),
+                paused_from_state=None,
+                terminal_outcome=None,
+                delivery=None,
+                goal_state=None,
+                terminal_execution_state=None,
+                task_local_state={},
+            ),
+            timing=None,
         )
 
 
@@ -85,7 +100,7 @@ def test_microphone_success_uses_source_once_and_runtime_flow():
     assert len(source.calls) == 1
     assert event_runtime.signals[0].source == "cli_input"
     assert event_runtime.signals[0].signal_type == "cli_text"
-    assert task_runtime.task_ids == [("task-microphone", 20)]
+    assert task_runtime.task_ids == ["task-microphone"]
     assert result.snapshot.user_input == "你好"
     assert result.snapshot.transcript == "你好"
     assert statuses == ["Listening...", "Transcription complete."]
