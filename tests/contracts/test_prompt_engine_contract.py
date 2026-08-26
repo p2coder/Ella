@@ -146,7 +146,7 @@ def test_no_suitable_tool_or_skill_does_not_imply_task_failure():
 
     assert "If no Skill fits" in prompt
     assert "continue without Skill instead of failing" in prompt
-    assert "If no suitable Tool is available" in prompt
+    assert "answer directly when no Tool is needed" in prompt
     assert "SUBMIT_RESULT" in prompt
 
 

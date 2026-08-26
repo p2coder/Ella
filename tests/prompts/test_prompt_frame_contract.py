@@ -98,4 +98,4 @@ def test_prompt_frame_does_not_call_external_runtime_services():
     )
 
     assert isinstance(result.prompt, str)
-    assert "ExplodingService" in result.prompt
+    assert "[UNSUPPORTED_OBJECT]" in result.prompt

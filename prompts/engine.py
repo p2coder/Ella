@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import re
 from typing import Any, Mapping, Sequence
 
@@ -7,6 +8,8 @@ from prompts.templates import TEMPLATES_BY_TYPE, PromptTemplate
 
 WORKSPACE_CONTEXT_KEYS = frozenset(("workspace", "WorkSpace"))
 MEMORY_CONTEXT_KEYS = frozenset(("memory", "memory_context", "Memory"))
+USER_PROMPT_CONTEXT_KEYS = frozenset(("user_input", "user_prompt", "UserPrompt"))
+WORKSPACE_PRIORITY_KEYS = ("visible_tools", "visible_skills")
 SENSITIVE_FIELD_MARKERS = (
     "api_key",
     "authorization",
@@ -114,15 +117,12 @@ class PromptEngine:
         context: Mapping[str, Any],
     ) -> str:
         frame = self._frame_for(template=template, context=context)
-        block_text = "\n\n".join(
+        sections = [
             f"{block.name}:\n{self._format_value(block.content)}"
             for block in frame.blocks
-        )
-
-        return (
-            f"{block_text}\n\n"
-            f"OutputContract:\n{frame.output_contract}"
-        )
+        ]
+        sections.append(f"FinalOutputReminder:\n{template.final_output_reminder}")
+        return "\n\n".join(sections)
 
     def _frame_for(
         self,
@@ -130,10 +130,17 @@ class PromptEngine:
         template: PromptTemplate,
         context: Mapping[str, Any],
     ) -> PromptFrame:
-        blocks: list[PromptBlock] = [
-            PromptBlock("SystemPrompt", template.system_prompt),
-            PromptBlock("Instruction", template.instruction),
-        ]
+        blocks: list[PromptBlock] = [PromptBlock("SystemPrompt", template.system_prompt)]
+        if template.capability_policy:
+            blocks.append(
+                PromptBlock("GlobalCapabilityPolicy", template.capability_policy)
+            )
+        blocks.extend(
+            (
+                PromptBlock("PromptTypeInstruction", template.instruction),
+                PromptBlock("OutputContract", template.output_contract),
+            )
+        )
 
         memory_content = self._first_context_value(
             context,
@@ -143,11 +150,16 @@ class PromptEngine:
             context,
             keys=WORKSPACE_CONTEXT_KEYS,
         )
+        user_prompt_content = self._first_context_value(
+            context,
+            keys=USER_PROMPT_CONTEXT_KEYS,
+        )
         remaining_context = {
             key: context[key]
             for key in sorted(context)
             if key not in MEMORY_CONTEXT_KEYS
             and key not in WORKSPACE_CONTEXT_KEYS
+            and key not in USER_PROMPT_CONTEXT_KEYS
         }
 
         if memory_content is not None:
@@ -157,11 +169,11 @@ class PromptEngine:
                     self._sanitize_prompt_content(memory_content),
                 )
             )
-        if workspace_content is not None:
+        if user_prompt_content is not None:
             blocks.append(
                 PromptBlock(
-                    "WorkSpace",
-                    self._sanitize_prompt_content(workspace_content),
+                    "UserPrompt",
+                    self._sanitize_prompt_content(user_prompt_content),
                 )
             )
         if remaining_context or not context:
@@ -171,11 +183,46 @@ class PromptEngine:
                     remaining_context or {"none": "none"},
                 )
             )
+        if workspace_content is not None:
+            blocks.append(
+                PromptBlock(
+                    "WorkSpace",
+                    self._sanitize_workspace(workspace_content),
+                )
+            )
 
         return PromptFrame.from_blocks(
             prompt_type=template.name,
             blocks=blocks,
-            output_contract=template.instruction,
+            output_contract=template.output_contract,
+        )
+
+    def _sanitize_workspace(self, value: Any) -> Any:
+        sanitized = self._sanitize_prompt_content(value)
+        if not isinstance(sanitized, Mapping):
+            return sanitized
+        ordered: dict[str, Any] = {}
+        for key in WORKSPACE_PRIORITY_KEYS:
+            if key in sanitized:
+                ordered[key] = self._sort_named_items(sanitized[key])
+        for key in sorted(sanitized):
+            if key not in ordered:
+                ordered[key] = sanitized[key]
+        return ordered
+
+    @staticmethod
+    def _sort_named_items(value: Any) -> Any:
+        if not isinstance(value, (list, tuple)):
+            return value
+        return tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    str(item.get("name", ""))
+                    if isinstance(item, Mapping)
+                    else str(item)
+                ),
+            )
         )
 
     def _first_context_value(
@@ -234,16 +281,14 @@ class PromptEngine:
         )
 
     def _format_value(self, value: Any) -> str:
-        if isinstance(value, Mapping):
-            return "{" + ", ".join(
-                f"{key}: {self._format_value(item)}"
-                for key, item in sorted(value.items())
-            ) + "}"
-        if isinstance(value, (list, tuple, set, frozenset)):
-            return ", ".join(self._format_value(item) for item in value)
-        if value is None:
-            return "none"
-        return str(value)
+        if isinstance(value, str):
+            return value
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=lambda _: "[UNSUPPORTED_OBJECT]",
+        )
 
 
 SECRET_PATTERNS = (

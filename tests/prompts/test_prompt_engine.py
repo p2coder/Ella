@@ -102,7 +102,7 @@ def test_prompt_engine_does_not_call_external_runtime_services():
     result = PromptEngine().build(PromptType.FINAL_RESPONSE, context)
 
     assert "llm_provider" in result.context_keys
-    assert "ExplodingService" in result.prompt
+    assert "[UNSUPPORTED_OBJECT]" in result.prompt
 
 
 def test_system_prompt_is_not_going_out_specific():

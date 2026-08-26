@@ -171,3 +171,77 @@ def test_skill_and_tool_policy_sections_do_not_duplicate_runtime_lists():
     assert "rare_tool_name" not in instruction
     assert "rare_skill_name" in prompt
     assert "rare_tool_name" in prompt
+
+
+def test_decision_prompt_orders_stable_blocks_before_workspace():
+    prompt = build_workspace_prompt(
+        {
+            "observations": ({"observation_id": "obs-1"},),
+            "visible_skills": ({"name": "z_skill"}, {"name": "a_skill"}),
+            "visible_tools": ({"name": "z_tool"}, {"name": "a_tool"}),
+        },
+        memory_context="remembered",
+        user_prompt="do the task",
+    )
+
+    names = (
+        "SystemPrompt:",
+        "GlobalCapabilityPolicy:",
+        "PromptTypeInstruction:",
+        "OutputContract:",
+        "Memory:",
+        "UserPrompt:",
+        "WorkSpace:",
+        "FinalOutputReminder:",
+    )
+    positions = tuple(prompt.index(name) for name in names)
+    assert positions == tuple(sorted(positions))
+
+
+def test_workspace_prioritizes_and_sorts_visible_capabilities():
+    prompt = build_workspace_prompt(
+        {
+            "task_id": "task-1",
+            "visible_skills": ({"name": "z_skill"}, {"name": "a_skill"}),
+            "visible_tools": ({"name": "z_tool"}, {"name": "a_tool"}),
+            "observations": (),
+        }
+    )
+    workspace = prompt.split("WorkSpace:\n", 1)[1].split(
+        "\n\nFinalOutputReminder:", 1
+    )[0]
+
+    assert workspace.index('"visible_tools"') < workspace.index('"visible_skills"')
+    assert workspace.index('"visible_skills"') < workspace.index('"observations"')
+    assert workspace.index('"a_tool"') < workspace.index('"z_tool"')
+    assert workspace.index('"a_skill"') < workspace.index('"z_skill"')
+
+
+def test_workspace_changes_do_not_change_decision_prompt_prefix():
+    first = build_workspace_prompt(
+        {"visible_tools": (), "visible_skills": (), "observations": ()},
+        user_prompt="same task",
+    )
+    second = build_workspace_prompt(
+        {
+            "visible_tools": (),
+            "visible_skills": (),
+            "observations": ({"observation_id": "obs-2"},),
+        },
+        user_prompt="same task",
+    )
+
+    assert first.split("WorkSpace:\n", 1)[0] == second.split("WorkSpace:\n", 1)[0]
+
+
+def test_instruction_and_output_contract_are_not_duplicated():
+    prompt = build_workspace_prompt({}, user_prompt="hello")
+    instruction = prompt.split("PromptTypeInstruction:\n", 1)[1].split(
+        "\n\nOutputContract:", 1
+    )[0]
+    output_contract = prompt.split("OutputContract:\n", 1)[1].split(
+        "\n\nUserPrompt:", 1
+    )[0]
+
+    assert instruction != output_contract
+    assert prompt.count("Return one strict JSON object") == 1
