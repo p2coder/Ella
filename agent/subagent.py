@@ -86,6 +86,8 @@ class SubAgent:
             not result.failed,
             result,
         )
+        if isinstance(result.metadata.get("usage"), dict):
+            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
         if result.failed:
             raise DecisionValidationError("first decision provider failed")
         try:
@@ -198,6 +200,8 @@ class SubAgent:
             not result.failed,
             result,
         )
+        if isinstance(result.metadata.get("usage"), dict):
+            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
         if result.failed:
             raise DecisionValidationError("execution decision provider failed")
         try:

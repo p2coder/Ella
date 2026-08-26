@@ -113,6 +113,8 @@ class VerificationAgent:
             self._record_timing(task, started, False, None)
             raise
         self._record_timing(task, started, not result.failed, result)
+        if isinstance(result.metadata.get("usage"), dict):
+            task.task_local_state["provider_usage"] = dict(result.metadata["usage"])
         if result.failed:
             raise VerificationDecisionError("verification provider failed")
         try:

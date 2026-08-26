@@ -149,6 +149,7 @@ class DeepSeekLLMProvider:
                 }
             )
             content = self._content(response)
+            usage = self._usage(response)
         except DeepSeekTransportError as error:
             return self._error(trace_id, error.code, str(error), {})
         except Exception:
@@ -168,8 +169,19 @@ class DeepSeekLLMProvider:
                 "real_provider_requested": True,
                 "thinking_enabled": self.thinking_enabled,
                 "reasoning_effort": self.reasoning_effort,
+                **({"usage": usage} if usage else {}),
             },
         )
+
+    @staticmethod
+    def _usage(response: Any) -> dict[str, Any]:
+        value = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        dump = getattr(value, "model_dump", None)
+        return dict(dump()) if callable(dump) else {}
 
     @staticmethod
     def _content(response: Any) -> str:

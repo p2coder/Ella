@@ -55,15 +55,16 @@ def test_task_snapshot_endpoint_returns_both_task_lists():
 def test_web_ui_uses_sse_and_has_no_task_polling_loop():
     source = Path("demo/static/web_ui.html").read_text(encoding="utf-8")
     assert 'new EventSource("/task-events")' in source
-    assert "Active tasks" in source
-    assert "Finished tasks" in source
+    assert "运行中" in source
+    assert "已完成" in source
+    assert "失败" in source
     assert '"task_interaction_required"' in source
     assert 'fetch("/tasks/input"' in source
-    assert 'id="timing-summary"' in source
-    assert "updateDisplayedTask(task)" in source
-    assert "task.timing_summary || display.timing_summary" in source
-    assert 'eventName === "task_terminal"' in source
-    assert "refreshDisplayedTask(task)" in source
-    assert "`/task?task_id=${encodeURIComponent(task.task_id)}`" in source
+    assert 'id="total-duration"' in source
+    assert "renderSelectedTask(task)" in source
+    assert "task.timing" in source
+    assert 'eventName==="task_terminal"' in source
+    assert "selectTask(task.task_id)" in source
+    assert "`/task?task_id=${encodeURIComponent(taskId)}`" in source
     assert "scheduleTaskRefresh" not in source
     assert "setTimeout" not in source

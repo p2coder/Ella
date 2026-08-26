@@ -355,12 +355,14 @@ class AppRuntime:
                 else None
             ),
             "final_response": None,
+            "model_output": _current_model_output(task),
         }
         result = self._task_runtime.result_for(task.task_id)
         projection["timing"] = (
             None if result.timing is None else result.timing.to_dict()
         )
         projection["timing_summary"] = _timing_summary(result)
+        projection.update(_usage_projection(task))
         if result.completion is not None:
             user_input = ""
             source_event = task.source_event
@@ -585,6 +587,51 @@ def _public_value(value: Any) -> Any:
     if is_dataclass(value):
         return _public_value(asdict(value))
     return str(value)
+
+
+def _current_model_output(task) -> str:
+    """Expose user-facing model text without leaking prompts or hidden reasoning."""
+    if task.completion is not None:
+        return task.completion.user_visible_output.final_response
+    draft = task.task_local_state.get("draft_final_response")
+    if isinstance(draft, str) and draft.strip():
+        return draft
+    decision = task.task_local_state.get("current_decision")
+    if isinstance(decision, Mapping):
+        for key in ("final_response_draft", "completion_summary", "decision_reason"):
+            value = decision.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
+
+
+def _usage_projection(task) -> dict[str, object]:
+    """Normalize token usage if an OpenAI-compatible provider preserved it."""
+    usage = task.task_local_state.get("usage")
+    if not isinstance(usage, Mapping):
+        usage = task.task_local_state.get("provider_usage")
+    if not isinstance(usage, Mapping):
+        return {
+            "token_usage": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "cached_tokens": None,
+            "cache_hit_rate": None,
+        }
+    prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+    completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+    total = int(usage.get("total_tokens", prompt + completion) or 0)
+    details = usage.get("prompt_tokens_details", usage.get("input_tokens_details", {}))
+    cached = int(usage.get("cached_tokens", 0) or 0)
+    if isinstance(details, Mapping) and details.get("cached_tokens") is not None:
+        cached = int(details.get("cached_tokens", 0) or 0)
+    return {
+        "token_usage": total,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "cached_tokens": cached,
+        "cache_hit_rate": round(cached / prompt * 100, 1) if prompt else None,
+    }
 
 
 def _build_display_snapshot(
