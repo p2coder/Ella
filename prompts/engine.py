@@ -1,12 +1,37 @@
 from dataclasses import dataclass
+import json
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from prompts.templates import TEMPLATES_BY_TYPE, PromptTemplate
 
 
 WORKSPACE_CONTEXT_KEYS = frozenset(("workspace", "WorkSpace"))
 MEMORY_CONTEXT_KEYS = frozenset(("memory", "memory_context", "Memory"))
+USER_PROMPT_CONTEXT_KEYS = frozenset(("user_input", "user_prompt", "UserPrompt"))
+# Cache-friendly workspace field order. Provider prefix caching (DeepSeek
+# automatic context caching / DashScope context cache) reuses only the
+# byte-identical head of the prompt, so a field that changes between two
+# calls invalidates everything after it. Fields are therefore ordered:
+#   whole-task stable → append-only shared history → per-node → per-wave →
+#   per-decision variable.
+# Unknown workspace keys are appended after these in sorted order, which keeps
+# their position stable as well.
+WORKSPACE_CACHE_ORDER = (
+    "visible_tools",
+    "visible_skills",
+    "overall_goal",
+    "task_id",
+    "trace_id",
+    "observations",
+    "completion_criteria",
+    "current_goal",
+    "plan",
+    "current_step",
+    "decision_repair",
+    "task_state",
+)
+WORKSPACE_SORTED_KEYS = ("visible_tools", "visible_skills")
 SENSITIVE_FIELD_MARKERS = (
     "api_key",
     "authorization",
@@ -23,7 +48,6 @@ SENSITIVE_FIELD_MARKERS = (
 
 class PromptType:
     FIRST_DECISION = "FIRST_DECISION"
-    FINAL_RESPONSE = "FINAL_RESPONSE"
     EXECUTION_DECISION = "EXECUTION_DECISION"
     VERIFICATION_DECISION = "VERIFICATION_DECISION"
 
@@ -42,44 +66,6 @@ class PromptBuildResult:
             "prompt_name": self.prompt_name,
             "context_keys": self.context_keys,
         }
-
-
-@dataclass(frozen=True, slots=True)
-class PromptBlock:
-    name: str
-    content: Any
-    metadata: Mapping[str, Any] | None = None
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("PromptBlock name must be non-empty")
-
-
-@dataclass(frozen=True, slots=True)
-class PromptFrame:
-    prompt_type: str
-    blocks: tuple[PromptBlock, ...]
-    output_contract: str
-
-    def __post_init__(self) -> None:
-        if not self.prompt_type:
-            raise ValueError("PromptFrame prompt_type must be non-empty")
-        if not self.output_contract:
-            raise ValueError("PromptFrame output_contract must be non-empty")
-
-    @classmethod
-    def from_blocks(
-        cls,
-        *,
-        prompt_type: str,
-        blocks: Sequence[PromptBlock],
-        output_contract: str,
-    ) -> "PromptFrame":
-        return cls(
-            prompt_type=prompt_type,
-            blocks=tuple(blocks),
-            output_contract=output_contract,
-        )
 
 
 class PromptEngine:
@@ -113,27 +99,29 @@ class PromptEngine:
         template: PromptTemplate,
         context: Mapping[str, Any],
     ) -> str:
-        frame = self._frame_for(template=template, context=context)
-        block_text = "\n\n".join(
-            f"{block.name}:\n{self._format_value(block.content)}"
-            for block in frame.blocks
-        )
+        blocks = self._blocks_for(template=template, context=context)
+        sections = [
+            f"{name}:\n{self._format_value(content)}"
+            for name, content in blocks
+        ]
+        sections.append(f"FinalOutputReminder:\n{template.final_output_reminder}")
+        return "\n\n".join(sections)
 
-        return (
-            f"{block_text}\n\n"
-            f"OutputContract:\n{frame.output_contract}"
-        )
-
-    def _frame_for(
+    def _blocks_for(
         self,
         *,
         template: PromptTemplate,
         context: Mapping[str, Any],
-    ) -> PromptFrame:
-        blocks: list[PromptBlock] = [
-            PromptBlock("SystemPrompt", template.system_prompt),
-            PromptBlock("Instruction", template.instruction),
-        ]
+    ) -> list[tuple[str, Any]]:
+        blocks: list[tuple[str, Any]] = [("SystemPrompt", template.system_prompt)]
+        if template.capability_policy:
+            blocks.append(("GlobalCapabilityPolicy", template.capability_policy))
+        blocks.extend(
+            (
+                ("PromptTypeInstruction", template.instruction),
+                ("OutputContract", template.output_contract),
+            )
+        )
 
         memory_content = self._first_context_value(
             context,
@@ -143,39 +131,61 @@ class PromptEngine:
             context,
             keys=WORKSPACE_CONTEXT_KEYS,
         )
+        user_prompt_content = self._first_context_value(
+            context,
+            keys=USER_PROMPT_CONTEXT_KEYS,
+        )
         remaining_context = {
             key: context[key]
             for key in sorted(context)
             if key not in MEMORY_CONTEXT_KEYS
             and key not in WORKSPACE_CONTEXT_KEYS
+            and key not in USER_PROMPT_CONTEXT_KEYS
         }
 
         if memory_content is not None:
+            blocks.append(("Memory", self._sanitize_prompt_content(memory_content)))
+        if user_prompt_content is not None:
             blocks.append(
-                PromptBlock(
-                    "Memory",
-                    self._sanitize_prompt_content(memory_content),
-                )
-            )
-        if workspace_content is not None:
-            blocks.append(
-                PromptBlock(
-                    "WorkSpace",
-                    self._sanitize_prompt_content(workspace_content),
-                )
+                ("UserPrompt", self._sanitize_prompt_content(user_prompt_content))
             )
         if remaining_context or not context:
-            blocks.append(
-                PromptBlock(
-                    "Context",
-                    remaining_context or {"none": "none"},
-                )
-            )
+            blocks.append(("Context", remaining_context or {"none": "none"}))
+        if workspace_content is not None:
+            blocks.append(("WorkSpace", self._sanitize_workspace(workspace_content)))
+        return blocks
 
-        return PromptFrame.from_blocks(
-            prompt_type=template.name,
-            blocks=blocks,
-            output_contract=template.instruction,
+    def _sanitize_workspace(self, value: Any) -> Any:
+        sanitized = self._sanitize_prompt_content(value)
+        if not isinstance(sanitized, Mapping):
+            return sanitized
+        ordered: dict[str, Any] = {}
+        for key in WORKSPACE_CACHE_ORDER:
+            if key in sanitized:
+                item = sanitized[key]
+                ordered[key] = (
+                    self._sort_named_items(item)
+                    if key in WORKSPACE_SORTED_KEYS
+                    else item
+                )
+        for key in sorted(sanitized):
+            if key not in ordered:
+                ordered[key] = sanitized[key]
+        return ordered
+
+    @staticmethod
+    def _sort_named_items(value: Any) -> Any:
+        if not isinstance(value, (list, tuple)):
+            return value
+        return tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    str(item.get("name", ""))
+                    if isinstance(item, Mapping)
+                    else str(item)
+                ),
+            )
         )
 
     def _first_context_value(
@@ -234,16 +244,14 @@ class PromptEngine:
         )
 
     def _format_value(self, value: Any) -> str:
-        if isinstance(value, Mapping):
-            return "{" + ", ".join(
-                f"{key}: {self._format_value(item)}"
-                for key, item in sorted(value.items())
-            ) + "}"
-        if isinstance(value, (list, tuple, set, frozenset)):
-            return ", ".join(self._format_value(item) for item in value)
-        if value is None:
-            return "none"
-        return str(value)
+        if isinstance(value, str):
+            return value
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=lambda _: "[UNSUPPORTED_OBJECT]",
+        )
 
 
 SECRET_PATTERNS = (

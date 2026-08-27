@@ -14,7 +14,6 @@ def _snapshot() -> RunDisplaySnapshot:
         scene_summary="",
         visible_items=(),
         task_goal="",
-        final_response_prompt_text="SECRET PROMPT",
         tool_results_summary="",
         final_response="Public final response",
         memory_status="recorded",
@@ -60,7 +59,51 @@ def test_usage_projection_calculates_cache_hit_rate_when_available():
         "completion_tokens": 20,
         "cached_tokens": 60,
         "cache_hit_rate": 60.0,
+        "provider_usage_calls": [],
     }
+
+
+def test_usage_projection_aggregates_text_calls_by_boundary():
+    calls = [
+        {
+            "boundary": "first_decision",
+            "provider_name": "qwen_llm",
+            "model_name": "qwen-plus",
+            "modality": "text",
+            "success": True,
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "cached_tokens": 50,
+            "total_tokens": 110,
+        },
+        {
+            "boundary": "verification_decision",
+            "provider_name": "qwen_llm",
+            "model_name": "qwen-plus",
+            "modality": "text",
+            "success": True,
+            "prompt_tokens": 50,
+            "completion_tokens": 5,
+            "cached_tokens": 25,
+            "total_tokens": 55,
+        },
+    ]
+    task = SimpleNamespace(task_local_state={"provider_usage_calls": calls})
+
+    projection = _usage_projection(task)
+
+    assert projection["token_usage"] == 165
+    assert projection["prompt_tokens"] == 150
+    assert projection["cached_tokens"] == 75
+    assert projection["cache_hit_rate"] == 50.0
+    assert projection["provider_usage_calls"] == calls
+
+
+def test_web_ui_includes_boundary_usage_rows():
+    html = render_web_ui_shell(_snapshot())
+
+    assert "providerUsageRows" in html
+    assert "boundary" in html
 
 
 def test_current_model_output_prefers_safe_draft():

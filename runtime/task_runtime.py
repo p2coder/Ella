@@ -2017,7 +2017,6 @@ class TaskRuntime:
                     "execution_decision_prompt_text",
                     "",
                 ),
-                "final_response_prompt_text": "",
                 "verification_prompt_text": session.task_local_state.get(
                     "verification_prompt_text",
                     "",

@@ -19,9 +19,9 @@ def test_repair_policy_binds_the_active_tool():
 
 
 def test_non_retryable_failures_are_not_blindly_retried():
-    instruction = EXECUTION_DECISION_TEMPLATE.instruction
+    policy = EXECUTION_DECISION_TEMPLATE.capability_policy
 
-    assert "permission" in instruction
-    assert "environment" in instruction
-    assert "internal" in instruction
-    assert "do not retry" in instruction
+    assert "Permission" in policy
+    assert "environment" in policy
+    assert "internal" in policy
+    assert "non-retryable" in policy

@@ -310,6 +310,9 @@ class _QwenProviderBase:
                     "metadata": dict(metadata or {}),
                 }
             )
+            usage = self._usage(raw_output)
+            if usage:
+                result_metadata["usage"] = usage
             output = self._normalize_output(raw_output)
         except QwenTransportError as error:
             error_metadata: dict[str, Any] = {}
@@ -342,6 +345,18 @@ class _QwenProviderBase:
             return output
         content = self._message_content(output)
         return self._normalize_content(content)
+
+    @staticmethod
+    def _usage(response: Any) -> dict[str, Any]:
+        value = response.get("usage") if isinstance(response, dict) else getattr(
+            response, "usage", None
+        )
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        dump = getattr(value, "model_dump", None)
+        return dict(dump()) if callable(dump) else {}
 
     def _is_normalized(self, output: dict[str, Any]) -> bool:
         raise NotImplementedError
@@ -575,6 +590,9 @@ class QwenLLMProvider(_QwenProviderBase):
                     "metadata": dict(metadata or {}),
                 }
             )
+            usage = self._usage(raw_output)
+            if usage:
+                result_metadata["usage"] = usage
             print("\n\n\n\n\n\nLLM output: ",raw_output,"\n\n\n\n\n")
             output = qwen_tool_call_to_decision(
                 raw_output,

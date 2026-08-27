@@ -23,7 +23,7 @@ class PlanSummaryProvider:
 
     def generate(self, prompt, *, trace_id=None, metadata=None):
         assert metadata == {"boundary": "execution_decision"}
-        assert "execution_complete: True" in prompt
+        assert '"execution_complete":true' in prompt
         return ProviderResult(
             self.provider_name,
             self.model_name,

@@ -6,6 +6,11 @@ class PromptTemplate:
     name: str
     system_prompt: str
     instruction: str
+    output_contract: str
+    capability_policy: str = ""
+    final_output_reminder: str = (
+        "Return only the output required by OutputContract."
+    )
 
 
 ELLA_SYSTEM_PROMPT = (
@@ -29,116 +34,62 @@ ELLA_SYSTEM_PROMPT = (
 
 
 SKILL_POLICY_PROMPT = (
-    "Skill policy: Skill is guidance for behavior, not an independent "
-    "execution engine and not a fixed execution plan. Use a Skill only when "
-    "it fits the current goal and is visible in the current WorkSpace. A "
-    "Skill must not bypass task permissions, ToolManager visibility, "
-    "CapabilityExecutor validation, or Runtime state transitions. If no "
-    "Skill fits the user request, continue without Skill instead of failing "
-    "the task. If a Skill cannot be used, explain the visible reason when it "
-    "matters to the user and continue with another safe path when possible."
+    "Skill is guidance for behavior, not an independent execution engine or "
+    "a fixed Tool sequence. Use only a Skill visible in WorkSpace. A Skill "
+    "must not bypass permissions, capability validation, or Runtime state "
+    "transitions. If no Skill fits, continue without Skill instead of failing "
+    "the task."
 )
 
 
 TOOL_POLICY_PROMPT = (
-    "Tool policy: Tool is an optional capability, not a mandatory step. "
-    "Call a Tool only when it is visible in the current WorkSpace and its "
-    "description and schema match the current need. If no suitable Tool is "
-    "available, answer directly or use the visible ask_user_question "
-    "interaction capability when user input is required. Treat Tool results "
-    "as observations; update the "
-    "next decision from those observations. Tool failures are not successful "
-    "facts. Invalid parameters, missing permissions, unavailable tools, and "
-    "unexpected tool results should be reported or used to choose a safer "
-    "next action rather than retried blindly. A ToolResult is a successful "
-    "business observation. A ToolFailureObservation records an execution "
-    "failure and must not be treated as successful facts. Permission, "
-    "environment, and internal Tool failures are non-retryable by default; "
-    "do not retry them in the current logical Step."
+    "Tool is an optional capability, not a mandatory step. Call only a Tool "
+    "visible in WorkSpace, and answer directly when no Tool is needed. Never "
+    "claim that a Tool ran when it did not. Treat Tool results as observations "
+    "rather than automatic task completion. A ToolResult is a successful "
+    "business observation. A ToolFailureObservation records failures that "
+    "must not be treated as successful facts. If no suitable Tool is available, "
+    "answer directly when possible. Permission, environment, and "
+    "internal Tool failures are non-retryable by default."
 )
 
 
-DECISION_POLICY_PROMPT = (
-    f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT} One execution decision may "
-    "choose at most one action. CALL_TOOL may use exactly one visible tool. "
-    "SUBMIT_RESULT is valid when current information is enough, even if no Tool "
-    "was used. Planning and user interaction are expressed through visible "
-    "runtime capabilities, not separate actions."
-)
-
-
-FINAL_RESPONSE_TEMPLATE = PromptTemplate(
-    name="final_response",
-    system_prompt=ELLA_SYSTEM_PROMPT,
-    instruction=(
-        "Use the provided context to answer: 应该如何回应用户？ Produce a "
-        "short user-facing response that reflects the task goal, tool "
-        "results, memory_context, scene summary, and uncertainty. Use "
-        "memory_context only as prior conversation/task memory; current tool "
-        "results and current user input should take precedence. Treat visual "
-        "scene descriptions and visible_items as evidence, even when they "
-        "are embedded in natural language or JSON-like text. Compare any "
-        "checklist or requested items with what is visibly confirmed. Do not "
-        "remind the user to check an item that is clearly visible or already "
-        "confirmed; mention only missing, uncertain, or still-relevant items. "
-        "If visual evidence is ambiguous, say it is uncertain instead of "
-        "claiming it is absent."
-    ),
-)
+GLOBAL_CAPABILITY_POLICY = f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT}"
 
 
 EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     name="execution_decision",
     system_prompt=ELLA_SYSTEM_PROMPT,
+    capability_policy=GLOBAL_CAPABILITY_POLICY,
     instruction=(
-        f"{DECISION_POLICY_PROMPT} Return one strict JSON object. The action "
-        "must be CALL_TOOL or SUBMIT_RESULT. CALL_TOOL must include "
-        "a visible tool_name and an arguments object matching that tool's "
-        "schema. Include decision_reason for every action. SUBMIT_RESULT must also "
-        "include a non-empty completion_summary, a non-empty "
-        "final_response_draft, and evidence_refs containing "
-        "only observation IDs from WorkSpace; evidence_refs may be empty only "
-        "when the task does not depend on a capability result. "
-        "final_response_draft must be the complete answer ready to show the "
-        "user now; it must not promise that an answer or artifact will be "
-        "produced later. Read concrete "
-        "visible Skill summaries, visible CapabilityDefinition "
-        "summaries, and observations only from WorkSpace. Other actions must "
-        "not include a tool name. Use the provided "
-        "tool_results observations before choosing another tool call. If an "
-        "observation is sufficient for the current task, choose SUBMIT_RESULT. If "
-        "the user's request explicitly depends on current screen content and "
-        "screen_scene is visible, CALL_TOOL screen_scene before asking the "
-        "user for confirmation, unless the request is unsafe or the user "
-        "explicitly forbids screen capture. If the user's request explicitly "
-        "depends on the current physical visual environment and camera_scene "
-        "is visible, CALL_TOOL camera_scene before asking the user for "
-        "confirmation, unless the request is unsafe or the user explicitly "
-        "forbids camera capture. When the user says 屏幕, screen, on my "
-        "screen, 窗口, 页面, or web page, prefer screen_scene. When the user "
-        "says 摄像头, 房间, 面前, 周围, 看到我, or physical environment, "
-        "prefer camera_scene. Do not stop merely because no visual observation "
-        "exists yet when a suitable visible visual tool can "
-        "obtain that observation. The absence of an observation is a reason "
-        "to call the matching visible tool, not a reason to ask the user to "
-        "describe the scene. If an observation is insufficient, do not repeat "
-        "the same tool call with materially identical arguments. If the "
-        "missing information can still be obtained through a refined tool "
-        "call, another visible tool, or user input, continue execution. "
-        "Choose SUBMIT_RESULT only when the task can be reasonably concluded with "
-        "the available information. Do not choose SUBMIT_RESULT if a visible tool "
-        "can still reasonably obtain information required to satisfy the "
-        "user's request. If observations already contain camera_scene "
-        "for the current task, do not call camera_scene again; use that "
-        "observation, explain missing visual information, or report visual "
-        "unavailability. If information can only come from the user and "
-        "ask_user_question is visible, call it. If a tool is unavailable, "
-        "choose another visible capability or SUBMIT_RESULT with an honest "
-        "conclusion. In "
-        "argument repair mode, regenerate arguments for active_tool_name only. "
-        "The repair must use the same Tool and must not switch tool_name or "
-        "return SUBMIT_RESULT. Never select a Tool listed in "
-        "blacklisted_tools."
+        "One execution decision may choose at most one action. Decide the next "
+        "action from the current user request, visible "
+        "capabilities, visible Skill guidance, and persisted observations. "
+        "Use existing observations before choosing another Tool call. If the "
+        "available information is sufficient, submit the result. A submitted "
+        "final_response_draft must be a complete answer ready to show now and "
+        "must not promise a future answer or artifact. If an observation is "
+        "insufficient, do not repeat the same Tool with materially identical "
+        "arguments. Continue when a refined call, another visible Tool, or user "
+        "input can reasonably obtain required information. Submit only when the "
+        "task can reasonably be concluded with available information. If a "
+        "Tool is unavailable, use another visible capability or submit an "
+        "honest conclusion. In argument repair mode, regenerate arguments for "
+        "active_tool_name only; the repair must use the same Tool and must not "
+        "switch Tool or submit. Never select a "
+        "Tool listed in blacklisted_tools."
+    ),
+    output_contract=(
+        "Return one strict JSON object. action must be CALL_TOOL or "
+        "SUBMIT_RESULT. CALL_TOOL requires tool_name naming one visible Tool, "
+        "and CALL_TOOL may use exactly one visible tool. "
+        "tool_input as an object matching its schema, and non-empty "
+        "decision_reason. SUBMIT_RESULT requires tool_name=null, "
+        "tool_input=null, non-empty decision_reason, non-empty "
+        "completion_summary, non-empty final_response_draft, and "
+        "evidence_refs containing only observation IDs from WorkSpace; "
+        "evidence_refs may be empty only when the task does not depend on a "
+        "capability result."
     ),
 )
 
@@ -146,45 +97,41 @@ EXECUTION_DECISION_TEMPLATE = PromptTemplate(
 FIRST_DECISION_TEMPLATE = PromptTemplate(
     name="first_decision",
     system_prompt=ELLA_SYSTEM_PROMPT,
+    capability_policy=GLOBAL_CAPABILITY_POLICY,
     instruction=(
-        f"{DECISION_POLICY_PROMPT} This is the first decision for a raw user "
-        "request. Return one strict JSON object containing intent and action. "
-        "intent captures the user's intended outcome for this task; it is not "
-        "a restatement of Ella's personality and not an execution plan. Use "
-        "this exact intent shape: {\"goal\":\"<one concrete outcome>\","
-        "\"constraints\":[\"<restriction that actually applies>\"],"
-        "\"deliverables\":[\"<result the user should receive>\"],"
-        "\"minimum_acceptance_criteria\":[\"<observable condition that must "
-        "be true>\"]}. goal must be one non-empty string describing what the "
-        "user wants achieved. constraints contains only explicit user limits "
-        "or necessary safety and factual restrictions; use [] when none apply. "
-        "deliverables contains the concrete outputs expected from this task. "
-        "minimum_acceptance_criteria contains the smallest observable conditions "
-        "needed to judge the result, not checker names, Tool names, implementation "
-        "steps, or general response-style aspirations. Every array element must "
-        "be a non-empty string; never emit blank strings or placeholder entries. "
-        "For a greeting or another directly answerable request, keep intent "
-        "minimal instead of inventing constraints or multiple deliverables. "
-        "For a greeting or direct conversational response that needs no factual, "
-        "artifact, or capability validation, set minimum_acceptance_criteria to "
-        "[]. "
-        "action must be exactly one of "
-        "these shapes: CALL_TOOL: {\"action\":\"CALL_TOOL\","
+        "This is the first decision for a raw user request. Identify the "
+        "user's intended outcome and decide exactly one action. intent captures "
+        "the outcome; it is not Ella's personality and not an execution plan. "
+        "goal is one "
+        "concrete outcome. constraints contains only explicit limits or "
+        "necessary safety and factual restrictions; use [] when none apply. "
+        "deliverables contains the "
+        "concrete outputs expected. minimum_acceptance_criteria contains the "
+        "smallest observable conditions needed to judge the result, not Tool "
+        "names or implementation steps. Every array item must be non-empty; "
+        "never emit blank strings or placeholder entries. "
+        "Keep directly answerable conversational intent minimal. For a greeting "
+        "or direct conversational response that needs no factual, artifact, or "
+        "capability validation, set minimum_acceptance_criteria to []. For a "
+        "complex task, call the visible planning capability. "
+        "For a simple task, call a needed visible Tool or answer directly. If "
+        "the user's purpose is genuinely unclear, set intent to null and call "
+        "the visible user-question capability. Do not use keyword-specific goal "
+        "templates. Correct any decision_repair error in WorkSpace."
+    ),
+    output_contract=(
+        "Return one strict JSON object with intent and action. intent is null "
+        "or {\"goal\":\"<one concrete outcome>\",\"constraints\":[],"
+        "\"deliverables\":[],\"minimum_acceptance_criteria\":[]}. action "
+        "must use exactly one shape. CALL_TOOL: {\"action\":\"CALL_TOOL\","
         "\"tool_name\":\"<visible name>\",\"tool_input\":{},"
-        "\"decision_reason\":\"<non-empty reason>\"}; SUBMIT_RESULT: "
+        "\"decision_reason\":\"<non-empty reason>\"}. SUBMIT_RESULT: "
         "{\"action\":\"SUBMIT_RESULT\",\"tool_name\":null,"
         "\"tool_input\":null,\"decision_reason\":\"<non-empty reason>\","
         "\"completion_summary\":\"<non-empty candidate summary>\","
         "\"final_response_draft\":\"<complete user-facing answer>\","
-        "\"evidence_refs\":[]}. decision_reason is mandatory for every "
-        "action. Do not rename action to type, tool_input to arguments, or "
-        "decision_reason to reason. For a complex task, create a plan by calling "
-        "the visible plan_written capability. For a simple task, call the "
-        "needed visible Tool or answer directly. If the user's purpose is "
-        "genuinely unclear, set intent to null and call ask_user_question. "
-        "Do not use keyword-specific goal templates. If WorkSpace contains "
-        "decision_repair, correct the stated validation error; do not repeat "
-        "the same invalid shape."
+        "\"evidence_refs\":[]}. Do not rename action to type, tool_input to "
+        "arguments, or decision_reason to reason."
     ),
 )
 
@@ -198,25 +145,25 @@ VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
         "action happened without evidence and do not expose hidden reasoning."
     ),
     instruction=(
-        "Return one strict JSON action. If a visible read-only verification "
-        "Tool is required, return CALL_TOOL with tool_name and arguments. "
-        "Otherwise return VERIFICATION_VERDICT with goal_state equal to "
-        "achieved, partially_achieved, or not_achieved; criterion_results, "
+        "If a visible read-only verification Tool is required, call it. "
+        "Otherwise evaluate whether the goal is achieved, partially achieved, "
+        "or not achieved. Achieved requires all necessary criteria and "
+        "deliverables. Partially achieved requires real completion of at least "
+        "one goal portion. Not achieved means no goal portion was achieved. "
+        "Check that the actual draft is truthful, complete, and consistent "
+        "with evidence. Never request a write or a new external observation."
+    ),
+    output_contract=(
+        "Return one strict JSON action: CALL_TOOL with tool_name and arguments, "
+        "or VERIFICATION_VERDICT with goal_state, criterion_results, "
         "deliverable_results, draft_quality_issues, recoverable, "
-        "feedback_for_execution, and public_summary. achieved requires all "
-        "necessary criteria and deliverables. partially_achieved requires "
-        "real completion of at least one goal portion. not_achieved means no "
-        "goal portion was achieved. Also check that the actual draft is "
-        "truthful, complete, and consistent with evidence. Never call a Tool "
-        "outside visible_verification_tools and never request a write or a new "
-        "external observation."
+        "feedback_for_execution, and public_summary."
     ),
 )
 
 
 TEMPLATES_BY_TYPE = {
     "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
-    "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
     "VERIFICATION_DECISION": VERIFICATION_DECISION_TEMPLATE,
 }

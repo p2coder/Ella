@@ -31,12 +31,15 @@ class DocumentWriteTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Use to save a completed report or other user-requested text "
-                "document as Markdown, plain text, JSON, or CSV. Supply the full "
-                "document content and a safe relative path. Use this when the "
-                "deliverable should persist beyond the chat response. Do not use "
-                "for arbitrary filesystem access, executable files, credentials, "
-                "raw media, or paths outside the configured document directory."
+                "Purpose: Save a completed user-requested text document as "
+                "Markdown, plain text, JSON, or CSV. Use when: The requested "
+                "deliverable must persist beyond the chat response. Do not use "
+                "when: The user only needs an in-chat answer, or for executable "
+                "files, credentials, raw media, arbitrary filesystem access, or "
+                "paths outside the controlled document directory. Execution "
+                "behavior: Supply the complete document content and a safe relative "
+                "path in one call. Failure and limitations: A successful write "
+                "result is required before claiming that the artifact exists."
             ),
             schema_version="1.0",
             input_schema={

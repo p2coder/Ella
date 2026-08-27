@@ -1,8 +1,7 @@
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from enum import Enum
-from time import monotonic, sleep
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -17,7 +16,6 @@ from demo.display_snapshot import (
     TEXT_ONLY,
     RunDisplaySnapshot,
 )
-from demo.page_viewer import LocalPageViewer
 from events.microphone_source import MicrophoneSource
 from events.source import CLITextSignalSource
 from memory import MemoryManager
@@ -25,6 +23,7 @@ from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
 from runtime.plan_store import PlanStore
+from runtime.provider_usage import aggregate_provider_usage
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.task_queue import TaskQueue
 from runtime.task_store import TaskStore
@@ -38,7 +37,6 @@ from tasks.state import (
 from agent.subagent import SubAgent
 from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
-from tasks.output import UserVisibleAgentOutput
 from skill import SkillLoader, SkillManager
 from tools import (
     DocumentWriteTool,
@@ -61,22 +59,10 @@ from tools.verification import (
 )
 from runtime.interactions import InteractionBroker
 
-MAX_APP_STEPS = 200
-APP_TASK_TIMEOUT_SECONDS = 120.0
-
-
-@dataclass(frozen=True, slots=True)
-class AppDisplayResult:
-    output: str
-    snapshot: RunDisplaySnapshot
-    page_path: Path | None = None
-
-
 @dataclass(frozen=True, slots=True)
 class AppRuntime:
     _event_runtime: EventRuntime
     _task_runtime: TaskRuntime
-    _page_viewer: LocalPageViewer = field(default_factory=LocalPageViewer)
     microphone_source: MicrophoneSource | None = None
 
     @classmethod
@@ -192,41 +178,6 @@ class AppRuntime:
     def close(self, timeout: float | None = 5.0) -> bool:
         self._task_runtime.stop()
         return self._task_runtime.join(timeout)
-
-    def run_text_with_display(self, input_text: str) -> AppDisplayResult:
-        signal = CLITextSignalSource().create_signal(
-            text=input_text,
-            trace_id=f"trace-web-{uuid4().hex}",
-        )
-        return self._run_signal_with_display(
-            signal,
-            user_input=input_text,
-        )
-
-    def run_submitted_task_with_display(
-        self,
-        task_id: str,
-        *,
-        user_input: str,
-        transcript: str | None = None,
-    ) -> AppDisplayResult:
-        task_result = self._task_runtime.run_until_complete(
-            task_id,
-            max_steps=MAX_APP_STEPS,
-        )
-        if task_result.failure_reason is not None:
-            raise RuntimeError(task_result.failure_reason)
-        if task_result.completion is None:
-            raise RuntimeError(
-                f"task did not complete: {task_result.stop_reason}"
-            )
-        if task_result.memory_result is None:
-            raise RuntimeError("task completed without a memory result")
-        return self._display_result(
-            task_result,
-            user_input=user_input,
-            transcript=transcript,
-        )
 
     def submit_text(self, input_text: str):
         signal = CLITextSignalSource().create_signal(
@@ -402,45 +353,6 @@ class AppRuntime:
             )
         )
 
-    def run_microphone_with_display(
-        self,
-        *,
-        status_callback: Callable[[str], None] | None = None,
-    ) -> AppDisplayResult:
-        report_status = status_callback or (lambda _status: None)
-        report_status("Listening...")
-        source = self.microphone_source or MicrophoneSource.from_factories()
-        try:
-            source_result = source.capture_transcript(
-                trace_id=f"trace-web-microphone-{uuid4().hex}",
-            )
-        except Exception:
-            return _microphone_failure_result(
-                "Microphone input failed. Text input remains available."
-            )
-        signal = source_result.raw_signal
-        if signal is None:
-            return _microphone_failure_result(
-                "Microphone input failed. Text input remains available."
-            )
-        transcript = signal.payload.get("text")
-        if not isinstance(transcript, str) or not transcript.strip():
-            return _microphone_failure_result(
-                "No speech was detected. Text input remains available."
-            )
-
-        normalized_transcript = transcript.strip()
-        report_status("Transcription complete.")
-        text_signal = CLITextSignalSource().create_signal(
-            text=normalized_transcript,
-            trace_id=f"trace-web-microphone-text-{uuid4().hex}",
-        )
-        return self._run_signal_with_display(
-            text_signal,
-            user_input=normalized_transcript,
-            transcript=normalized_transcript,
-        )
-
     def submit_microphone(
         self,
         *,
@@ -468,89 +380,6 @@ class AppRuntime:
         if not result.submitted or result.task_handle is None:
             raise RuntimeError(result.reason)
         return result.task_handle, normalized
-
-    def _run_signal_with_display(
-        self,
-        signal,
-        *,
-        user_input: str,
-        transcript: str | None = None,
-    ) -> AppDisplayResult:
-        task_result = self._run_signal_to_completion(signal)
-        return self._display_result(
-            task_result,
-            user_input=user_input,
-            transcript=transcript,
-        )
-
-    def _display_result(
-        self,
-        task_result: TaskRuntimeResult,
-        *,
-        user_input: str,
-        transcript: str | None = None,
-    ) -> AppDisplayResult:
-        completion = task_result.completion
-        memory_result = task_result.memory_result
-        output = _render_output(
-            completion.user_visible_output,
-            memory_result.memory_path,
-            completion.tool_results,
-        )
-        return AppDisplayResult(
-            output=output,
-            snapshot=_build_display_snapshot(
-                user_input,
-                task_result,
-                transcript=transcript,
-            ),
-        )
-
-    def _run_signal_to_completion(self, signal) -> TaskRuntimeResult:
-        event_result = self._event_runtime.publish(signal)
-        if not event_result.submitted or event_result.task_handle is None:
-            raise RuntimeError(event_result.reason)
-        task_id = event_result.task_handle.task_id
-        deadline = monotonic() + APP_TASK_TIMEOUT_SECONDS
-        terminal = {
-            "succeeded", "failed", "uncertain", "killed", "delivered"
-        }
-        while self._task_runtime.get_task(task_id).state.value not in terminal:
-            if monotonic() >= deadline:
-                raise TimeoutError(f"task {task_id} did not finish in time")
-            sleep(0.01)
-        task_result = self._task_runtime.result_for(task_id)
-        if task_result.failure_reason is not None:
-            raise RuntimeError(task_result.failure_reason)
-        if task_result.completion is None:
-            raise RuntimeError(
-                f"task did not complete: {task_result.stop_reason}"
-            )
-        if task_result.memory_result is None:
-            raise RuntimeError("task completed without a memory result")
-        return task_result
-
-
-def _render_output(
-    output: UserVisibleAgentOutput,
-    memory_path: Path,
-    tool_results: tuple[ToolResult, ...],
-) -> str:
-    process_values = [str(value) for value in output.process.values()]
-    process_values.extend(
-        f"Visual context: {result.payload['summary']}"
-        for result in tool_results
-        if result.tool_name == "camera_scene" and "summary" in result.payload
-    )
-    return (
-        "[Ella Process]\n"
-        f"{'\n'.join(process_values)}\n\n"
-        "[Final Answer]\n"
-        f"{output.final_response}\n\n"
-        "[Memory]\n"
-        f"Recorded task memory at {memory_path}"
-    )
-
 
 def _task_user_input(task, maximum: int = 120) -> str:
     if task.source_event is None:
@@ -606,7 +435,14 @@ def _current_model_output(task) -> str:
 
 
 def _usage_projection(task) -> dict[str, object]:
-    """Normalize token usage if an OpenAI-compatible provider preserved it."""
+    """Aggregate real text usage, falling back to the latest legacy payload."""
+    calls = task.task_local_state.get("provider_usage_calls")
+    aggregate = aggregate_provider_usage(calls, modality="text")
+    if aggregate is not None:
+        return {
+            **aggregate,
+            "provider_usage_calls": _public_value(calls),
+        }
     usage = task.task_local_state.get("usage")
     if not isinstance(usage, Mapping):
         usage = task.task_local_state.get("provider_usage")
@@ -617,6 +453,7 @@ def _usage_projection(task) -> dict[str, object]:
             "completion_tokens": None,
             "cached_tokens": None,
             "cache_hit_rate": None,
+            "provider_usage_calls": _public_value(calls or ()),
         }
     prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
     completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
@@ -631,6 +468,7 @@ def _usage_projection(task) -> dict[str, object]:
         "completion_tokens": completion,
         "cached_tokens": cached,
         "cache_hit_rate": round(cached / prompt * 100, 1) if prompt else None,
+        "provider_usage_calls": _public_value(calls or ()),
     }
 
 
@@ -653,18 +491,6 @@ def _build_display_snapshot(
         scene_summary=_scene_summary(camera_result),
         visible_items=_visible_items(camera_result),
         task_goal=str(process.get("task_goal", "")),
-        first_decision_prompt_text=str(
-            task_result.task.task_local_state.get("first_decision_prompt_text", "")
-        ),
-        execution_decision_prompt_text=str(
-            process.get("execution_decision_prompt_text", "")
-        ),
-        final_response_prompt_text=str(
-            process.get("final_response_prompt_text", "")
-        ),
-        verification_prompt_text=str(
-            task_result.task.task_local_state.get("verification_prompt_text", "")
-        ),
         tool_results_summary=_tool_results_summary(tool_results),
         final_response=output.final_response,
         memory_status=getattr(task_result.memory_result, "action", "unknown"),
@@ -697,26 +523,6 @@ def _display_value(value) -> str:
         return ""
     to_dict = getattr(value, "to_dict", None)
     return str(to_dict() if callable(to_dict) else value)
-
-
-def _microphone_failure_result(message: str) -> AppDisplayResult:
-    return AppDisplayResult(
-        output=message,
-        snapshot=RunDisplaySnapshot(
-            user_input="",
-            transcript=None,
-            captured_frame_reference=None,
-            image_status=TEXT_ONLY,
-            scene_summary="",
-            visible_items=(),
-            task_goal="",
-            final_response_prompt_text="",
-            tool_results_summary="",
-            final_response=message,
-            memory_status="not recorded",
-            timing_summary="",
-        ),
-    )
 
 
 def _timing_summary(task_result: TaskRuntimeResult) -> str:

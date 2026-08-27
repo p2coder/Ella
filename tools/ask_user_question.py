@@ -31,9 +31,13 @@ class AskUserQuestionTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Ask the user for information that only the user can provide. "
-                "Use only when current observations and visible capabilities "
-                "cannot supply the missing information."
+                "Purpose: Ask the user for information that only the user can "
+                "provide. Use when: A decision cannot proceed because required "
+                "information is absent from the request, observations, and visible "
+                "capabilities. Do not use when: A visible capability can reasonably "
+                "obtain the information or the task can be concluded honestly "
+                "without it. Execution behavior: Submit the bounded questions and "
+                "wait for the matching user answers before reasoning continues."
             ),
             schema_version="1.0",
             input_schema={

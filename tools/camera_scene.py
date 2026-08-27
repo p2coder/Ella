@@ -45,15 +45,19 @@ class CameraSceneTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Use to capture a bounded visual scene summary when the current "
-                "task needs fresh visual context. Do not use for continuous "
-                "surveillance, unbounded capture, identity recognition, or when "
-                "the task can be answered without visual context. If the task "
+                "Purpose: Capture a bounded summary of the current physical visual "
+                "environment. Use when: The request depends on fresh camera-visible "
+                "objects, surroundings, or physical context. Do not use when: The "
+                "request concerns on-screen content, can be answered without visual "
+                "context, or requires continuous surveillance, unbounded capture, "
+                "or identity recognition. Execution behavior: Capture only within "
+                "the configured frame and duration bounds. If the task "
                 "already has a successful camera_scene observation, do not call "
                 "camera_scene again, even when the requested object is missing "
                 "or the image is blurred, obstructed, poorly angled, or otherwise "
-                "insufficient. Use the existing observation and explain what is "
-                "visible, missing, or uncertain."
+                "insufficient. Failure and limitations: Use the existing observation "
+                "and explain what is visible, missing, or uncertain; a missing "
+                "object is not proof that it does not exist outside the frame."
             ),
             schema_version="1.0",
             input_schema={

@@ -33,9 +33,11 @@ class PlanWrittenTool:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Create or structurally replace the current Task plan. Use only "
-                "when the goal requires multiple staged outcomes; do not use for "
-                "simple direct tasks or progress updates. Each step must represent "
+                "Purpose: Create or structurally replace the current Task plan. "
+                "Use when: The goal requires multiple staged outcomes or several "
+                "independent deliverable units. Do not use when: The task is a "
+                "simple direct action, conversation, or progress update. "
+                "Execution behavior: Each step must represent "
                 "one independently executable and observable intermediate goal, "
                 "not one Tool call. Split independent work items, such as research "
                 "for separate projects, into separate steps so they can run in the "
@@ -57,7 +59,9 @@ class PlanWrittenTool:
                 "step_id only when its goal, criteria, and dependencies are "
                 "unchanged; otherwise use a new step_id. For factual work, preserve "
                 "traceable sources in Tool observations rather than copying source "
-                "content into the plan."
+                "content into the plan. Failure and limitations: Planning records "
+                "execution structure but does not itself complete any planned "
+                "step or prove that a goal was achieved."
             ),
             schema_version="2.0",
             input_schema={
