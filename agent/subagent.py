@@ -419,6 +419,8 @@ class SubAgent:
         arguments = payload.get("arguments", payload.get("tool_input", {}))
         if not isinstance(arguments, dict):
             raise DecisionValidationError("CALL_TOOL arguments must be an object")
+        if tool_name == "ask_user_question":
+            _reject_repeated_answered_questions(arguments, observations)
         return ExecutionDecision(CALL_TOOL, tool_name, arguments, decision_reason)
 
     @staticmethod
@@ -446,3 +448,49 @@ class SubAgent:
             (),
             "I can answer this request directly without an external capability.",
         )
+
+
+def _reject_repeated_answered_questions(
+    arguments: dict[str, Any],
+    observations: tuple[dict[str, Any], ...],
+) -> None:
+    answered: dict[str, set[str]] = {}
+    for observation in observations:
+        payload = observation.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        for item in payload.get("answers", ()):
+            if not isinstance(item, dict) or not str(item.get("answer", "")).strip():
+                continue
+            question = _normalized_question(item.get("question"))
+            if not question:
+                continue
+            metadata = item.get("metadata")
+            phase = (
+                str(metadata.get("phase", "")).strip()
+                if isinstance(metadata, dict)
+                else ""
+            )
+            answered.setdefault(question, set()).add(phase)
+
+    for item in arguments.get("questions", ()):
+        if not isinstance(item, dict):
+            continue
+        question = _normalized_question(item.get("question"))
+        if question not in answered:
+            continue
+        metadata = item.get("metadata")
+        phase = (
+            str(metadata.get("phase", "")).strip()
+            if isinstance(metadata, dict)
+            else ""
+        )
+        if not phase or phase in answered[question]:
+            raise DecisionValidationError(
+                "ask_user_question repeated an already answered question in the "
+                "same phase; use the accepted user answer from observations"
+            )
+
+
+def _normalized_question(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())

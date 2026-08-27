@@ -31,7 +31,7 @@ class AskUserQuestionTool:
                             "text": {"type": "string"},
                             "recommended": {"type": "boolean"},
                         },
-                        "required": ["text", "recommended"],
+                        "required": ["text"],
                         "additionalProperties": False,
                     },
                 },
@@ -50,16 +50,18 @@ class AskUserQuestionTool:
                 "obtain the information or the task can be concluded honestly "
                 "without it. Execution behavior: Submit the bounded questions and "
                 "wait for the matching user answers before reasoning continues. "
-                "For every question, provide 1 to 3 concise answer options and "
-                "preferably mark one best option with recommended=true. A question "
-                "may omit a recommendation, but it must not mark more than one. The user "
+                "For every question, provide 0 to 3 concise answer options and "
+                "preferably mark one best option with recommended=true when a useful "
+                "default exists. A question may omit options, and it may omit a "
+                "recommendation, but it must not mark more than one. The user "
                 "may choose an option or provide a custom answer. Output semantics: "
                 "Every returned answer is direct user-provided information for "
                 "the Task identified by task_id. Use that observation in the next "
                 "decision and do not claim it belongs to another execution context "
                 "or immediately ask the same information merely for confirmation. "
                 "The same information may be asked again in a later phase only "
-                "when task progress creates a genuine need for an updated answer."
+                "when task progress creates a genuine need for an updated answer; "
+                "identify that phase explicitly as metadata.phase."
             ),
             schema_version="1.0",
             input_schema={
@@ -159,8 +161,8 @@ class AskUserQuestionTool:
         raw_options = tuple(item.get("options", ()))
         if not question:
             raise ValueError("question must be non-empty")
-        if not 1 <= len(raw_options) <= 3:
-            raise ValueError("each question must contain between 1 and 3 options")
+        if len(raw_options) > 3:
+            raise ValueError("each question must contain at most 3 options")
         options = tuple(
             UserQuestionOption(
                 text=str(option.get("text", "")).strip(),

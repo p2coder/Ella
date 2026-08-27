@@ -614,7 +614,7 @@ class TaskRuntime:
                 task_id=task_id,
                 user_id=question.user_id,
                 answer=value,
-                metadata={},
+                metadata=dict(question.metadata),
             )
         )
         if accepted:

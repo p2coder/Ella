@@ -4,7 +4,7 @@ from time import monotonic, sleep
 import pytest
 
 from events import StandardizedEvent
-from agent.subagent import SubAgent
+from agent.subagent import DecisionValidationError, SubAgent
 from providers.base import ProviderResult
 from runtime.interactions import InteractionBroker, UserAnswer
 from runtime.executor import CapabilityExecutor
@@ -277,7 +277,6 @@ def test_answered_first_decision_continues_with_execution_decision() -> None:
 @pytest.mark.parametrize(
     "options",
     (
-        (),
         (
             {"text": "A", "recommended": True},
             {"text": "B", "recommended": True},
@@ -311,3 +310,142 @@ def test_question_options_may_omit_a_recommendation() -> None:
     assert question == "Choose one"
     assert not any(option.recommended for option in options)
     assert metadata == {}
+
+
+def test_question_may_use_custom_answer_without_options() -> None:
+    question, options, metadata = AskUserQuestionTool._normalize_question(
+        {"question": "What flavor do you prefer?", "options": ()}
+    )
+
+    assert question == "What flavor do you prefer?"
+    assert options == ()
+    assert metadata == {}
+
+
+def test_recommended_flag_is_optional_in_model_schema() -> None:
+    option_schema = AskUserQuestionTool(InteractionBroker()).definition.input_schema[
+        "properties"
+    ]["questions"]["items"]["properties"]["options"]["items"]
+
+    assert option_schema["required"] == ["text"]
+
+
+def test_answer_metadata_preserves_question_phase() -> None:
+    broker = InteractionBroker()
+    tool = AskUserQuestionTool(broker)
+    manager = ToolManager()
+    manager.register(tool)
+    runtime = TaskRuntime(
+        task_factory=TaskFactory(
+            skill_manager=SkillManager(),
+            tool_manager=manager,
+            task_id_factory=lambda: "task-question-phase",
+        ),
+        executor=CapabilityExecutor(SkillManager(), manager),
+    )
+    handle = runtime.create_task(
+        StandardizedEvent(
+            trace_id="trace-question-phase",
+            source="test",
+            payload={"text": "choose"},
+            event_type="USER_UTTERANCE",
+        )
+    )
+    context = runtime.get_context(handle.task_id)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            tool.run,
+            context,
+            {
+                "questions": [
+                    {
+                        "question": "Which one?",
+                        "options": [],
+                        "metadata": {"phase": "initial preference"},
+                    }
+                ]
+            },
+        )
+        question = _wait_for_question(broker, handle.task_id)
+        assert runtime.provide_input(
+            handle.task_id,
+            correlation_key=question.question_id,
+            value="A",
+        )
+        result = future.result(timeout=1)
+
+    assert result.payload["answers"][0]["metadata"] == {
+        "phase": "initial preference"
+    }
+
+
+def test_subagent_rejects_same_phase_reask_after_answer() -> None:
+    tools = ({"name": "ask_user_question"},)
+    observations = (
+        {
+            "observation_id": "task:observation:1",
+            "payload": {
+                "answers": [
+                    {
+                        "question": "What flavor do you prefer?",
+                        "answer": "Spicy",
+                        "metadata": {"phase": "initial preference"},
+                    }
+                ]
+            },
+        },
+    )
+    payload = {
+        "action": "CALL_TOOL",
+        "tool_name": "ask_user_question",
+        "arguments": {
+            "questions": [
+                {
+                    "question": "What flavor do you prefer?",
+                    "options": [],
+                    "metadata": {"phase": "initial preference"},
+                }
+            ]
+        },
+        "decision_reason": "Ask again.",
+    }
+
+    with pytest.raises(DecisionValidationError, match="already answered"):
+        SubAgent._decision_from_payload(payload, tools, observations)
+
+
+def test_subagent_allows_same_question_for_explicit_later_phase() -> None:
+    tools = ({"name": "ask_user_question"},)
+    observations = (
+        {
+            "observation_id": "task:observation:1",
+            "payload": {
+                "answers": [
+                    {
+                        "question": "Which address should I use?",
+                        "answer": "Home",
+                        "metadata": {"phase": "search"},
+                    }
+                ]
+            },
+        },
+    )
+    payload = {
+        "action": "CALL_TOOL",
+        "tool_name": "ask_user_question",
+        "arguments": {
+            "questions": [
+                {
+                    "question": "Which address should I use?",
+                    "options": [],
+                    "metadata": {"phase": "final confirmation"},
+                }
+            ]
+        },
+        "decision_reason": "Confirm the delivery destination.",
+    }
+
+    decision = SubAgent._decision_from_payload(payload, tools, observations)
+
+    assert decision.tool_name == "ask_user_question"
