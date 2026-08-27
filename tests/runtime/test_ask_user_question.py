@@ -77,6 +77,7 @@ def test_interaction_tool_blocks_until_first_matching_answer() -> None:
 
     answer = result.payload["answers"][0]
     assert answer["question_id"] == question.question_id
+    assert answer["question"] == "Who should I contact?"
     assert answer["task_id"] == handle.task_id
     assert answer["answer"] == "Ella"
     assert not broker.answer(
@@ -158,6 +159,10 @@ def test_all_questions_are_published_before_tool_waits_for_answers() -> None:
     assert tuple(item["answer"] for item in result.payload["answers"]) == (
         "Tuesday",
         "Online",
+    )
+    assert tuple(item["question"] for item in result.payload["answers"]) == (
+        "Which day works?",
+        "Which format?",
     )
 
 

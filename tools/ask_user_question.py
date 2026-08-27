@@ -88,6 +88,7 @@ class AskUserQuestionTool:
                             "type": "object",
                             "properties": {
                                 "question_id": {"type": "string"},
+                                "question": {"type": "string"},
                                 "task_id": {"type": "string"},
                                 "user_id": {"type": "string"},
                                 "answer": {"type": "string"},
@@ -95,6 +96,7 @@ class AskUserQuestionTool:
                             },
                             "required": [
                                 "question_id",
+                                "question",
                                 "task_id",
                                 "user_id",
                                 "answer",
@@ -120,15 +122,20 @@ class AskUserQuestionTool:
             raise ValueError(
                 f"questions must contain between 1 and {self.max_questions} items"
             )
+        normalized_questions = tuple(
+            self._normalize_question(item) for item in questions
+        )
+        user_answers = self.broker.ask_many(
+            task_id=context.task_id,
+            user_id=self.user_id,
+            questions=normalized_questions,
+        )
         answers = tuple(
-            answer.to_dict()
-            for answer in self.broker.ask_many(
-                task_id=context.task_id,
-                user_id=self.user_id,
-                questions=tuple(
-                    self._normalize_question(item) for item in questions
-                ),
-            )
+            {
+                **answer.to_dict(),
+                "question": normalized_questions[index][0],
+            }
+            for index, answer in enumerate(user_answers)
         )
         return ToolResult(
             self.name,

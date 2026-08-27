@@ -1081,8 +1081,27 @@ class TaskRuntime:
                         if execution.failure is None
                         else execution.failure.to_dict()
                     ),
+                    "tool_result": (
+                        None
+                        if execution.tool_result is None
+                        else execution.tool_result.to_dict()
+                    ),
                 },
             )
+
+        # A completed capability outcome is durable evidence. Commit it before
+        # honoring a control request that may have arrived while the Tool ran.
+        if execution.tool_result is not None:
+            observation = execution.tool_result.to_dict()
+            observation["observation_id"] = (
+                f"{task.task_id}:observation:{len(task.tool_trace) + 1}"
+            )
+            task.tool_trace += (observation,)
+            self._observe_capability_result(task, execution.tool_result)
+            task.task_local_state.pop("current_decision", None)
+            self._archive_and_advance(task)
+            self._persist(task)
+
         if task.state in {
             TaskState.PAUSE_REQUESTED,
             TaskState.PAUSED,
@@ -1100,17 +1119,6 @@ class TaskRuntime:
             )
             self._handle_failure(task, execution.failure)
             return self._result(creation)
-
-        if execution.tool_result is not None:
-            observation = execution.tool_result.to_dict()
-            observation["observation_id"] = (
-                f"{task.task_id}:observation:{len(task.tool_trace) + 1}"
-            )
-            task.tool_trace += (observation,)
-            self._observe_capability_result(task, execution.tool_result)
-            task.task_local_state.pop("current_decision", None)
-            self._archive_and_advance(task)
-            self._persist(task)
 
         if decision.action == SUBMIT_RESULT:
             task.task_local_state.pop("current_decision", None)
