@@ -28,25 +28,6 @@ def test_building_first_decision_prompt_returns_result():
     )
 
 
-def test_building_final_response_prompt_returns_result():
-    result = PromptEngine().build(
-        PromptType.FINAL_RESPONSE,
-        {
-            "user_input": "看看桌上有没有伞",
-            "task_goal": "Check whether the umbrella is visible.",
-            "tool_results_summary": "camera_scene: umbrella is not visible.",
-            "visible_items": ("phone", "cup"),
-            "scene_summary": "A desk with a phone and a cup.",
-        },
-    )
-
-    assert isinstance(result.prompt, str)
-    assert result.prompt_type == PromptType.FINAL_RESPONSE
-    assert result.prompt_name == "final_response"
-    assert "应该如何回应用户" in result.prompt
-    assert "camera_scene: umbrella is not visible." in result.prompt
-
-
 def test_context_values_change_prompt_without_changing_external_call_shape():
     engine = PromptEngine()
 
@@ -99,7 +80,7 @@ def test_prompt_engine_does_not_call_external_runtime_services():
         "memory_manager": ExplodingService(),
     }
 
-    result = PromptEngine().build(PromptType.FINAL_RESPONSE, context)
+    result = PromptEngine().build(PromptType.EXECUTION_DECISION, context)
 
     assert "llm_provider" in result.context_keys
     assert "[UNSUPPORTED_OBJECT]" in result.prompt
@@ -107,7 +88,7 @@ def test_prompt_engine_does_not_call_external_runtime_services():
 
 def test_system_prompt_is_not_going_out_specific():
     result = PromptEngine().build(
-        PromptType.FINAL_RESPONSE,
+        PromptType.EXECUTION_DECISION,
         {"task_goal": "Summarize the user's request."},
     )
 

@@ -137,7 +137,7 @@ def test_workspace_excludes_sensitive_runtime_resources():
 
 def test_workspace_and_memory_are_distinct_prompt_sections():
     result = PromptEngine().build(
-        "FINAL_RESPONSE",
+        "EXECUTION_DECISION",
         {
             "memory_context": "The user prefers concise answers.",
             "workspace": {
@@ -202,19 +202,60 @@ def test_workspace_prioritizes_and_sorts_visible_capabilities():
     prompt = build_workspace_prompt(
         {
             "task_id": "task-1",
+            "trace_id": "trace-1",
+            "overall_goal": "Overall goal.",
+            "completion_criteria": ("done",),
+            "current_goal": "Current goal.",
+            "task_state": "reasoning",
             "visible_skills": ({"name": "z_skill"}, {"name": "a_skill"}),
             "visible_tools": ({"name": "z_tool"}, {"name": "a_tool"}),
-            "observations": (),
+            "observations": ({"observation_id": "obs-1"},),
+            "current_step": {"attempt_id": "step1_try"},
+            "decision_repair": None,
         }
     )
     workspace = prompt.split("WorkSpace:\n", 1)[1].split(
         "\n\nFinalOutputReminder:", 1
     )[0]
 
+    # Cache-friendly order: whole-task stable fields first, then the
+    # append-only shared history, then per-node fields, then per-decision
+    # variable fields last — so prefix caching keeps the largest reusable
+    # head before the first field that changes between calls.
     assert workspace.index('"visible_tools"') < workspace.index('"visible_skills"')
-    assert workspace.index('"visible_skills"') < workspace.index('"observations"')
+    assert workspace.index('"visible_skills"') < workspace.index('"overall_goal"')
+    assert workspace.index('"overall_goal"') < workspace.index('"observations"')
+    assert workspace.index('"observations"') < workspace.index('"current_goal"')
+    assert workspace.index('"current_goal"') < workspace.index('"current_step"')
+    assert workspace.index('"current_step"') < workspace.index('"decision_repair"')
+    assert workspace.index('"decision_repair"') < workspace.index('"task_state"')
     assert workspace.index('"a_tool"') < workspace.index('"z_tool"')
     assert workspace.index('"a_skill"') < workspace.index('"z_skill"')
+
+
+def test_workspace_variable_fields_do_not_invalidate_shared_history_prefix():
+    base = {
+        "task_id": "task-1",
+        "trace_id": "trace-1",
+        "overall_goal": "Overall goal.",
+        "visible_skills": ({"name": "a_skill"},),
+        "visible_tools": ({"name": "a_tool"},),
+        "observations": ({"observation_id": "obs-1"},),
+        "completion_criteria": ("done",),
+        "current_goal": "Current goal.",
+    }
+    first = build_workspace_prompt(
+        {**base, "current_step": {"attempt_id": "step1_try"}}
+    )
+    second = build_workspace_prompt(
+        {**base, "current_step": {"attempt_id": "step2_try"}}
+    )
+
+    # Everything up to the per-decision variable field is byte-identical, so
+    # the shared history (visible_tools → observations) stays in the cached
+    # prefix even though current_step changes every call.
+    shared = first.split('"current_step"', 1)[0]
+    assert second.startswith(shared)
 
 
 def test_workspace_changes_do_not_change_decision_prompt_prefix():

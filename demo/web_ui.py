@@ -56,12 +56,6 @@ class LocalWebUI:
             )
 
         try:
-            if not hasattr(self._app_runtime, "submit_text"):
-                result = self._app_runtime.run_text_with_display(normalized_text)
-                return WebUIResponse(
-                    status=200,
-                    body=render_web_ui_shell(result.snapshot),
-                )
             handle = self._app_runtime.submit_text(normalized_text)
         except Exception as error:
             return WebUIResponse(
@@ -137,17 +131,10 @@ class LocalWebUI:
 
     def submit_microphone(self) -> WebUIResponse:
         try:
-            submit_microphone = getattr(
-                self._app_runtime,
-                "submit_microphone",
-                None,
-            )
-            if callable(submit_microphone):
-                handle, transcript = submit_microphone()
-                with self._lock:
-                    self._task_inputs[handle.task_id] = transcript
-                return self.task_status(handle.task_id)
-            result = self._app_runtime.run_microphone_with_display()
+            handle, transcript = self._app_runtime.submit_microphone()
+            with self._lock:
+                self._task_inputs[handle.task_id] = transcript
+            return self.task_status(handle.task_id)
         except Exception as error:
             return WebUIResponse(
                 status=500,
@@ -158,11 +145,6 @@ class LocalWebUI:
                     ),
                 ),
             )
-        return WebUIResponse(
-            status=200,
-            body=render_web_ui_shell(result.snapshot),
-        )
-
     def handle_request(
         self,
         *,
@@ -239,7 +221,7 @@ class LocalWebUI:
                 json.dumps({"accepted": accepted}),
                 "application/json; charset=utf-8",
             )
-        if normalized_method == "POST" and parsed.path in {"/submit", "/task/control"}:
+        if normalized_method == "POST" and parsed.path == "/task/control":
             if content_type.split(";", 1)[0] != "application/x-www-form-urlencoded":
                 return WebUIResponse(
                     status=415,
@@ -248,12 +230,10 @@ class LocalWebUI:
                     ),
                 )
             form = parse_qs(body.decode("utf-8"), keep_blank_values=True)
-            if parsed.path == "/task/control":
-                return self.control_task(
-                    form.get("task_id", [""])[0],
-                    form.get("action", [""])[0],
-                )
-            return self.submit_text(form.get("user_input", [""])[0])
+            return self.control_task(
+                form.get("task_id", [""])[0],
+                form.get("action", [""])[0],
+            )
         return WebUIResponse(
             status=404,
             body=render_web_ui_shell(form_error="Page not found."),
@@ -303,22 +283,6 @@ def render_web_ui_shell(
         "scene_summary": _value(data, "scene_summary"),
         "visible_items": _join_items(data.get("visible_items", ())),
         "task_goal": _value(data, "task_goal"),
-        "first_decision_prompt_text": _prompt_value(
-            data,
-            "first_decision_prompt_text",
-        ),
-        "execution_decision_prompt_text": _prompt_value(
-            data,
-            "execution_decision_prompt_text",
-        ),
-        "verification_prompt_text": _prompt_value(
-            data,
-            "verification_prompt_text",
-        ),
-        "final_response_prompt_text": _prompt_value(
-            data,
-            "final_response_prompt_text",
-        ),
         "tool_results_summary": _value(data, "tool_results_summary"),
         "timing_summary": _value(data, "timing_summary"),
         "model_output": _value(data, "model_output") or _value(data, "final_response"),
@@ -446,13 +410,6 @@ def _value(data: Mapping[str, Any], key: str) -> str:
     value = data.get(key)
     if value is None:
         return ""
-    return escape(str(value))
-
-
-def _prompt_value(data: Mapping[str, Any], key: str) -> str:
-    value = data.get(key)
-    if value is None or not str(value).strip():
-        return "Not invoked for this run."
     return escape(str(value))
 
 

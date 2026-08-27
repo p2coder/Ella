@@ -14,7 +14,6 @@ def _snapshot() -> RunDisplaySnapshot:
         scene_summary="",
         visible_items=(),
         task_goal="",
-        final_response_prompt_text="SECRET PROMPT",
         tool_results_summary="",
         final_response="Public final response",
         memory_status="recorded",

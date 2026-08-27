@@ -103,14 +103,14 @@ def test_prompt_engine_accepts_serialized_tools_as_structured_context() -> None:
     serialized_tools = serialize_tool_definitions((make_definition(),))
 
     result = PromptEngine().build(
-        PromptType.FINAL_RESPONSE,
+        PromptType.EXECUTION_DECISION,
         {
             "task_goal": "Help the user decide whether to bring an umbrella.",
             "visible_tools": serialized_tools,
         },
     )
 
-    assert result.prompt_type == PromptType.FINAL_RESPONSE
+    assert result.prompt_type == PromptType.EXECUTION_DECISION
     assert "get_weather" in result.prompt
     assert "provider_credentials" not in result.prompt
     assert "raw_media" not in result.prompt

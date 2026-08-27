@@ -3,9 +3,6 @@ import binascii
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 import re
-from typing import ClassVar
-
-from prompts.engine import redact_prompt_text
 
 
 MOCK_IMAGE = "mock image"
@@ -42,13 +39,9 @@ class RunDisplaySnapshot:
     scene_summary: str
     visible_items: tuple[str, ...]
     task_goal: str
-    final_response_prompt_text: str
     tool_results_summary: str
     final_response: str
     memory_status: str
-    execution_decision_prompt_text: str = ""
-    first_decision_prompt_text: str = ""
-    verification_prompt_text: str = ""
     timing_summary: str = ""
     task_id: str = ""
     task_state: str = ""
@@ -59,13 +52,6 @@ class RunDisplaySnapshot:
     goal_state: str = ""
     terminal_execution_state: str = ""
 
-    prompt_display_fields: ClassVar[tuple[str, ...]] = (
-        "first_decision_prompt_text",
-        "execution_decision_prompt_text",
-        "verification_prompt_text",
-        "final_response_prompt_text",
-    )
-
     def __post_init__(self) -> None:
         if self.image_status not in SUPPORTED_IMAGE_STATUSES:
             raise ValueError(f"unsupported image_status: {self.image_status}")
@@ -74,26 +60,6 @@ class RunDisplaySnapshot:
                 "unsafe captured_frame_reference: expected an image data URI "
                 "or a controlled display-relative path"
             )
-        object.__setattr__(
-            self,
-            "final_response_prompt_text",
-            redact_prompt_text(self.final_response_prompt_text),
-        )
-        object.__setattr__(
-            self,
-            "first_decision_prompt_text",
-            redact_prompt_text(self.first_decision_prompt_text),
-        )
-        object.__setattr__(
-            self,
-            "verification_prompt_text",
-            redact_prompt_text(self.verification_prompt_text),
-        )
-        object.__setattr__(
-            self,
-            "execution_decision_prompt_text",
-            redact_prompt_text(self.execution_decision_prompt_text),
-        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -104,10 +70,6 @@ class RunDisplaySnapshot:
             "scene_summary": self.scene_summary,
             "visible_items": self.visible_items,
             "task_goal": self.task_goal,
-            "first_decision_prompt_text": self.first_decision_prompt_text,
-            "execution_decision_prompt_text": self.execution_decision_prompt_text,
-            "verification_prompt_text": self.verification_prompt_text,
-            "final_response_prompt_text": self.final_response_prompt_text,
             "tool_results_summary": self.tool_results_summary,
             "final_response": self.final_response,
             "memory_status": self.memory_status,
@@ -120,7 +82,6 @@ class RunDisplaySnapshot:
             "delivery_status": self.delivery_status,
             "goal_state": self.goal_state,
             "terminal_execution_state": self.terminal_execution_state,
-            "prompt_display_fields": self.prompt_display_fields,
         }
 
 

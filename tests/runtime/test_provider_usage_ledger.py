@@ -53,7 +53,15 @@ def test_usage_calls_append_without_overwriting_previous_boundaries():
         "first_decision",
         "verification_decision",
     ]
-    assert state["provider_usage"]["prompt_tokens"] == 50
+    # The checkpoint rollup must be the aggregate over ALL calls, not the raw
+    # usage of the latest call.
+    assert state["provider_usage"] == {
+        "token_usage": 165,
+        "prompt_tokens": 150,
+        "completion_tokens": 15,
+        "cached_tokens": 70,
+        "cache_hit_rate": 46.7,
+    }
     assert aggregate_provider_usage(state["provider_usage_calls"]) == {
         "token_usage": 165,
         "prompt_tokens": 150,
@@ -79,6 +87,32 @@ def test_missing_provider_usage_is_recorded_without_estimation():
     assert entry["prompt_tokens"] is None
     assert entry["cached_tokens"] is None
     assert aggregate_provider_usage(state["provider_usage_calls"]) is None
+    assert state["provider_usage"] == {}
+
+
+def test_deepseek_cache_field_names_are_recognized():
+    state = {}
+
+    record_provider_usage(
+        state,
+        boundary="execution_decision",
+        provider=Provider(),
+        result=_result(
+            {
+                "prompt_tokens": 900,
+                "prompt_cache_hit_tokens": 800,
+                "prompt_cache_miss_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 920,
+            }
+        ),
+        success=True,
+    )
+
+    entry = state["provider_usage_calls"][0]
+    assert entry["cached_tokens"] == 800
+    assert state["provider_usage"]["cached_tokens"] == 800
+    assert state["provider_usage"]["cache_hit_rate"] == 88.9
 
 
 def test_modalities_are_aggregated_separately():

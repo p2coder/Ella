@@ -57,23 +57,6 @@ TOOL_POLICY_PROMPT = (
 GLOBAL_CAPABILITY_POLICY = f"{SKILL_POLICY_PROMPT} {TOOL_POLICY_PROMPT}"
 
 
-FINAL_RESPONSE_TEMPLATE = PromptTemplate(
-    name="final_response",
-    system_prompt=ELLA_SYSTEM_PROMPT,
-    instruction=(
-        "Use the provided context to answer: 应该如何回应用户？ Produce a concise "
-        "user-facing response that reflects the task goal, Tool results, "
-        "memory, scene summary, and uncertainty. Current Tool results and the "
-        "current user input take precedence over memory. Treat visual scene "
-        "descriptions and visible_items as evidence even when embedded in "
-        "natural language or JSON-like text. Do not remind the user to check "
-        "an item that is visibly confirmed. If evidence is ambiguous, state "
-        "uncertainty instead of claiming absence."
-    ),
-    output_contract="Return one natural-language response for the user.",
-)
-
-
 EXECUTION_DECISION_TEMPLATE = PromptTemplate(
     name="execution_decision",
     system_prompt=ELLA_SYSTEM_PROMPT,
@@ -181,7 +164,6 @@ VERIFICATION_DECISION_TEMPLATE = PromptTemplate(
 
 TEMPLATES_BY_TYPE = {
     "FIRST_DECISION": FIRST_DECISION_TEMPLATE,
-    "FINAL_RESPONSE": FINAL_RESPONSE_TEMPLATE,
     "EXECUTION_DECISION": EXECUTION_DECISION_TEMPLATE,
     "VERIFICATION_DECISION": VERIFICATION_DECISION_TEMPLATE,
 }

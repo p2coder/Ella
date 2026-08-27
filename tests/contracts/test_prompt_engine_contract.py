@@ -1,8 +1,5 @@
 import inspect
 
-from demo.display_snapshot import TEXT_ONLY, RunDisplaySnapshot
-from demo.page_viewer import render_snapshot_html
-from demo.web_ui import render_web_ui_shell
 from prompts import templates
 from prompts.engine import PromptEngine, PromptType
 
@@ -49,7 +46,7 @@ def test_prompt_engine_does_not_call_external_runtime_services():
     external = ExplodingExternalService()
 
     prompt = PromptEngine().build(
-        PromptType.FINAL_RESPONSE,
+        PromptType.EXECUTION_DECISION,
         {
             "workspace": {
                 "provider": external,
@@ -150,33 +147,9 @@ def test_no_suitable_tool_or_skill_does_not_imply_task_failure():
     assert "SUBMIT_RESULT" in prompt
 
 
-def test_page_prompt_labels_avoid_hidden_reasoning_terms():
-    snapshot = RunDisplaySnapshot(
-        user_input="hello",
-        transcript=None,
-        captured_frame_reference=None,
-        image_status=TEXT_ONLY,
-        scene_summary="",
-        visible_items=(),
-        task_goal="Respond.",
-        final_response_prompt_text="FINAL",
-        tool_results_summary="",
-        final_response="Hi.",
-        memory_status="appended",
-        execution_decision_prompt_text="EXECUTION",
-    )
-
-    html = render_web_ui_shell(snapshot) + render_snapshot_html(snapshot)
-
-    assert "Prompt Sent to LLM" in html
-    assert "Reasoning" not in html
-    assert "Chain of Thought" not in html
-    assert "Model Thinking" not in html
-
-
 def test_prompt_output_redacts_api_key_like_secrets():
     prompt = PromptEngine().build(
-        PromptType.FINAL_RESPONSE,
+        PromptType.EXECUTION_DECISION,
         {
             "workspace": {
                 "visible_tools": (),

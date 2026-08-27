@@ -222,6 +222,12 @@ Task CREATED
 同一个 Task 同一时间只能被一个 Worker claim。
 
 第一版使用单进程、单 Worker。
+worker消耗task queue的消耗规则：
+由scheduler将task queue中的任务分配给worker
+worker获得任务之后持续执行任务，直到任务处于终止态，第一版本不做任务切换
+EventRuntime 只提交 SourceEvent / TaskCreationRequest。
+TaskRuntime 创建 CREATED Task、持久化并返回 task_id。
+Worker 再执行 CREATED → FORMULATING → READY。
 
 ## 7. 前端任务展示
 

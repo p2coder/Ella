@@ -323,3 +323,43 @@ Ella 最明显的 3 个短板；
 - final_response: 你好！👋 我是Ella，温暖、稳定，也始终专注地为你提供清晰而有分寸的支持。  
 很高兴见到你～ 😊
 
+## Task task-cd8cc4f3aabe46f3ab4aa9a9df6b4ef7
+- trace_id: trace-app-0a4068a8b49c4d1b8d6e36d5e7a4c557
+- user_input: diagnostic hello
+- summary: Responded to diagnostic hello with a warm, steady, and lightly contextual acknowledgment.
+- final_response: Hello — good to be here with you. I'm Ella, and I'm ready to help with whatever you're thinking about, whether it's a question, a task, or just a moment of clarity.
+
+## Task task-38bacaa1e2784d76a393201603942b7a
+- trace_id: trace-app-d44c3d00df79475c8318643ea2625baa
+- user_input: 你好
+- summary: Responded to user's greeting with a friendly, natural acknowledgment.
+- final_response: 你好！很高兴见到你 —— 有什么我可以帮你的吗？😊
+
+## Task task-64e861cd7a47418eb8973eff3ed1feab
+- trace_id: trace-app-37e8e35c10fd40ec900265570eac4553
+- user_input: 你好
+- summary: Responded to user's greeting with a friendly, natural-language acknowledgment.
+- final_response: 你好！很高兴见到你 —— 我是Ella，随时准备陪你思考、理清思路，或者一起把事情做成。今天有什么想聊的，或者需要帮忙的吗？
+
+## Task task-cb02827c2a834c8e826d94fcb88ee1d8
+- trace_id: trace-app-e0c87fd69e93440bb228975dfae4ad6c
+- user_input: 帮我为“Ella Agent Runtime”做一份竞争分析。先找出 5 个当前有代表性的 Agent Runtime / Agent Framework，包括至少 2 个偏开发框架、2 个偏 Agent Runtime / Harness、1 个偏工作流编排。然后分别比较它们在任务规划、Tool 调用、Memory、Pause/Resume、Trace/Observability、并发执行、失败恢复这 7 个维度上的能力。结果写入report.md
+- summary: 已完成竞争分析并写入 report.md。报告选定 LangChain、AutoGen AgentChat、LangGraph、OpenAI Agents SDK、CrewAI 共 5 个框架，覆盖至少 2 个开发框架、2 个 Agent Runtime/Harness 和 1 个工作流编排，并在任务规划、Tool 调用、Memory、Pause/Resume、Trace/Observability、并发执行、失败恢复 7 个维度上逐框架比较。文件已成功写入且可读取。
+- final_response: 竞争分析已完成，结果已写入 report.md。
+
+选定框架：
+- 开发框架：LangChain、AutoGen AgentChat
+- Agent Runtime / Harness：LangGraph、OpenAI Agents SDK
+- 工作流编排：CrewAI
+
+报告已覆盖并比较以下 7 个维度：任务规划、Tool 调用、Memory、Pause/Resume、Trace/Observability、并发执行、失败恢复。
+
+主要结论：
+- LangGraph 在 Pause/Resume、Memory、失败恢复和 Trace/Observability 上具备较强的 runtime 能力，适合作为 Ella Agent Runtime 的重点对标对象。
+- OpenAI Agents SDK 在 Tool 调用、Tracing、Sessions 和可恢复 sandbox session 上较完整。
+- AutoGen AgentChat 擅长多智能体协调、Teams 与事件驱动编程模型，但在部分失败恢复与并发能力上仍标为证据不足。
+- LangChain 更偏开发框架和生态整合，其 runtime 能力主要由 LangGraph 承接。
+- CrewAI 定位清晰但本次快速核验对其 Pause/Resume、Trace/Observability、并发执行、失败恢复的证据覆盖不足。
+
+报告中已注明证据来源与证据不足项，避免把未核验内容表述为确定能力。
+

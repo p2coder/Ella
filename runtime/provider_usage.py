@@ -32,22 +32,28 @@ def record_provider_usage(
         calls = []
         task_local_state["provider_usage_calls"] = calls
     calls.append(entry)
-    if usage:
-        task_local_state["provider_usage"] = dict(usage)
+    # Keep the checkpoint rollup field as a real aggregate over all calls
+    # (summed tokens + cache hit rate). Storing the raw usage of only the
+    # latest call here made the field report e.g. prompt_cache_hit_tokens: 0
+    # even when earlier calls had thousands of cached tokens.
+    task_local_state["provider_usage"] = aggregate_provider_usage(calls) or {}
 
 
 def aggregate_provider_usage(
     calls: object,
     *,
-    modality: str = "text",
+    modality: str | None = "text",
 ) -> dict[str, object] | None:
     if not isinstance(calls, (list, tuple)):
         return None
-    selected = tuple(
-        call
-        for call in calls
-        if isinstance(call, Mapping) and call.get("modality", "text") == modality
-    )
+    if modality is None:
+        selected = tuple(call for call in calls if isinstance(call, Mapping))
+    else:
+        selected = tuple(
+            call
+            for call in calls
+            if isinstance(call, Mapping) and call.get("modality", "text") == modality
+        )
     if not selected:
         return None
     prompt_values = _available_values(selected, "prompt_tokens")
@@ -88,7 +94,9 @@ def _integer(usage: Mapping[str, Any], *keys: str) -> int | None:
 
 
 def _cached_tokens(usage: Mapping[str, Any]) -> int | None:
-    direct = _integer(usage, "cached_tokens")
+    # OpenAI-compatible: usage.cached_tokens / prompt_tokens_details.cached_tokens.
+    # DeepSeek: usage.prompt_cache_hit_tokens at top level.
+    direct = _integer(usage, "cached_tokens", "prompt_cache_hit_tokens")
     details = usage.get("prompt_tokens_details", usage.get("input_tokens_details"))
     if isinstance(details, Mapping):
         nested = _integer(details, "cached_tokens")

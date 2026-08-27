@@ -16,7 +16,6 @@ def test_snapshot_construction_from_explicit_values():
         scene_summary="Desk scene with phone and keys.",
         visible_items=("phone", "keys"),
         task_goal="Give the user a short reminder before leaving.",
-        final_response_prompt_text="final prompt",
         tool_results_summary="camera_scene: phone and keys visible",
         final_response="Remember your phone and keys.",
         memory_status="recorded",
@@ -37,7 +36,6 @@ def test_snapshot_serialization_is_deterministic():
         scene_summary="",
         visible_items=("wallet", "phone"),
         task_goal="Answer the user.",
-        final_response_prompt_text="final prompt",
         tool_results_summary="",
         final_response="Done.",
         memory_status="not recorded",
@@ -51,10 +49,6 @@ def test_snapshot_serialization_is_deterministic():
         "scene_summary": "",
         "visible_items": ("wallet", "phone"),
         "task_goal": "Answer the user.",
-        "first_decision_prompt_text": "",
-        "execution_decision_prompt_text": "",
-        "verification_prompt_text": "",
-        "final_response_prompt_text": "final prompt",
         "tool_results_summary": "",
         "final_response": "Done.",
         "memory_status": "not recorded",
@@ -67,46 +61,10 @@ def test_snapshot_serialization_is_deterministic():
         "delivery_status": "",
         "goal_state": "",
         "terminal_execution_state": "",
-        "prompt_display_fields": (
-            "first_decision_prompt_text",
-            "execution_decision_prompt_text",
-            "verification_prompt_text",
-            "final_response_prompt_text",
-        ),
     }
 
     assert snapshot.to_dict() == expected
     assert snapshot.to_dict() == expected
-
-
-def test_prompt_fields_are_present_and_redacted():
-    snapshot = RunDisplaySnapshot(
-        user_input="hello",
-        transcript=None,
-        captured_frame_reference=None,
-        image_status=TEXT_ONLY,
-        scene_summary="",
-        visible_items=(),
-        task_goal="Answer.",
-        final_response_prompt_text=(
-            "DASHSCOPE_API_KEY=abcdef1234567890abcdef1234567890"
-        ),
-        tool_results_summary="",
-        final_response="Done.",
-        memory_status="not recorded",
-    )
-
-    serialized = snapshot.to_dict()
-
-    assert serialized["final_response_prompt_text"] == "[REDACTED]"
-    assert "sk-1234567890abcdef1234567890abcdef" not in str(serialized)
-    assert "abcdef1234567890abcdef1234567890" not in str(serialized)
-    assert serialized["prompt_display_fields"] == (
-        "first_decision_prompt_text",
-        "execution_decision_prompt_text",
-        "verification_prompt_text",
-        "final_response_prompt_text",
-    )
 
 
 def test_image_status_supports_required_values():
@@ -124,7 +82,6 @@ def test_image_status_supports_required_values():
             scene_summary="",
             visible_items=(),
             task_goal="Answer.",
-            final_response_prompt_text="",
             tool_results_summary="",
             final_response="Done.",
             memory_status="not recorded",
@@ -142,7 +99,6 @@ def test_invalid_image_status_raises_clear_error():
             scene_summary="",
             visible_items=(),
             task_goal="Answer.",
-            final_response_prompt_text="",
             tool_results_summary="",
             final_response="Done.",
             memory_status="not recorded",
@@ -170,7 +126,6 @@ def test_snapshot_does_not_call_runtime_or_providers():
         scene_summary="",
         visible_items=(),
         task_goal="Answer.",
-        final_response_prompt_text="",
         tool_results_summary="",
         final_response="Done.",
         memory_status="not recorded",
@@ -191,7 +146,6 @@ def test_snapshot_does_not_write_memory():
         scene_summary="",
         visible_items=(),
         task_goal="Answer.",
-        final_response_prompt_text="final prompt",
         tool_results_summary="",
         final_response="Done.",
         memory_status="recorded",
