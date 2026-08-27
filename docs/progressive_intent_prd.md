@@ -30,6 +30,9 @@ checkpointed Task fact and does not depend on whether Intent fields are empty.
 4. First Decision completion is stored independently from Intent.
 5. `ask_user_question` only returns the questions and user answers as a
    `ToolResult`. The result becomes a normal persisted observation.
+   Returned answers are direct user-provided information for the Task identified
+   by `task_id`; the next decision must not dismiss them as another execution
+   context or immediately repeat the same questions merely for confirmation.
 6. Runtime does not select a current or latest answer. Multiple question results
    remain independent observations for the model to interpret in context.
 7. The same question may be asked in a later phase because the user's answer may

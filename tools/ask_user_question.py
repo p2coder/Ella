@@ -52,7 +52,13 @@ class AskUserQuestionTool:
                 "wait for the matching user answers before reasoning continues. "
                 "For every question, provide 1 to 3 concise answer options and "
                 "mark exactly one best option with recommended=true. The user "
-                "may choose an option or provide a custom answer."
+                "may choose an option or provide a custom answer. Output semantics: "
+                "Every returned answer is direct user-provided information for "
+                "the Task identified by task_id. Use that observation in the next "
+                "decision and do not claim it belongs to another execution context "
+                "or immediately ask the same information merely for confirmation. "
+                "The same information may be asked again in a later phase only "
+                "when task progress creates a genuine need for an updated answer."
             ),
             schema_version="1.0",
             input_schema={
