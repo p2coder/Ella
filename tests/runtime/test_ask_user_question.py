@@ -278,7 +278,6 @@ def test_answered_first_decision_continues_with_execution_decision() -> None:
     "options",
     (
         (),
-        ({"text": "A", "recommended": False},),
         (
             {"text": "A", "recommended": True},
             {"text": "B", "recommended": True},
@@ -289,8 +288,26 @@ def test_answered_first_decision_continues_with_execution_decision() -> None:
         ),
     ),
 )
-def test_question_options_require_one_recommendation_within_bound(options) -> None:
+def test_question_options_reject_invalid_bounds_or_multiple_recommendations(
+    options,
+) -> None:
     with pytest.raises(ValueError):
         AskUserQuestionTool._normalize_question(
             {"question": "Choose one", "options": options}
         )
+
+
+def test_question_options_may_omit_a_recommendation() -> None:
+    question, options, metadata = AskUserQuestionTool._normalize_question(
+        {
+            "question": "Choose one",
+            "options": (
+                {"text": "A", "recommended": False},
+                {"text": "B", "recommended": False},
+            ),
+        }
+    )
+
+    assert question == "Choose one"
+    assert not any(option.recommended for option in options)
+    assert metadata == {}

@@ -51,7 +51,8 @@ class AskUserQuestionTool:
                 "without it. Execution behavior: Submit the bounded questions and "
                 "wait for the matching user answers before reasoning continues. "
                 "For every question, provide 1 to 3 concise answer options and "
-                "mark exactly one best option with recommended=true. The user "
+                "preferably mark one best option with recommended=true. A question "
+                "may omit a recommendation, but it must not mark more than one. The user "
                 "may choose an option or provide a custom answer. Output semantics: "
                 "Every returned answer is direct user-provided information for "
                 "the Task identified by task_id. Use that observation in the next "
@@ -171,6 +172,6 @@ class AskUserQuestionTool:
             raise ValueError("option text must be non-empty")
         if len({option.text for option in options}) != len(options):
             raise ValueError("option text must be unique within one question")
-        if sum(option.recommended for option in options) != 1:
-            raise ValueError("each question must have exactly one recommended option")
+        if sum(option.recommended for option in options) > 1:
+            raise ValueError("each question may have at most one recommended option")
         return question, options, dict(item.get("metadata", {}))

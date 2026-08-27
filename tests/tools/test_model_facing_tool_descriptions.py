@@ -58,3 +58,11 @@ def test_user_question_description_makes_answer_provenance_explicit():
     assert "Task identified by task_id" in description
     assert "do not claim it belongs to another execution context" in description
     assert "later phase" in description
+
+
+def test_user_question_description_prefers_but_does_not_require_recommendation():
+    description = AskUserQuestionTool(InteractionBroker()).definition.description
+
+    assert "preferably mark one best option" in description
+    assert "may omit a recommendation" in description
+    assert "must not mark more than one" in description

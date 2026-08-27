@@ -37,6 +37,8 @@ checkpointed Task fact and does not depend on whether Intent fields are empty.
    remain independent observations for the model to interpret in context.
 7. The same question may be asked in a later phase because the user's answer may
    have changed. This PR does not add a duplicate-question rejection policy.
+8. A user question contains one to three options. One recommended option is
+   preferred but optional; more than one recommended option is invalid.
 
 ## 4. Data Contract
 
