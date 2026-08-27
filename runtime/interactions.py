@@ -7,11 +7,21 @@ from uuid import uuid4
 
 
 @dataclass(frozen=True, slots=True)
+class UserQuestionOption:
+    text: str
+    recommended: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"text": self.text, "recommended": self.recommended}
+
+
+@dataclass(frozen=True, slots=True)
 class UserQuestion:
     question_id: str
     task_id: str
     user_id: str
     question: str
+    options: tuple[UserQuestionOption, ...]
     metadata: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -20,6 +30,7 @@ class UserQuestion:
             "task_id": self.task_id,
             "user_id": self.user_id,
             "question": self.question,
+            "options": tuple(option.to_dict() for option in self.options),
             "metadata": self.metadata,
         }
 
@@ -65,29 +76,53 @@ class InteractionBroker:
         task_id: str,
         user_id: str,
         question: str,
+        options: tuple[UserQuestionOption, ...] = (),
         metadata: dict[str, Any] | None = None,
     ) -> UserAnswer:
-        if not question.strip():
-            raise ValueError("question must be non-empty")
-        item = UserQuestion(
-            question_id=f"question-{uuid4().hex}",
+        return self.ask_many(
             task_id=task_id,
             user_id=user_id,
-            question=question.strip(),
-            metadata=dict(metadata or {}),
+            questions=((question, options, dict(metadata or {})),),
+        )[0]
+
+    def ask_many(
+        self,
+        *,
+        task_id: str,
+        user_id: str,
+        questions: tuple[
+            tuple[str, tuple[UserQuestionOption, ...], dict[str, Any]], ...
+        ],
+    ) -> tuple[UserAnswer, ...]:
+        if not questions:
+            raise ValueError("questions must be non-empty")
+        items = tuple(
+            UserQuestion(
+                question_id=f"question-{uuid4().hex}",
+                task_id=task_id,
+                user_id=user_id,
+                question=question.strip(),
+                options=tuple(options),
+                metadata=dict(metadata),
+            )
+            for question, options, metadata in questions
         )
+        if any(not item.question for item in items):
+            raise ValueError("question must be non-empty")
         with self._condition:
-            self._questions[item.question_id] = item
+            for item in items:
+                self._questions[item.question_id] = item
         if self._on_question is not None:
-            self._on_question(item)
+            for item in items:
+                self._on_question(item)
         with self._condition:
-            while item.question_id not in self._answers:
+            while any(item.question_id not in self._answers for item in items):
                 if task_id in self._cancelled_tasks:
                     raise InteractionCancelled(
                         f"interaction cancelled for task {task_id}"
                     )
                 self._condition.wait()
-            return self._answers[item.question_id]
+            return tuple(self._answers[item.question_id] for item in items)
 
     def answer(self, answer: UserAnswer) -> bool:
         if not answer.answer.strip():

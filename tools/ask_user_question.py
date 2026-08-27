@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from agent.context import AgentExecutionContext
-from runtime.interactions import InteractionBroker
+from runtime.interactions import InteractionBroker, UserQuestionOption
 from .base import CapabilityKind, ToolDefinition, ToolResult
 
 
@@ -9,7 +9,7 @@ from .base import CapabilityKind, ToolDefinition, ToolResult
 class AskUserQuestionTool:
     broker: InteractionBroker
     user_id: str = "local-user"
-    max_questions: int = 1
+    max_questions: int = 3
     name: str = "ask_user_question"
     allowed_roles: tuple[str, ...] = ("main_agent",)
 
@@ -23,9 +23,21 @@ class AskUserQuestionTool:
             "type": "object",
             "properties": {
                 "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "recommended": {"type": "boolean"},
+                        },
+                        "required": ["text", "recommended"],
+                        "additionalProperties": False,
+                    },
+                },
                 "metadata": {"type": "object"},
             },
-            "required": ["question"],
+            "required": ["question", "options"],
             "additionalProperties": False,
         }
         return ToolDefinition(
@@ -37,7 +49,10 @@ class AskUserQuestionTool:
                 "capabilities. Do not use when: A visible capability can reasonably "
                 "obtain the information or the task can be concluded honestly "
                 "without it. Execution behavior: Submit the bounded questions and "
-                "wait for the matching user answers before reasoning continues."
+                "wait for the matching user answers before reasoning continues. "
+                "For every question, provide 1 to 3 concise answer options and "
+                "mark exactly one best option with recommended=true. The user "
+                "may choose an option or provide a custom answer."
             ),
             schema_version="1.0",
             input_schema={
@@ -51,7 +66,19 @@ class AskUserQuestionTool:
                 "required": ["questions"],
                 "additionalProperties": False,
             },
-            input_examples=({"questions": [{"question": "Who should I contact?"}]},),
+            input_examples=(
+                {
+                    "questions": [
+                        {
+                            "question": "Who should I contact?",
+                            "options": [
+                                {"text": "Ella", "recommended": True},
+                                {"text": "My teammate", "recommended": False},
+                            ],
+                        }
+                    ]
+                },
+            ),
             output_schema={
                 "type": "object",
                 "properties": {
@@ -94,13 +121,14 @@ class AskUserQuestionTool:
                 f"questions must contain between 1 and {self.max_questions} items"
             )
         answers = tuple(
-            self.broker.ask(
+            answer.to_dict()
+            for answer in self.broker.ask_many(
                 task_id=context.task_id,
                 user_id=self.user_id,
-                question=str(item["question"]),
-                metadata=dict(item.get("metadata", {})),
-            ).to_dict()
-            for item in questions
+                questions=tuple(
+                    self._normalize_question(item) for item in questions
+                ),
+            )
         )
         return ToolResult(
             self.name,
@@ -108,3 +136,28 @@ class AskUserQuestionTool:
             context.trace_id,
             {"answers": answers},
         )
+
+    @staticmethod
+    def _normalize_question(item: dict) -> tuple[
+        str, tuple[UserQuestionOption, ...], dict
+    ]:
+        question = str(item.get("question", "")).strip()
+        raw_options = tuple(item.get("options", ()))
+        if not question:
+            raise ValueError("question must be non-empty")
+        if not 1 <= len(raw_options) <= 3:
+            raise ValueError("each question must contain between 1 and 3 options")
+        options = tuple(
+            UserQuestionOption(
+                text=str(option.get("text", "")).strip(),
+                recommended=option.get("recommended") is True,
+            )
+            for option in raw_options
+        )
+        if any(not option.text for option in options):
+            raise ValueError("option text must be non-empty")
+        if len({option.text for option in options}) != len(options):
+            raise ValueError("option text must be unique within one question")
+        if sum(option.recommended for option in options) != 1:
+            raise ValueError("each question must have exactly one recommended option")
+        return question, options, dict(item.get("metadata", {}))
