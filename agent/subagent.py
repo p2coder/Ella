@@ -268,13 +268,8 @@ class SubAgent:
         if not isinstance(raw_action, dict):
             raise DecisionValidationError("first decision action is required")
         action = cls._decision_from_payload(raw_action, tools, observations)
-        if raw_intent is None:
-            try:
-                return FirstDecision(None, action)
-            except ValueError as error:
-                raise DecisionValidationError(str(error)) from error
         if not isinstance(raw_intent, dict):
-            raise DecisionValidationError("intent must be an object or null")
+            raise DecisionValidationError("first decision requires an intent object")
         try:
             intent = TaskIntent(
                 goal=str(raw_intent.get("goal", "")),
@@ -300,11 +295,26 @@ class SubAgent:
             if not any(item.name == "ask_user_question" for item in definitions):
                 raise DecisionValidationError("empty input requires ask_user_question")
             return FirstDecision(
-                None,
+                TaskIntent(
+                    goal="Clarify what the user wants Ella to help accomplish.",
+                    deliverables=("A clarified user goal.",),
+                ),
                 ExecutionDecision(
                     CALL_TOOL,
                     "ask_user_question",
-                    {"question": "What would you like Ella to help with?"},
+                    {
+                        "questions": [
+                            {
+                                "question": "What would you like Ella to help with?",
+                                "options": [
+                                    {
+                                        "text": "Describe the task in your own words",
+                                        "recommended": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
                     "The user's purpose is unclear.",
                 ),
             )

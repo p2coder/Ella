@@ -29,7 +29,7 @@ from tasks.completion import TaskCompletionPackage
 from tools import ToolResult
 
 
-CHECKPOINT_SCHEMA_VERSION = 3
+CHECKPOINT_SCHEMA_VERSION = 4
 _FORBIDDEN_KEYS = frozenset({"api_key", "authorization", "credentials"})
 _OMITTED_KEY_PARTS = frozenset(
     {"prompt_text", "captured_frame", "display_frame", "raw_media"}
@@ -165,6 +165,7 @@ def _encode_task(task: Task) -> dict[str, Any]:
                 else None
             ),
             "intent": None if task.intent is None else task.intent.to_dict(),
+            "first_decision_completed": task.first_decision_completed,
             "graph": _encode_graph(task.graph),
             "paused_from_state": task.paused_from_state.value
             if task.paused_from_state
@@ -222,6 +223,7 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
             if data.get("intent")
             else None
         ),
+        first_decision_completed=bool(data.get("first_decision_completed", False)),
         paused_from_state=TaskState(data["paused_from_state"])
         if data.get("paused_from_state")
         else None,

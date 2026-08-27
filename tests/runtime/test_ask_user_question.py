@@ -4,6 +4,8 @@ from time import monotonic, sleep
 import pytest
 
 from events import StandardizedEvent
+from agent.subagent import SubAgent
+from providers.base import ProviderResult
 from runtime.interactions import InteractionBroker, UserAnswer
 from runtime.executor import CapabilityExecutor
 from runtime.task_runtime import TaskRuntime
@@ -12,6 +14,61 @@ from tasks.factory import TaskFactory
 from tools import ToolManager
 from tools.ask_user_question import AskUserQuestionTool
 from tools.base import CapabilityKind
+
+
+class ClarifyingDecisionProvider:
+    provider_name = "clarifying-decision-test"
+    model_name = "test-model"
+
+    def __init__(self) -> None:
+        self.boundaries = []
+
+    def generate(self, prompt, *, trace_id=None, metadata=None):
+        boundary = metadata["boundary"]
+        self.boundaries.append(boundary)
+        if boundary == "first_decision":
+            output = {
+                "intent": {
+                    "goal": "Book a restaurant for dinner tonight.",
+                    "constraints": ["Do not guess missing booking details."],
+                    "deliverables": ["A restaurant booking result."],
+                    "minimum_acceptance_criteria": [],
+                },
+                "action": {
+                    "action": "CALL_TOOL",
+                    "tool_name": "ask_user_question",
+                    "tool_input": {
+                        "questions": [
+                            {
+                                "question": "Where should I book dinner?",
+                                "options": [
+                                    {
+                                        "text": "Shanghai Jing'an",
+                                        "recommended": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    "decision_reason": "The goal is known but location is missing.",
+                },
+            }
+        else:
+            output = {
+                "action": "SUBMIT_RESULT",
+                "tool_name": None,
+                "tool_input": None,
+                "decision_reason": "The answer is available as an observation.",
+                "completion_summary": "The requested location was collected.",
+                "final_response_draft": "I received your preferred location.",
+                "evidence_refs": [],
+            }
+        return ProviderResult(
+            self.provider_name,
+            self.model_name,
+            trace_id,
+            output,
+        )
 
 
 def _wait_for_question(broker, task_id, timeout=1.0):
@@ -164,6 +221,57 @@ def test_all_questions_are_published_before_tool_waits_for_answers() -> None:
         "Which day works?",
         "Which format?",
     )
+
+
+def test_answered_first_decision_continues_with_execution_decision() -> None:
+    broker = InteractionBroker()
+    manager = ToolManager()
+    manager.register(AskUserQuestionTool(broker))
+    provider = ClarifyingDecisionProvider()
+    subagent = SubAgent(
+        skill_manager=SkillManager(),
+        tool_directory=manager,
+        llm_provider=provider,
+    )
+    runtime = TaskRuntime(
+        task_factory=TaskFactory(
+            skill_manager=SkillManager(),
+            tool_manager=manager,
+            task_id_factory=lambda: "task-progressive-intent",
+        ),
+        subagent=subagent,
+        executor=CapabilityExecutor(SkillManager(), manager, subagent),
+    )
+    handle = runtime.create_task(
+        StandardizedEvent(
+            trace_id="trace-progressive-intent",
+            source="test",
+            payload={"text": "Book dinner tonight, but ask me for the location."},
+            event_type="USER_UTTERANCE",
+        )
+    )
+
+    runtime.step(handle.task_id)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(runtime.step, handle.task_id)
+        question = _wait_for_question(broker, handle.task_id)
+        assert runtime.provide_input(
+            handle.task_id,
+            correlation_key=question.question_id,
+            value="Shanghai Jing'an",
+        )
+        future.result(timeout=1)
+
+    task = runtime.get_task(handle.task_id)
+    assert task.first_decision_completed
+    assert task.intent is not None
+    assert task.tool_trace[0]["payload"]["answers"][0]["answer"] == (
+        "Shanghai Jing'an"
+    )
+
+    runtime.step(handle.task_id)
+
+    assert provider.boundaries == ["first_decision", "execution_decision"]
 
 
 @pytest.mark.parametrize(

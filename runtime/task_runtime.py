@@ -964,7 +964,7 @@ class TaskRuntime:
                 {"action": decision.action, "tool_name": decision.tool_name},
             )
         else:
-            is_first_decision = task.intent is None
+            is_first_decision = not task.first_decision_completed
             try:
                 if is_first_decision:
                     self._trace_task(
@@ -973,8 +973,8 @@ class TaskRuntime:
                         "started",
                     )
                     first = subagent.decide_first_action(creation.context, task)
-                    if first.intent is not None:
-                        self._commit_task_intent(task, first.intent)
+                    self._commit_task_intent(task, first.intent)
+                    task.first_decision_completed = True
                     decision = first.action
                     task.task_local_state["pending_reasoning"] = {
                         "purpose": "first_decision"

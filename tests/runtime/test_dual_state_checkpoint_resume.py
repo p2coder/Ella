@@ -32,6 +32,7 @@ def _task() -> Task:
         source_event=event,
         execution_context=context,
         state=TaskState.REASONING,
+        first_decision_completed=True,
         intent=TaskIntent(
             "Create a report",
             deliverables=("report.md",),
@@ -58,6 +59,7 @@ def test_checkpoint_preserves_verification_continuation(tmp_path) -> None:
 
     assert restored is not None
     assert restored.task.intent == task.intent
+    assert restored.task.first_decision_completed
     assert restored.task.task_local_state["pending_reasoning"] == {
         "purpose": "verification"
     }
