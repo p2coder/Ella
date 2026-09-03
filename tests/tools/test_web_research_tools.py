@@ -1,6 +1,6 @@
 import pytest
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from tools.web_research import WebPageReadTool, WebResponse, WebSearchTool
 
 
@@ -13,7 +13,7 @@ def context() -> AgentExecutionContext:
         trace_id="trace-research",
         handoff_goal="Compare public agent frameworks.",
         memory_scope="task_local",
-        allowed_tools=("web_search", "web_page_read"),
+        capability_scope=CapabilityScope("main_agent", (), ("web_search", "web_page_read")),
         permissions=("read_context",),
     )
 

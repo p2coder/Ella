@@ -1,5 +1,9 @@
 # Ella PRD 3 Implementation Prompts
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> 本实施清单引用的 `agent/formulation.py`、`agent/final_response.py`、`demo/cli_demo.py` 路径已失效，对应 PR 已无法直接执行；目标能力大多已通过其他路径实现。
+> 仅作历史记录保留。当前架构与设计请参阅 [`docs/design_overview.md`](design_overview.md)。
+
 以下每一节都是可以直接复制给 Codex 的单 PR 提示词。每个 PR 只做一件事，必须严格遵守 allowed files，不要提前实现后续 PR。
 
 ---

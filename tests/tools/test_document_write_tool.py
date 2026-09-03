@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from config.settings import load_settings
 from tools.base import ToolIdempotency, ToolUncertainPolicy
 from tools.document_write import DocumentWriteTool, MAX_DOCUMENT_BYTES
@@ -17,7 +17,7 @@ def _context() -> AgentExecutionContext:
         trace_id="trace-document",
         handoff_goal="Write a report",
         memory_scope="task_local",
-        allowed_tools=("document_write",),
+        capability_scope=CapabilityScope("main_agent", (), ("document_write",)),
         permissions=("write_document",),
     )
 

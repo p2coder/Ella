@@ -1,5 +1,10 @@
 # Ella架构文档
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> 本文档定义的 v1 架构只有 PresenceRuntime 手动编排链路，不包含现役的 EventRuntime/TaskRuntime/CapabilityExecutor/TaskGraph wave/checkpoint/VerificationAgent；目录结构与组件位置已全面演化（`sessions/` 已清空、SubAgent 迁至 `agent/`、Executor 迁至 `runtime/`）。
+> 概念层（事件路由、TaskSession 隔离、MemoryManager 收口）仍大体成立，但实现细节请以当前代码为准。
+> 当前架构与设计请参阅 [`docs/design_overview.md`](design_overview.md)。
+
 ## 1. 架构概览（Architecture Overview）
 
 Ella是一个 Agent Native 的 AI 生活伴侣原型。它不是单一聊天机器人，也不是固定 workflow 系统，而是一个 Agent Runtime Harness，用来验证事件进入、事件路由、Presence Runtime、任务交接、隔离执行、用户可见输出和 memory 管理的完整生命周期。

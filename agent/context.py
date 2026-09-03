@@ -20,7 +20,7 @@ class CapabilityScope:
         }
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class AgentExecutionContext:
     agent_id: str
     agent_role: str
@@ -29,48 +29,12 @@ class AgentExecutionContext:
     trace_id: str
     handoff_goal: str
     memory_scope: str
-    permissions: tuple[str, ...]
     capability_scope: CapabilityScope
+    permissions: tuple[str, ...] = ()
 
-    def __init__(
-        self,
-        agent_id: str,
-        agent_role: str,
-        parent_agent_id: str | None,
-        task_id: str,
-        trace_id: str,
-        handoff_goal: str,
-        memory_scope: str,
-        allowed_tools: tuple[str, ...] = (),
-        permissions: tuple[str, ...] = (),
-        capability_scope: CapabilityScope | None = None,
-    ) -> None:
-        if capability_scope is None:
-            capability_scope = CapabilityScope(
-                agent_role=agent_role,
-                allowed_skills=(),
-                allowed_tools=allowed_tools,
-            )
-        elif capability_scope.agent_role != agent_role:
+    def __post_init__(self) -> None:
+        if self.capability_scope.agent_role != self.agent_role:
             raise ValueError("capability scope agent role must match context agent role")
-        elif allowed_tools and allowed_tools != capability_scope.allowed_tools:
-            raise ValueError(
-                "allowed_tools must match capability scope when both are provided"
-            )
-
-        object.__setattr__(self, "agent_id", agent_id)
-        object.__setattr__(self, "agent_role", agent_role)
-        object.__setattr__(self, "parent_agent_id", parent_agent_id)
-        object.__setattr__(self, "task_id", task_id)
-        object.__setattr__(self, "trace_id", trace_id)
-        object.__setattr__(self, "handoff_goal", handoff_goal)
-        object.__setattr__(self, "memory_scope", memory_scope)
-        object.__setattr__(self, "permissions", permissions)
-        object.__setattr__(self, "capability_scope", capability_scope)
-
-    @property
-    def allowed_tools(self) -> tuple[str, ...]:
-        return self.capability_scope.allowed_tools
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,7 +45,6 @@ class AgentExecutionContext:
             "trace_id": self.trace_id,
             "handoff_goal": self.handoff_goal,
             "memory_scope": self.memory_scope,
-            "allowed_tools": self.allowed_tools,
             "permissions": self.permissions,
             "capability_scope": self.capability_scope.to_dict(),
         }

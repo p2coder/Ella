@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from memory import MemoryManagementRequest, MemoryManager
 from tasks.completion import TaskCompletionPackage
 from tasks.output import UserVisibleAgentOutput
@@ -16,7 +16,7 @@ def make_package() -> TaskCompletionPackage:
         trace_id="trace-memory",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
-        allowed_tools=("mock_weather", "mock_checklist"),
+        capability_scope=CapabilityScope("main_agent", (), ("mock_weather", "mock_checklist")),
         permissions=("read_context",),
     )
     return TaskCompletionPackage(

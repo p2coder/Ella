@@ -1,5 +1,10 @@
 # Ella Runtime PRD 2.1：真实感知与低频环境理解
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> 本文档的低频环境理解主线（AmbientSensorRuntime、本地场景变化检测、声音活动检测、AmbientState 时间序列、疲劳/久坐提醒）整体未实现，是当前唯一完全未落地的大块。
+> 真实 LLM/麦克风/摄像头接入（主线 A）已落地，并已额外接入 DeepSeek provider 与 screen_scene 工具（文档未覆盖）。
+> 当前架构与设计请参阅 [`docs/design_overview.md`](design_overview.md)。
+
 ## 1. 产品概要
 
 Ella Runtime 2.1 在现有 EventRuntime、TaskRuntime 和 Provider/Device 边界上，完成真实 LLM、真实麦克风和真实摄像头接入，并增加低功耗、非打扰式的持续环境理解能力。

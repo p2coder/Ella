@@ -1,4 +1,4 @@
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from tools.base import ToolDefinition
 from tools.camera_scene import CameraSceneTool
 from tools.mock_tools import (
@@ -17,7 +17,7 @@ def _make_context(*, allowed_tools: tuple[str, ...]) -> AgentExecutionContext:
         trace_id="trace-tools",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
-        allowed_tools=allowed_tools,
+        capability_scope=CapabilityScope("main_agent", (), allowed_tools),
         permissions=("read_context",),
     )
 

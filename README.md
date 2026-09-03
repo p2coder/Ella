@@ -225,12 +225,14 @@ tests/       单元、集成与契约测试
 
 ## 设计文档
 
-- [`docs/architecture.md`](docs/architecture.md)：架构边界与核心对象。
-- [`docs/prompt_prd.md`](docs/prompt_prd.md)：Prompt Engine 设计。
+- [`docs/design_overview.md`](docs/design_overview.md)：**综合设计文档**，架构演进主线、设计原理、文档地图与当前边界，是当前架构的单一入口。
+- [`docs/prompt_prd.md`](docs/prompt_prd.md)：Prompt Engine 设计（最新演进见 `prompt_structure_improve_prd.md`）。
 - [`docs/task_runtime_worker_prd.md`](docs/task_runtime_worker_prd.md)：后台任务执行模型。
 - [`docs/task_step_tool_graph_prd.md`](docs/task_step_tool_graph_prd.md)：Task、Step 与 Tool 图结构。
 - [`docs/tool_failure_prd.md`](docs/tool_failure_prd.md)：Tool 失败分类与重试语义。
 - [`docs/dual_state_task_verification_prd.md`](docs/dual_state_task_verification_prd.md)：双状态与 Verification。
+
+> 注：`docs/` 下部分早期文档（`prd.md`、`architecture.md`、`prd_2_1.md`、`prd3.md` 等）已标记「已过期」，仅作历史记录。完整文档地图见 `docs/design_overview.md`。
 
 ## 当前限制
 

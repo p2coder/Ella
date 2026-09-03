@@ -35,9 +35,8 @@ from tasks.graph import (
     TaskGraphNodeDefinition,
     TaskGraphRun,
     TaskGraphNodeType,
-    ToolGraphRun,
 )
-from tasks.factory import TaskCreationResult, TaskFactory
+from tasks.factory import TaskFactory
 from agent.subagent import DecisionValidationError, SubAgent
 from tools import ToolResult
 from tools.base import ToolUncertainPolicy
@@ -48,10 +47,10 @@ from .timing import (
 )
 from .task_queue import TaskQueue
 from .task_store import TaskStore
-from .step_runtime import StepRuntime, ToolNodeRun, ToolNodeRunState
 from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 from .interactions import InteractionBroker, UserAnswer, UserQuestion
+from .provider_usage import merge_provider_usage_calls
 
 
 VERIFICATION_TOOL_NAMES = frozenset(
@@ -90,7 +89,6 @@ class TaskRuntime:
     max_verification_rounds: int = 2
     task_store: TaskStore | None = None
     task_queue: TaskQueue | None = None
-    step_runtime: StepRuntime | None = None
     max_runtime_ticks: int = 100
     max_steps: int = 200
     max_task_workers: int = 500
@@ -99,7 +97,7 @@ class TaskRuntime:
     trace_recorder: TraceRecorder | NoOpTraceRecorder
     event_publisher: TaskEventPublisher
     _memory_manager: MemoryManager = field(init=False, repr=False)
-    _tasks: dict[str, TaskCreationResult] = field(
+    _tasks: dict[str, Task] = field(
         default_factory=dict,
         init=False,
         repr=False,
@@ -133,7 +131,6 @@ class TaskRuntime:
         max_verification_rounds: int = 2,
         task_store: TaskStore | None = None,
         task_queue: TaskQueue | None = None,
-        step_runtime: StepRuntime | None = None,
         max_runtime_ticks: int = 100,
         max_steps: int = 200,
         max_task_workers: int = 500,
@@ -157,7 +154,6 @@ class TaskRuntime:
         self.max_verification_rounds = max_verification_rounds
         self.task_store = task_store
         self.task_queue = task_queue
-        self.step_runtime = step_runtime
         self.max_runtime_ticks = max_runtime_ticks
         self.max_steps = max_steps
         self.max_task_workers = max_task_workers
@@ -246,12 +242,12 @@ class TaskRuntime:
         result = self._worker_results.get(task_id)
         if result is not None:
             return result
-        creation = self._tasks.get(task_id)
-        if creation is None:
+        task = self._tasks.get(task_id)
+        if task is None:
             raise KeyError(task_id)
         return self._result(
-            creation,
-            stop_reason=self._stop_reason(creation.task),
+            task,
+            stop_reason=self._stop_reason(task),
             memory_result=self._memory_results.get(task_id),
             failure_reason=self._worker_errors.get(task_id),
             record_trace=False,
@@ -270,15 +266,15 @@ class TaskRuntime:
                 self._wake_event.wait(0.1)
                 self._wake_event.clear()
                 continue
-            creation = self._tasks.get(task_id)
-            if creation is None:
+            task = self._tasks.get(task_id)
+            if task is None:
                 continue
             if task_id in self._owned_tasks:
                 continue
             pool = self._task_worker_pool
             if pool is None:
                 return
-            future = pool.submit(self._run_task_worker, creation)
+            future = pool.submit(self._run_task_worker, task)
             self._owned_tasks[task_id] = future
 
     def _reap_task_workers(self) -> None:
@@ -295,8 +291,7 @@ class TaskRuntime:
                 self._worker_errors[task_id] = str(error)
             self._wake_event.set()
 
-    def _run_task_worker(self, creation: TaskCreationResult) -> None:
-        task = creation.task
+    def _run_task_worker(self, task: Task) -> None:
         self._trace_task(
             task,
             "runtime.worker",
@@ -311,7 +306,7 @@ class TaskRuntime:
                     self._wake_event.wait(0.05)
                     self._wake_event.clear()
                     continue
-                self._process_scheduled_task(creation)
+                self._process_scheduled_task(task)
         except Exception as error:
             self._worker_errors[task.task_id] = str(error)
             self._handle_worker_exception(task, error)
@@ -333,15 +328,14 @@ class TaskRuntime:
                 self.task_queue.enqueue(task.task_id)
                 self._wake_event.set()
 
-    def _process_scheduled_task(self, creation: TaskCreationResult) -> None:
-        task = creation.task
+    def _process_scheduled_task(self, task: Task) -> None:
         if task.state not in {TaskState.READY, TaskState.REASONING, TaskState.TOOL_EXECUTION}:
             return
         result = self.run_until_complete(task.task_id, self.max_steps)
         reached_control_safe_point = self._reach_control_safe_point(task)
         self._worker_results[task.task_id] = (
             self._result(
-                creation,
+                task,
                 steps=result.steps,
                 stop_reason=self._stop_reason(task),
                 blocked=result.blocked,
@@ -359,7 +353,7 @@ class TaskRuntime:
             self._persist(task)
             self._trace_task(task, "task", "failed", task.failure)
             self._worker_results[task.task_id] = self._result(
-                creation,
+                task,
                 stop_reason="failed",
                 failure_reason=task.failure_reason,
             )
@@ -423,7 +417,7 @@ class TaskRuntime:
             task = stored.task
             if task.execution_context is None:
                 continue
-            self._tasks[task.task_id] = TaskCreationResult(task)
+            self._tasks[task.task_id] = task
             self._trace_task(
                 task,
                 "recovery",
@@ -519,8 +513,7 @@ class TaskRuntime:
             max_step_retries=self.max_step_retries,
         )
         task.transition_to(TaskState.READY)
-        creation = TaskCreationResult(task)
-        self._tasks[task_id] = creation
+        self._tasks[task_id] = task
         self._persist(task)
         self._trace_task(task, "task", "created")
         self._trace_task(task, "task", "submitted")
@@ -550,17 +543,7 @@ class TaskRuntime:
             constraints=intent.constraints,
             completion_criteria=intent.minimum_acceptance_criteria,
         )
-        task.execution_context = AgentExecutionContext(
-            agent_id=context.agent_id,
-            agent_role=context.agent_role,
-            parent_agent_id=context.parent_agent_id,
-            task_id=context.task_id,
-            trace_id=context.trace_id,
-            handoff_goal=intent.goal,
-            memory_scope=context.memory_scope,
-            permissions=context.permissions,
-            capability_scope=context.capability_scope,
-        )
+        task.execution_context = replace(context, handoff_goal=intent.goal)
         self._trace_task(
             task,
             "reasoning.first_decision",
@@ -584,8 +567,8 @@ class TaskRuntime:
 
     def list_tasks(self) -> tuple[Task, ...]:
         return tuple(
-            creation.task
-            for _, creation in sorted(self._tasks.items())
+            task
+            for _, task in sorted(self._tasks.items())
         )
 
     def provide_input(
@@ -618,7 +601,7 @@ class TaskRuntime:
             )
         )
         if accepted:
-            task = self._tasks[task_id].task
+            task = self._tasks[task_id]
             self._trace_task(
                 task,
                 "interaction.ask_user_question",
@@ -673,15 +656,17 @@ class TaskRuntime:
     def _apply_control_now(
         self, command: TaskControlCommand
     ) -> TaskControlResult:
-        creation = self._tasks.get(command.task_id)
-        if creation is None and self.task_store is not None:
+        task = self._tasks.get(command.task_id)
+        if task is None and self.task_store is not None:
             stored = self.task_store.load(command.task_id)
             if stored is not None:
-                creation = TaskCreationResult(stored.task)
-                self._tasks[command.task_id] = creation
-        if creation is None:
+                if stored.task.execution_context is None:
+                    raise ValueError("Task must own an execution context")
+                task = stored.task
+                self._tasks[command.task_id] = task
+        if task is None:
             return TaskControlResult(command.command_id, command.task_id, False, "missing", "missing", "task_not_found", "Task does not exist.")
-        task = creation.task
+
         handled = task.task_local_state.setdefault("handled_control_commands", {})
         if command.command_id in handled:
             previous = handled[command.command_id]
@@ -799,7 +784,7 @@ class TaskRuntime:
         return False
 
     def resolve_uncertain_as_failed(self, task_id: str, reason: str) -> None:
-        task = self._tasks[task_id].task
+        task = self._tasks[task_id]
         if task.state is not TaskState.UNCERTAIN:
             raise ValueError("only an UNCERTAIN Task can be resolved")
         attempt = task.task_local_state.get("uncertain_attempt", {})
@@ -825,7 +810,7 @@ class TaskRuntime:
         self._publish_terminal(task)
 
     def deliver(self, task_id: str, sender) -> bool:
-        task = self._tasks[task_id].task
+        task = self._tasks[task_id]
         if task.state not in {
             TaskState.COMPLETED,
             TaskState.FAILED,
@@ -897,14 +882,14 @@ class TaskRuntime:
         )
 
     def get_task(self, task_id: str) -> Task:
-        return self._tasks[task_id].task
+        return self._tasks[task_id]
 
     def get_context(self, task_id: str) -> AgentExecutionContext:
-        return self._tasks[task_id].context
+        return self._tasks[task_id].execution_context
 
     def step(self, task_id: str) -> TaskRuntimeResult:
-        creation = self._tasks[task_id]
-        task = creation.task
+        task = self._tasks[task_id]
+
         if (
             task.graph is not None
             and task.state is TaskState.REASONING
@@ -913,9 +898,9 @@ class TaskRuntime:
                 "plan_recovery_reasoning_pending", False
             )
         ):
-            return self._step_task_graph(creation)
+            return self._step_task_graph(task)
         self.timing_recorder.record_task_processing_started(
-            creation.context.trace_id
+            task.execution_context.trace_id
         )
 
         if task.state in {
@@ -939,9 +924,9 @@ class TaskRuntime:
                 "ready",
                 {"state": task.state.value},
             )
-            return self._result(creation)
+            return self._result(task)
 
-        self.timing_recorder.record_execution_started(creation.context.trace_id)
+        self.timing_recorder.record_execution_started(task.execution_context.trace_id)
         self._persist(task)
         pending_reasoning = task.task_local_state.get("pending_reasoning")
         if (
@@ -949,9 +934,9 @@ class TaskRuntime:
             and pending_reasoning.get("purpose") == "verification"
             and task.task_local_state.get("draft_final_response") is not None
         ):
-            completed = self._verify_candidate(creation)
+            completed = self._verify_candidate(task)
             return self._result(
-                creation,
+                task,
                 stop_reason="completed" if completed else None,
             )
         saved_decision = task.task_local_state.get("current_decision")
@@ -972,7 +957,7 @@ class TaskRuntime:
                         "reasoning.first_decision",
                         "started",
                     )
-                    first = subagent.decide_first_action(creation.context, task)
+                    first = subagent.decide_first_action(task.execution_context, task)
                     self._commit_task_intent(task, first.intent)
                     task.first_decision_completed = True
                     decision = first.action
@@ -982,7 +967,7 @@ class TaskRuntime:
                 else:
                     decision = subagent.decide_next_action(
                         task.handoff,
-                        creation.context,
+                        task.execution_context,
                         task,
                     )
                     task.task_local_state["pending_reasoning"] = {
@@ -991,7 +976,7 @@ class TaskRuntime:
             except DecisionValidationError as error:
                 self._handle_decision_failure(task, str(error))
                 self._persist(task)
-                return self._result(creation)
+                return self._result(task)
             task.task_local_state["current_decision"] = decision.to_dict()
             task.task_local_state.pop("decision_repair", None)
             self._persist(task)
@@ -1026,14 +1011,14 @@ class TaskRuntime:
             TaskState.KILL_REQUESTED,
             TaskState.KILLED,
         }:
-            return self._result(creation, stop_reason=self._stop_reason(task))
+            return self._result(task, stop_reason=self._stop_reason(task))
 
         repair_violation = self._repair_violation(task, decision)
         if repair_violation is not None:
             task.task_local_state.pop("current_decision", None)
             self._handle_failure(task, repair_violation)
             self._persist(task)
-            return self._result(creation)
+            return self._result(task)
 
         in_flight = None
         if decision.action == CALL_TOOL and decision.tool_name is not None:
@@ -1064,7 +1049,7 @@ class TaskRuntime:
                 execution_stage="tool_execution",
                 tool_name=decision.tool_name,
             )
-        execution = executor.execute(decision, creation.context, task)
+        execution = executor.execute(decision, task.execution_context, task)
         if in_flight is not None:
             task.task_local_state.pop("in_flight_action", None)
             if task.state is TaskState.TOOL_EXECUTION:
@@ -1108,7 +1093,7 @@ class TaskRuntime:
             TaskState.KILL_REQUESTED,
             TaskState.KILLED,
         }:
-            return self._result(creation, stop_reason=self._stop_reason(task))
+            return self._result(task, stop_reason=self._stop_reason(task))
         if execution.failure is not None:
             task.task_local_state.pop("current_decision", None)
             self._trace_task(
@@ -1118,7 +1103,7 @@ class TaskRuntime:
                 execution.failure.to_dict(),
             )
             self._handle_failure(task, execution.failure)
-            return self._result(creation)
+            return self._result(task)
 
         if decision.action == SUBMIT_RESULT:
             task.task_local_state.pop("current_decision", None)
@@ -1126,13 +1111,13 @@ class TaskRuntime:
             task.task_local_state["completion_evidence_refs"] = decision.evidence_refs
             task.task_local_state["draft_final_response"] = decision.final_response_draft
             self._archive_and_advance(task)
-            completed = self._finalize_candidate(creation)
+            completed = self._finalize_candidate(task)
             return self._result(
-                creation,
+                task,
                 stop_reason="completed" if completed else None,
             )
 
-        return self._result(creation)
+        return self._result(task)
 
     def _handle_decision_failure(self, task: Task, message: str) -> None:
         step = task.current_step
@@ -1167,14 +1152,13 @@ class TaskRuntime:
         task.transition_to(TaskState.FAILED)
 
     def _step_task_graph(
-        self, creation: TaskCreationResult
+        self, task: Task
     ) -> TaskRuntimeResult:
-        task = creation.task
         ticks = int(task.task_local_state.get("runtime_ticks", 0)) + 1
         task.task_local_state["runtime_ticks"] = ticks
         if ticks > self.max_runtime_ticks:
             return self._fail_graph_task(
-                creation, "max_runtime_ticks_exhausted"
+                task, "max_runtime_ticks_exhausted"
             )
         graph = task.graph
         runs = {key: value for key, value in graph.node_runs.items()}
@@ -1196,10 +1180,10 @@ class TaskRuntime:
                 for node_id in graph.definition.terminal_node_ids
             }
             if "succeeded" in terminal_states:
-                self._complete_graph_task(creation, runs)
+                self._complete_graph_task(task, runs)
                 self._persist(task)
                 return self._result(
-                    creation,
+                    task,
                     stop_reason=(
                         "completed"
                         if task.state is TaskState.COMPLETED
@@ -1207,7 +1191,7 @@ class TaskRuntime:
                     ),
                 )
             return self._schedule_plan_recovery_reasoning(
-                creation,
+                task,
                 runs,
                 "no_reachable_success_terminal",
             )
@@ -1227,7 +1211,7 @@ class TaskRuntime:
             futures = {
                 pool.submit(
                     self._execute_graph_node,
-                    creation,
+                    task,
                     node_by_id[node_id],
                     wave_id,
                 ): node_id
@@ -1251,8 +1235,13 @@ class TaskRuntime:
 
         plan_payload = None
         for node_id in graph.definition.stable_ready_order(results):
-            runs[node_id] = results[node_id]
-            for observation in results[node_id].get("observations", ()):
+            result = results[node_id]
+            merge_provider_usage_calls(
+                task.task_local_state,
+                result.pop("provider_usage_calls", ()),
+            )
+            runs[node_id] = result
+            for observation in result.get("observations", ()):
                 task.tool_trace += (observation,)
                 if observation.get("tool_name") == "plan_written":
                     plan_payload = observation.get("payload")
@@ -1261,7 +1250,7 @@ class TaskRuntime:
         if isinstance(plan_payload, Mapping):
             self._activate_plan(task, plan_payload)
             self._persist(task)
-            return self._result(creation)
+            return self._result(task)
         uncertain_nodes = tuple(
             node_id
             for node_id, result in results.items()
@@ -1279,7 +1268,7 @@ class TaskRuntime:
             task.failure_reason = task.failure["message"]
             task.transition_to(TaskState.UNCERTAIN)
             self._persist(task)
-            return self._result(creation, stop_reason="uncertain")
+            return self._result(task, stop_reason="uncertain")
         if any(
             _graph_run_state(runs.get(item)) == "succeeded"
             for item in graph.definition.terminal_node_ids
@@ -1288,16 +1277,15 @@ class TaskRuntime:
                 if _graph_run_state(runs.get(candidate.node_id)) in {None, "pending", "ready"}:
                     runs[candidate.node_id] = {"state": "skipped"}
             task.graph = TaskGraphRun(graph.definition, runs)
-            self._complete_graph_task(creation, runs)
+            self._complete_graph_task(task, runs)
         self._persist(task)
-        return self._result(creation)
+        return self._result(task)
 
     def _complete_graph_task(
         self,
-        creation: TaskCreationResult,
+        task: Task,
         runs: Mapping[str, Any],
     ) -> None:
-        task = creation.task
         terminal_candidates = tuple(
             runs[node_id]
             for node_id in task.graph.definition.terminal_node_ids
@@ -1323,7 +1311,7 @@ class TaskRuntime:
             task.task_local_state["completion_evidence_refs"] = tuple(
                 submitted.get("evidence_refs", ())
             )
-            self._finalize_candidate(creation)
+            self._finalize_candidate(task)
             return
         task.task_local_state["plan_execution_complete"] = True
         task.task_local_state["pending_reasoning"] = {
@@ -1338,11 +1326,10 @@ class TaskRuntime:
             {"plan_version": task.graph.definition.version},
         )
 
-    def _finalize_candidate(self, creation: TaskCreationResult) -> bool:
-        task = creation.task
+    def _finalize_candidate(self, task: Task) -> bool:
         task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
         self._persist(task)
-        task.completion = self._build_completion(creation)
+        task.completion = self._build_completion(task)
         self._trace_task(
             task,
             "reasoning.submit_result",
@@ -1353,10 +1340,9 @@ class TaskRuntime:
                 )
             },
         )
-        return self._verify_candidate(creation)
+        return self._verify_candidate(task)
 
-    def _verify_candidate(self, creation: TaskCreationResult) -> bool:
-        task = creation.task
+    def _verify_candidate(self, task: Task) -> bool:
         in_progress = bool(
             task.task_local_state.get("verification_in_progress", False)
         )
@@ -1387,7 +1373,7 @@ class TaskRuntime:
                 ),
             )
             return self._commit_verification_verdict(
-                creation,
+                task,
                 verdict,
                 verification_round,
             )
@@ -1403,7 +1389,7 @@ class TaskRuntime:
             _, executor = self._execution_components()
             definitions = tuple(
                 item
-                for item in executor.tool_manager.list_definitions(creation.context)
+                for item in executor.tool_manager.list_definitions(task.execution_context)
                 if item.name in VERIFICATION_TOOL_NAMES
             )
             verdict = None
@@ -1441,7 +1427,7 @@ class TaskRuntime:
                 )
                 task.transition_to(TaskState.TOOL_EXECUTION)
                 self._persist(task)
-                execution = executor.execute(decision, creation.context, task)
+                execution = executor.execute(decision, task.execution_context, task)
                 task.transition_to(TaskState.REASONING)
                 task.task_local_state.pop("pending_tool", None)
                 task.task_local_state.pop("in_flight_action", None)
@@ -1490,18 +1476,17 @@ class TaskRuntime:
             self._persist(task)
             return False
         return self._commit_verification_verdict(
-            creation,
+            task,
             verdict,
             verification_round,
         )
 
     def _commit_verification_verdict(
         self,
-        creation: TaskCreationResult,
+        task: Task,
         verdict: VerificationVerdict,
         verification_round: int,
     ) -> bool:
-        task = creation.task
         results = tuple(task.task_local_state.get("verification_results", ()))
         task.task_local_state["verification_results"] = (
             *results,
@@ -1570,8 +1555,8 @@ class TaskRuntime:
             )
             self._persist(task)
             return False
-        self.timing_recorder.record_execution_completed(creation.context.trace_id)
-        self.timing_recorder.record_task_completed(creation.context.trace_id)
+        self.timing_recorder.record_execution_completed(task.execution_context.trace_id)
+        self.timing_recorder.record_task_completed(task.execution_context.trace_id)
         task.transition_to(TaskState.COMPLETED)
         task.set_goal_state(verdict.goal_state)
         task.terminal_execution_state = TaskState.COMPLETED
@@ -1589,8 +1574,7 @@ class TaskRuntime:
         )
         return True
 
-    def _execute_graph_node(self, creation, node, wave_id: int) -> dict[str, Any]:
-        task = creation.task
+    def _execute_graph_node(self, task, node, wave_id: int) -> dict[str, Any]:
         payload = dict(node.payload) if isinstance(node.payload, Mapping) else {}
         goal = str(payload.get("goal") or node.node_id)
         criteria = tuple(payload.get("completion_criteria", ()))
@@ -1604,43 +1588,74 @@ class TaskRuntime:
             tool_trace=task.tool_trace,
             current_step=StepExecutionState(max_step_retries=self.max_step_retries),
         )
+
+        def node_result(**values: Any) -> dict[str, Any]:
+            calls = local.task_local_state.get("provider_usage_calls", ())
+            values["provider_usage_calls"] = tuple(
+                {
+                    **dict(call),
+                    "node_id": node.node_id,
+                    "wave_id": wave_id,
+                }
+                for call in calls
+                if isinstance(call, Mapping)
+            )
+            return values
+
         subagent, executor = self._execution_components()
         start_trace_len = len(local.tool_trace)
         for _ in range(self.max_steps):
             try:
                 decision = subagent.decide_next_action(
                     task.handoff,
-                    creation.context,
+                    task.execution_context,
                     local,
                     current_goal=goal,
                     completion_criteria=criteria,
                 )
             except DecisionValidationError as error:
                 if local.current_step.retry_index >= local.current_step.max_step_retries:
-                    return {"state": "failed", "code": "decision_repair_exhausted", "message": str(error), "wave_id": wave_id}
+                    return node_result(
+                        state="failed",
+                        code="decision_repair_exhausted",
+                        message=str(error),
+                        wave_id=wave_id,
+                    )
                 local.current_step = replace(local.current_step, retry_index=local.current_step.retry_index + 1)
                 continue
             if decision.action == SUBMIT_RESULT:
-                return {
-                    "state": "succeeded",
-                    "wave_id": wave_id,
-                    "completion_summary": decision.completion_summary,
-                    "final_response_draft": decision.final_response_draft,
-                    "evidence_refs": decision.evidence_refs,
-                    "observations": local.tool_trace[start_trace_len:],
-                }
+                return node_result(
+                    state="succeeded",
+                    wave_id=wave_id,
+                    completion_summary=decision.completion_summary,
+                    final_response_draft=decision.final_response_draft,
+                    evidence_refs=decision.evidence_refs,
+                    observations=local.tool_trace[start_trace_len:],
+                )
             local.state = TaskState.TOOL_EXECUTION
-            execution = executor.execute(decision, creation.context, local)
+            execution = executor.execute(decision, task.execution_context, local)
             local.state = TaskState.REASONING
             if execution.uncertain:
-                return {"state": "uncertain", "wave_id": wave_id, "failure": None if execution.failure is None else execution.failure.to_dict()}
+                return node_result(
+                    state="uncertain",
+                    wave_id=wave_id,
+                    failure=(
+                        None
+                        if execution.failure is None
+                        else execution.failure.to_dict()
+                    ),
+                )
             if execution.failure is not None:
                 local.current_step = replace(local.current_step, failures=(*local.current_step.failures, execution.failure))
                 continue
             observation = execution.tool_result.to_dict()
             observation["observation_id"] = f"{task.task_id}:{node.node_id}:observation:{len(local.tool_trace) + 1}"
             local.tool_trace += (observation,)
-        return {"state": "failed", "code": "max_steps_exhausted", "wave_id": wave_id}
+        return node_result(
+            state="failed",
+            code="max_steps_exhausted",
+            wave_id=wave_id,
+        )
 
     def _observe_capability_result(self, task: Task, result: ToolResult) -> None:
         if result.tool_name == "plan_written":
@@ -1724,11 +1739,10 @@ class TaskRuntime:
 
     def _schedule_plan_recovery_reasoning(
         self,
-        creation: TaskCreationResult,
+        task: Task,
         runs: Mapping[str, Any],
         reason: str,
     ) -> TaskRuntimeResult:
-        task = creation.task
         failed_nodes = tuple(
             node_id
             for node_id, run in runs.items()
@@ -1755,15 +1769,14 @@ class TaskRuntime:
             },
         )
         self._persist(task)
-        return self._result(creation)
+        return self._result(task)
 
-    def _fail_graph_task(self, creation, code: str) -> TaskRuntimeResult:
-        task = creation.task
+    def _fail_graph_task(self, task, code: str) -> TaskRuntimeResult:
         task.failure = {"code": code, "message": code.replace("_", " ")}
         task.failure_reason = code
         task.transition_to(TaskState.FAILED)
         self._persist(task)
-        return self._result(creation, stop_reason=code, blocked=True, failure_reason=code)
+        return self._result(task, stop_reason=code, blocked=True, failure_reason=code)
 
     def _repair_violation(
         self,
@@ -1872,17 +1885,17 @@ class TaskRuntime:
         if max_steps < 0:
             raise ValueError("max_steps must be non-negative")
 
-        creation = self._tasks[task_id]
-        stop_reason = self._stop_reason(creation.task)
+        task = self._tasks[task_id]
+        stop_reason = self._stop_reason(task)
         if stop_reason is not None:
             return self._result(
-                creation,
+                task,
                 stop_reason=stop_reason,
                 blocked=self._is_blocked_reason(stop_reason),
             )
 
         for steps in range(1, max_steps + 1):
-            task = creation.task
+
             self._persist(task)
             self._trace_task(
                 task,
@@ -1898,17 +1911,17 @@ class TaskRuntime:
                 "checkpointed",
                 {"state": task.state.value},
             )
-            stop_reason = self._stop_reason(creation.task)
+            stop_reason = self._stop_reason(task)
             if stop_reason is not None:
                 return self._result(
-                    creation,
+                    task,
                     steps=steps,
                     stop_reason=stop_reason,
                     blocked=self._is_blocked_reason(stop_reason),
                 )
 
         return self._result(
-            creation,
+            task,
             steps=max_steps,
             stop_reason="max_steps",
             blocked=True,
@@ -1989,10 +2002,9 @@ class TaskRuntime:
 
     def _build_completion(
         self,
-        creation: TaskCreationResult,
+        task: Task,
     ) -> TaskCompletionPackage:
-        session = creation.task
-        user_input = session.handoff.trigger_event.payload.get("text", "")
+        user_input = task.handoff.trigger_event.payload.get("text", "")
         if not isinstance(user_input, str):
             user_input = str(user_input)
         tool_results = tuple(
@@ -2002,47 +2014,47 @@ class TaskRuntime:
                 trace_id=entry["trace_id"],
                 payload=entry["payload"],
             )
-            for entry in session.tool_trace
+            for entry in task.tool_trace
         )
         final_response = str(
-            session.task_local_state.get("draft_final_response", "")
+            task.task_local_state.get("draft_final_response", "")
         ).strip()
         if not final_response:
             raise RuntimeError("SUBMIT_RESULT requires a persisted final response draft")
         output = UserVisibleAgentOutput(
             process={
-                "task_goal": session.handoff.task_goal,
+                "task_goal": task.handoff.task_goal,
                 "user_input": user_input,
                 "strategy": None,
                 "tool_results": tuple(
                     result.tool_name for result in tool_results
                 ),
-                "first_decision_prompt_text": session.task_local_state.get(
+                "first_decision_prompt_text": task.task_local_state.get(
                     "first_decision_prompt_text",
                     "",
                 ),
-                "execution_decision_prompt_text": session.task_local_state.get(
+                "execution_decision_prompt_text": task.task_local_state.get(
                     "execution_decision_prompt_text",
                     "",
                 ),
-                "verification_prompt_text": session.task_local_state.get(
+                "verification_prompt_text": task.task_local_state.get(
                     "verification_prompt_text",
                     "",
                 ),
-                "timing": self._timing_dict(creation),
+                "timing": self._timing_dict(task),
             },
             final_response=final_response,
         )
         return TaskCompletionPackage(
-            context=creation.context,
-            summary=str(session.task_local_state.get("completion_summary", "")),
+            context=task.execution_context,
+            summary=str(task.task_local_state.get("completion_summary", "")),
             user_visible_output=output,
             tool_results=tool_results,
         )
 
     def _result(
         self,
-        creation: TaskCreationResult,
+        task: Task,
         steps: int = 0,
         stop_reason: str | None = None,
         blocked: bool = False,
@@ -2050,32 +2062,32 @@ class TaskRuntime:
         failure_reason: str | None = None,
         record_trace: bool = True,
     ) -> TaskRuntimeResult:
-        timing = self.timing_recorder.snapshot(creation.context.trace_id)
+        timing = self.timing_recorder.snapshot(task.execution_context.trace_id)
         if record_trace:
             self._trace_task(
-                creation.task,
+                task,
                 "task_node.runtime",
                 "state_observed",
                 {
-                    "state": creation.task.state.value,
+                    "state": task.state.value,
                     "stop_reason": stop_reason,
                     "timing": None if timing is None else timing.to_dict(),
                 },
             )
         return TaskRuntimeResult(
             handle=TaskHandle(
-                task_id=creation.task.task_id,
-                trace_id=creation.context.trace_id,
+                task_id=task.task_id,
+                trace_id=task.execution_context.trace_id,
             ),
-            task=creation.task,
-            context=creation.context,
-            completion=creation.task.completion,
+            task=task,
+            context=task.execution_context,
+            completion=task.completion,
             steps=steps,
             stop_reason=stop_reason,
             blocked=blocked,
             memory_result=memory_result,
             failure_reason=failure_reason,
-            logical_steps=len(creation.task.step_history),
+            logical_steps=len(task.step_history),
             timing=timing,
         )
 
@@ -2120,8 +2132,8 @@ class TaskRuntime:
             ),
         )
 
-    def _timing_dict(self, creation: TaskCreationResult) -> dict:
-        snapshot = self.timing_recorder.snapshot(creation.context.trace_id)
+    def _timing_dict(self, task: Task) -> dict:
+        snapshot = self.timing_recorder.snapshot(task.execution_context.trace_id)
         return {} if snapshot is None else snapshot.to_dict()
 
 

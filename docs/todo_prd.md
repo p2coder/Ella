@@ -1,5 +1,10 @@
 # Ella Runtime 2.1 可执行 PR 提示词
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> Phase 0（权限治理）、Phase 1（真实 LLM/摄像头）、Phase 2（麦克风/语音）均已落地；Phase 3（低频环境感知、AmbientState、疲劳提醒）整体未实现。
+> 作为执行清单已部分失效，仅作历史记录保留。
+> 当前架构与设计请参阅 [`docs/design_overview.md`](design_overview.md)。
+
 本文根据以下文档和当前仓库状态整理：
 
 ```text

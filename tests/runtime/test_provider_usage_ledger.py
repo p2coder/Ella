@@ -1,5 +1,9 @@
 from providers.base import ProviderResult
-from runtime.provider_usage import aggregate_provider_usage, record_provider_usage
+from runtime.provider_usage import (
+    aggregate_provider_usage,
+    merge_provider_usage_calls,
+    record_provider_usage,
+)
 
 
 class Provider:
@@ -140,3 +144,53 @@ def test_modalities_are_aggregated_separately():
     assert aggregate_provider_usage(
         state["provider_usage_calls"], modality="multimodal"
     )["prompt_tokens"] == 500
+
+
+def test_child_call_ledgers_merge_into_the_task_aggregate():
+    state = {}
+    merge_provider_usage_calls(
+        state,
+        (
+            {
+                "boundary": "execution_decision",
+                "modality": "text",
+                "prompt_tokens": 100,
+                "completion_tokens": 10,
+                "cached_tokens": 80,
+                "total_tokens": 110,
+                "success": True,
+                "node_id": "research_a",
+            },
+            {
+                "boundary": "execution_decision",
+                "modality": "text",
+                "prompt_tokens": 200,
+                "completion_tokens": 20,
+                "cached_tokens": 100,
+                "total_tokens": 220,
+                "success": True,
+                "node_id": "research_b",
+            },
+        ),
+    )
+
+    assert len(state["provider_usage_calls"]) == 2
+    assert state["provider_usage"] == {
+        "token_usage": 330,
+        "prompt_tokens": 300,
+        "completion_tokens": 30,
+        "cached_tokens": 180,
+        "cache_hit_rate": 60.0,
+    }
+
+
+def test_empty_child_call_ledger_does_not_replace_existing_usage():
+    state = {
+        "provider_usage_calls": [{"boundary": "first_decision"}],
+        "provider_usage": {"prompt_tokens": 10},
+    }
+
+    merge_provider_usage_calls(state, ())
+
+    assert state["provider_usage_calls"] == [{"boundary": "first_decision"}]
+    assert state["provider_usage"] == {"prompt_tokens": 10}
