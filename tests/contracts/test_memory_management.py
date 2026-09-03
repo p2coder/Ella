@@ -1,4 +1,4 @@
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from memory import MemoryManagementRequest, MemoryManager
 from tasks.completion import TaskCompletionPackage
 from tasks.output import UserVisibleAgentOutput
@@ -14,7 +14,7 @@ def make_completion() -> TaskCompletionPackage:
         trace_id="trace-memory-contract",
         handoff_goal="Give the user a short reminder before leaving.",
         memory_scope="task_local",
-        allowed_tools=("mock_checklist",),
+        capability_scope=CapabilityScope("main_agent", (), ("mock_checklist",)),
         permissions=(),
     )
     return TaskCompletionPackage(

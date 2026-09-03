@@ -1,5 +1,10 @@
 # Ella Agent Runtime MVP PRD
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> 本文档描述的是早期 MVP 设计，与当前实际实现差距较大，仅作历史记录保留，不再作为实现依据。
+> 主要差异：MVP 基于 TaskSession/PresenceRuntime 的链路已被 TaskRuntime + TaskGraph wave 执行 + checkpoint 取代；`sessions/` 目录已清空；`going_out` 场景不再是唯一 demo。
+> 当前架构与设计请参阅 [`docs/design_overview.md`](design_overview.md)。
+
 ## 1. 产品概要
 
 Ella 是一个 Agent Native 的 AI 生活伴侣。第一阶段不追求完整的视觉、听觉、语音或真实世界工具能力，而是先验证一个持续在场的 Agent Runtime 骨架是否成立。

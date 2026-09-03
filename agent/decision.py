@@ -87,20 +87,11 @@ class ExecutionDecision:
 
 @dataclass(frozen=True, slots=True)
 class FirstDecision:
-    intent: TaskIntent | None
+    intent: TaskIntent
     action: ExecutionDecision
-
-    def __post_init__(self) -> None:
-        if self.intent is None and not (
-            self.action.action == CALL_TOOL
-            and self.action.tool_name == "ask_user_question"
-        ):
-            raise ValueError(
-                "FirstDecision without intent must ask the user a question"
-            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "intent": None if self.intent is None else self.intent.to_dict(),
+            "intent": self.intent.to_dict(),
             "action": self.action.to_dict(),
         }

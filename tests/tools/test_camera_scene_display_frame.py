@@ -1,4 +1,4 @@
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from devices.microphone import DeviceError, DeviceResult
 from providers.base import ProviderError, ProviderResult
 from tools.camera_scene import CameraSceneTool
@@ -13,7 +13,7 @@ def make_context() -> AgentExecutionContext:
         trace_id="trace-frame",
         handoff_goal="Inspect the current scene.",
         memory_scope="task_local",
-        allowed_tools=("camera_scene",),
+        capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),
     )
 

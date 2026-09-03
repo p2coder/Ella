@@ -75,6 +75,24 @@ def aggregate_provider_usage(
     }
 
 
+def merge_provider_usage_calls(
+    task_local_state: dict[str, Any],
+    calls: object,
+) -> None:
+    """Merge completed child-boundary calls into one task-level ledger."""
+    if not isinstance(calls, (list, tuple)):
+        return
+    incoming = [dict(call) for call in calls if isinstance(call, Mapping)]
+    if not incoming:
+        return
+    ledger = task_local_state.setdefault("provider_usage_calls", [])
+    if not isinstance(ledger, list):
+        ledger = []
+        task_local_state["provider_usage_calls"] = ledger
+    ledger.extend(incoming)
+    task_local_state["provider_usage"] = aggregate_provider_usage(ledger) or {}
+
+
 def _usage_mapping(result: ProviderResult | None) -> Mapping[str, Any]:
     if result is None:
         return {}

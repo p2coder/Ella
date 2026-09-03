@@ -49,3 +49,20 @@ def test_runtime_selection_metadata_is_not_added(tmp_path):
         serialized = definition.to_dict()
         assert "selection_policy" not in serialized
         assert "selection_order" not in serialized
+
+
+def test_user_question_description_makes_answer_provenance_explicit():
+    description = AskUserQuestionTool(InteractionBroker()).definition.description
+
+    assert "direct user-provided information" in description
+    assert "Task identified by task_id" in description
+    assert "do not claim it belongs to another execution context" in description
+    assert "later phase" in description
+
+
+def test_user_question_description_prefers_but_does_not_require_recommendation():
+    description = AskUserQuestionTool(InteractionBroker()).definition.description
+
+    assert "preferably mark one best option" in description
+    assert "may omit a recommendation" in description
+    assert "must not mark more than one" in description

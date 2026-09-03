@@ -43,24 +43,34 @@ def test_improved_ui_has_collapsible_timing_and_usage_metrics():
 
 
 def test_usage_projection_calculates_cache_hit_rate_when_available():
-    task = SimpleNamespace(
-        task_local_state={
-            "provider_usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 20,
-                "total_tokens": 120,
-                "prompt_tokens_details": {"cached_tokens": 60},
-            }
-        }
-    )
+    calls = [{
+        "modality": "text",
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "total_tokens": 120,
+        "cached_tokens": 60,
+    }]
+    task = SimpleNamespace(task_local_state={"provider_usage_calls": calls})
     assert _usage_projection(task) == {
         "token_usage": 120,
         "prompt_tokens": 100,
         "completion_tokens": 20,
         "cached_tokens": 60,
         "cache_hit_rate": 60.0,
-        "provider_usage_calls": [],
+        "provider_usage_calls": calls,
     }
+
+
+def test_usage_projection_does_not_read_obsolete_rollup_fields():
+    task = SimpleNamespace(task_local_state={
+        "usage": {"total_tokens": 999},
+        "provider_usage": {"prompt_tokens": 100},
+    })
+    projection = _usage_projection(task)
+
+    assert projection["token_usage"] is None
+    assert projection["cache_hit_rate"] is None
+    assert projection["provider_usage_calls"] == []
 
 
 def test_usage_projection_aggregates_text_calls_by_boundary():

@@ -435,41 +435,15 @@ def _current_model_output(task) -> str:
 
 
 def _usage_projection(task) -> dict[str, object]:
-    """Aggregate real text usage, falling back to the latest legacy payload."""
-    calls = task.task_local_state.get("provider_usage_calls")
-    aggregate = aggregate_provider_usage(calls, modality="text")
-    if aggregate is not None:
-        return {
-            **aggregate,
-            "provider_usage_calls": _public_value(calls),
-        }
-    usage = task.task_local_state.get("usage")
-    if not isinstance(usage, Mapping):
-        usage = task.task_local_state.get("provider_usage")
-    if not isinstance(usage, Mapping):
-        return {
-            "token_usage": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "cached_tokens": None,
-            "cache_hit_rate": None,
-            "provider_usage_calls": _public_value(calls or ()),
-        }
-    prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-    completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
-    total = int(usage.get("total_tokens", prompt + completion) or 0)
-    details = usage.get("prompt_tokens_details", usage.get("input_tokens_details", {}))
-    cached = int(usage.get("cached_tokens", 0) or 0)
-    if isinstance(details, Mapping) and details.get("cached_tokens") is not None:
-        cached = int(details.get("cached_tokens", 0) or 0)
-    return {
-        "token_usage": total,
-        "prompt_tokens": prompt,
-        "completion_tokens": completion,
-        "cached_tokens": cached,
-        "cache_hit_rate": round(cached / prompt * 100, 1) if prompt else None,
-        "provider_usage_calls": _public_value(calls or ()),
-    }
+    """Project text usage from the task's provider call ledger."""
+    calls = task.task_local_state.get("provider_usage_calls", ())
+    usage = aggregate_provider_usage(calls, modality="text")
+    if usage is None:
+        usage = dict.fromkeys((
+            "token_usage", "prompt_tokens", "completion_tokens",
+            "cached_tokens", "cache_hit_rate",
+        ))
+    return {**usage, "provider_usage_calls": _public_value(calls)}
 
 
 def _build_display_snapshot(

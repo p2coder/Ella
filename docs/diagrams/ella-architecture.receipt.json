@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/wx/Ella/docs/diagrams/ella-architecture.json",
+  "output": "/Users/wx/Ella/docs/diagrams/ella-architecture.html",
+  "specification": {
+    "sha256": "dba675ba1a6bebe39971ab043cbe09f651c7e33ad3046a0678d38acfedb2cc54",
+    "bytes": 5416
+  },
+  "artifact": {
+    "sha256": "0ae531afc28ee2c66dafacb110366ce977f2d4eb82fa43881fdb8b60e137b37d",
+    "bytes": 716898
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

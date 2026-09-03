@@ -1,5 +1,5 @@
-from agent.context import AgentExecutionContext
-from registries.tool_registry import ToolRegistry
+from agent.context import AgentExecutionContext, CapabilityScope
+from tools.manager import ToolManager
 from tools import (
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -17,18 +17,18 @@ def make_context() -> AgentExecutionContext:
         trace_id="trace-tools",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
-        allowed_tools=("mock_weather", "mock_vision_summary", "mock_checklist"),
+        capability_scope=CapabilityScope("main_agent", (), ("mock_weather", "mock_vision_summary", "mock_checklist")),
         permissions=("read_context",),
     )
 
 
-def test_tool_registry_registers_and_looks_up_tools():
-    registry = ToolRegistry()
+def test_tool_manager_registers_and_looks_up_tools():
+    registry = ToolManager()
     weather = MockWeatherTool()
 
     registry.register(weather)
 
-    assert registry.get("mock_weather") == weather
+    assert registry.get_tool("mock_weather") == weather
     assert registry.list_names() == ("mock_weather",)
 
 

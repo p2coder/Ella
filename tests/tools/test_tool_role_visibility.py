@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from tools import (
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -25,7 +25,7 @@ def make_context(
         trace_id="trace-role",
         handoff_goal="Use an allowed capability.",
         memory_scope="task_local",
-        allowed_tools=allowed_tools,
+        capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=(),
     )
 

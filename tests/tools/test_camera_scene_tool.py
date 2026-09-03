@@ -1,6 +1,6 @@
 import pytest
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from devices.camera import MockCameraProvider
 from devices.microphone import DeviceError, DeviceResult
 from providers.base import ProviderError, ProviderResult
@@ -18,7 +18,7 @@ def make_context() -> AgentExecutionContext:
         trace_id="trace-camera",
         handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
-        allowed_tools=("camera_scene",),
+        capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),
     )
 
@@ -141,16 +141,16 @@ def test_default_tool_uses_mock_providers_and_does_not_store_raw_media():
 
 
 def test_tool_has_no_global_registration_side_effects():
-    from registries.tool_registry import ToolRegistry
+    from tools.manager import ToolManager
 
-    registry = ToolRegistry()
+    registry = ToolManager()
 
-    assert registry.get("camera_scene") is None
+    assert registry.get_tool("camera_scene") is None
 
     tool = CameraSceneTool()
     registry.register(tool)
 
-    assert registry.get("camera_scene") is tool
+    assert registry.get_tool("camera_scene") is tool
 
 
 class CountingCameraProvider:

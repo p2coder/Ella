@@ -8,7 +8,7 @@ from tasks.graph import (
     TaskGraphNodeType,
     TaskGraphRun,
 )
-from tasks.task import Task, Task, TaskState
+from tasks.task import Task, TaskState
 
 
 def make_event(trace_id: str = "trace-task") -> StandardizedEvent:

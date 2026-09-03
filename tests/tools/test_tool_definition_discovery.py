@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from tools.base import ToolDefinition, ToolResult
 from tools.manager import ToolManager
 from tools.mock_tools import MockChecklistTool, MockVisionSummaryTool, MockWeatherTool
@@ -19,7 +19,7 @@ def _context(
         trace_id="trace-discovery",
         handoff_goal="Prepare a reminder.",
         memory_scope="task_local",
-        allowed_tools=allowed_tools,
+        capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=("read_context",),
     )
 
@@ -108,12 +108,13 @@ def test_list_definitions_does_not_return_tool_instances() -> None:
     assert definitions == (tool.definition,)
 
 
-def test_tool_manager_uses_registry_as_only_storage_source() -> None:
-    manager = ToolManager()
+def test_tool_managers_keep_registrations_isolated() -> None:
+    first = ToolManager()
+    second = ToolManager()
+    first.register(MockWeatherTool())
 
-    assert not hasattr(manager, "_tools")
-    assert not hasattr(manager, "tools")
-    assert manager.registry.list_names() == ()
+    assert first.list_names() == ("mock_weather",)
+    assert second.list_names() == ()
 
 
 def test_registering_once_supports_multiple_discovery_calls() -> None:

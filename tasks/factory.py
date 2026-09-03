@@ -2,35 +2,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
-from agent.context import AgentExecutionContext, CapabilityScope
+from agent.context import CapabilityScope
 from skill.manager import SkillManager
 from tools.manager import ToolManager
-
-from .task import Task
-
-
-@dataclass(frozen=True, slots=True, init=False)
-class TaskCreationResult:
-    task: Task
-
-    def __init__(
-        self,
-        task: Task | None = None,
-        *,
-        context: AgentExecutionContext | None = None,
-    ) -> None:
-        if task is None:
-            raise TypeError("TaskCreationResult requires task")
-        if context is not None:
-            task.execution_context = context
-        if task.execution_context is None:
-            raise ValueError("Task must own an execution context")
-        object.__setattr__(self, "task", task)
-
-    @property
-    def context(self) -> AgentExecutionContext:
-        return self.task.execution_context
-
 
 @dataclass(frozen=True, slots=True)
 class TaskFactory:

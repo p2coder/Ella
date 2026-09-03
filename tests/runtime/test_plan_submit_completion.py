@@ -64,6 +64,7 @@ def _runtime(provider=None):
             minimum_acceptance_criteria=(),
         ),
     )
+    task.first_decision_completed = True
     task.state = TaskState.REASONING
     definition = TaskGraphDefinition(
         graph_id="plan-task",

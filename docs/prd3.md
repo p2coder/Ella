@@ -1,5 +1,9 @@
 # Ella Runtime PRD 3：Prompt Engine 与页面显示器
 
+> **⚠️ 已过期文档（核对日期：2026-08-27）**
+> PromptEngine 已实现，但本文档指定的模块路径已全部失效：`agent/formulation.py` 已并入 `agent/decision.py` 与 `tasks/factory.py`，最终回答生成已迁移，`demo/cli_demo.py` 与 `demo/page_viewer.py` 已不存在（页面现为 `demo/web_ui.py`）。
+> 当前 PromptEngine 设计见 [`prompt_prd.md`](prompt_prd.md) 与 [`prompt_structure_improve_prd.md`](prompt_structure_improve_prd.md)；整体架构见 [`docs/design_overview.md`](design_overview.md)。
+
 ## 1. 产品概要
 
 PRD 3 在 Ella Runtime 2.1 的真实模型、摄像头和麦克风能力之上，增加两个关键产品边界：

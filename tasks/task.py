@@ -126,6 +126,7 @@ class Task:
     goal_state: TaskGoalState | None = None
     terminal_execution_state: TaskState | None = None
     intent: TaskIntent | None = None
+    first_decision_completed: bool = False
     task_local_state: dict[str, Any] = field(default_factory=dict)
     message_history: tuple[dict[str, Any], ...] = ()
     tool_trace: tuple[dict[str, Any], ...] = ()

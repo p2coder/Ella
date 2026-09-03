@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 
 from agent.context import AgentExecutionContext
-from registries.tool_registry import ToolRegistry
 
 from .base import (
     EffectiveToolExecutionMetadata,
@@ -21,23 +20,23 @@ class CapabilityUnavailableError(RuntimeError):
 
 @dataclass(slots=True)
 class ToolManager:
-    registry: ToolRegistry = field(default_factory=ToolRegistry)
+    _tools: dict[str, Tool] = field(default_factory=dict, init=False, repr=False)
     version: int = 0
 
     def register(self, tool: Tool) -> None:
-        self.registry.register(tool)
+        self._tools[tool.name] = tool
         self.version += 1
 
     def unregister(self, tool_name: str) -> None:
-        if self.registry.get(tool_name) is not None:
-            self.registry.unregister(tool_name)
+        if self._tools.get(tool_name) is not None:
+            del self._tools[tool_name]
             self.version += 1
 
     def list_names(self) -> tuple[str, ...]:
-        return self.registry.list_names()
+        return tuple(self._tools)
 
     def get_tool(self, tool_name: str) -> Tool | None:
-        return self.registry.get(tool_name)
+        return self._tools.get(tool_name)
 
     def resolve_execution_metadata(
         self,
@@ -45,7 +44,7 @@ class ToolManager:
         tool_version: str,
         execution_override: dict[str, object] | None = None,
     ) -> EffectiveToolExecutionMetadata:
-        tool = self.registry.get(tool_name)
+        tool = self._tools.get(tool_name)
         if tool is None:
             raise CapabilityUnavailableError(tool_name, "not registered")
         definition = tool.definition
@@ -91,25 +90,20 @@ class ToolManager:
     ) -> tuple[ToolDefinition, ...]:
         return tuple(
             tool.definition
-            for tool_name in self.registry.list_names()
-            if tool_name in context.allowed_tools
-            for tool in (self.get_for_role(tool_name, context.agent_role),)
-            if tool is not None
+            for name, tool in tuple(self._tools.items())
+            if name in context.capability_scope.allowed_tools
+            and context.agent_role in tool.allowed_roles
         )
 
     def list_names_for_role(self, agent_role: str) -> tuple[str, ...]:
         return tuple(
-            tool_name
-            for tool_name in self.registry.list_names()
-            if self.get_for_role(tool_name, agent_role) is not None
+            name
+            for name, tool in tuple(self._tools.items())
+            if agent_role in tool.allowed_roles
         )
 
     def get_for_role(self, tool_name: str, agent_role: str) -> Tool | None:
-        tool = self.registry.get(tool_name)
-        if tool is None or agent_role not in self._allowed_roles(tool):
+        tool = self._tools.get(tool_name)
+        if tool is None or agent_role not in tool.allowed_roles:
             return None
         return tool
-
-    @staticmethod
-    def _allowed_roles(tool: Tool) -> tuple[str, ...]:
-        return tool.allowed_roles

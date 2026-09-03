@@ -338,10 +338,6 @@ UNKNOWN → 建立或刷新基准
 
 当前 ToolDefinition 已经是结构化的，但未来可以根据任务进一步裁剪给 LLM 的工具描述，例如只传当前 Skill 相关工具或只传 name/description/input_schema，减少 token。
 
-#### Provider 调用缓存
-
-对于相同 frame、相同 prompt 或相同工具参数，可以做短期缓存，避免重复调用真实模型。当前尚未实现。
-
 ## 5. 当前实现的取舍
 
 ### 5.1 为什么先做 Web UI

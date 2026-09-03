@@ -55,7 +55,7 @@ class CapabilityExecutor:
         tool_name = decision.tool_name
         if tool_name is None:
             raise ValueError("CALL_TOOL requires tool_name")
-        if tool_name not in context.allowed_tools:
+        if tool_name not in context.capability_scope.allowed_tools:
             return self._failure(
                 decision, task, ToolFailureKind.PERMISSION_DENIED,
                 "tool_not_allowed", f"tool {tool_name} is not allowed",
@@ -66,7 +66,7 @@ class CapabilityExecutor:
                 decision, task, ToolFailureKind.ENVIRONMENT_UNAVAILABLE,
                 "tool_not_registered", f"tool {tool_name} is not registered",
             )
-        if context.agent_role not in self.tool_manager._allowed_roles(tool):
+        if context.agent_role not in tool.allowed_roles:
             return self._failure(
                 decision, task, ToolFailureKind.PERMISSION_DENIED,
                 "tool_role_not_allowed",

@@ -1,4 +1,4 @@
-from agent.context import AgentExecutionContext
+from agent.context import AgentExecutionContext, CapabilityScope
 from devices.microphone import DeviceError, DeviceResult
 from providers.base import ProviderError, ProviderResult
 from providers.mock import MockMultimodalProvider
@@ -15,7 +15,7 @@ def make_context() -> AgentExecutionContext:
         trace_id="trace-screen",
         handoff_goal="Identify what is currently visible on my screen.",
         memory_scope="task_local",
-        allowed_tools=("screen_scene",),
+        capability_scope=CapabilityScope("main_agent", (), ("screen_scene",)),
         permissions=("read_context",),
     )
 

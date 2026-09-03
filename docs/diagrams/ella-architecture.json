@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ella 当前运行架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      760
+    ]
+  },
+  "components": [
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "本地 Web UI",
+      "sublabel": "文本 / 麦克风 · SSE",
+      "pos": [
+        40,
+        340
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "AppRuntime",
+      "sublabel": "装配 · 提交 · 展示投影",
+      "pos": [
+        320,
+        340
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "events",
+      "type": "messagebus",
+      "label": "EventRuntime",
+      "sublabel": "标准化 · 路由 · 中断策略",
+      "pos": [
+        600,
+        340
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "TaskRuntime",
+      "sublabel": "队列 · worker · 状态机",
+      "pos": [
+        880,
+        340
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "agents",
+      "type": "backend",
+      "label": "决策与验证",
+      "sublabel": "SubAgent / VerificationAgent",
+      "pos": [
+        1160,
+        340
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "prompts",
+      "type": "backend",
+      "label": "提示词与能力范围",
+      "sublabel": "PromptEngine / SkillManager",
+      "pos": [
+        1160,
+        100
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "models",
+      "type": "external",
+      "label": "文本模型 Provider",
+      "sublabel": "Qwen / DeepSeek / Mock",
+      "pos": [
+        1160,
+        580
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "executor",
+      "type": "security",
+      "label": "CapabilityExecutor",
+      "sublabel": "权限 · Schema · 失败分类",
+      "pos": [
+        880,
+        580
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "ToolManager 与工具",
+      "sublabel": "网页 · 文档 · 规划 · 追问",
+      "pos": [
+        600,
+        580
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "devices",
+      "type": "external",
+      "label": "设备与多模态",
+      "sublabel": "摄像头 / 屏幕 · Qwen / Mock",
+      "pos": [
+        320,
+        580
+      ],
+      "size": [
+        210,
+        80
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "本地持久化与观测",
+      "sublabel": "checkpoint · memory · trace",
+      "pos": [
+        880,
+        100
+      ],
+      "size": [
+        210,
+        80
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web-to-app",
+      "from": "web",
+      "to": "app",
+      "label": "HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "app-to-events",
+      "from": "app",
+      "to": "events",
+      "label": "发布输入",
+      "variant": "emphasis"
+    },
+    {
+      "id": "events-to-runtime",
+      "from": "events",
+      "to": "runtime",
+      "label": "创建任务",
+      "variant": "emphasis"
+    },
+    {
+      "id": "runtime-to-agents",
+      "from": "runtime",
+      "to": "agents",
+      "label": "推理 / 验证",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agents-to-prompts",
+      "from": "agents",
+      "to": "prompts",
+      "label": "构建上下文",
+      "variant": "default"
+    },
+    {
+      "id": "agents-to-models",
+      "from": "agents",
+      "to": "models",
+      "label": "模型调用",
+      "variant": "default",
+      "labelDy": 70
+    },
+    {
+      "id": "runtime-to-executor",
+      "from": "runtime",
+      "to": "executor",
+      "label": "CALL_TOOL",
+      "variant": "default",
+      "labelDy": 70
+    },
+    {
+      "id": "executor-to-tools",
+      "from": "executor",
+      "to": "tools",
+      "label": "执行工具",
+      "variant": "default"
+    },
+    {
+      "id": "tools-to-devices",
+      "from": "tools",
+      "to": "devices",
+      "label": "采集 / 理解",
+      "variant": "default"
+    },
+    {
+      "id": "runtime-to-storage",
+      "from": "runtime",
+      "to": "storage",
+      "label": "保存 / 恢复",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "输入与交付",
+      "items": [
+        "文本与有界录音经事件管线创建任务；PresenceRuntime 执行中断策略。",
+        "AppRuntime 直接转发暂停、恢复、取消和追问回答；SSE 推送状态与结果。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "任务执行闭环",
+      "items": [
+        "First Decision 建立意图；CALL_TOOL 后继续推理，SUBMIT_RESULT 后验证。",
+        "Task 独占状态和 CapabilityScope；plan_written 激活 TaskGraph wave 并发。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "持久化与外部边界",
+      "items": [
+        "TaskStore 保存 JSON checkpoint；MemoryManager 写记忆，TraceRecorder 记录过程。",
+        "PlanWrittenTool 使用 Git PlanStore；模型、网页及设备通过各自适配层访问。"
+      ]
+    }
+  ]
+}
