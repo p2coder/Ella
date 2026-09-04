@@ -177,6 +177,20 @@ def test_workflow_terminates_infinite_script_at_wall_timeout() -> None:
     assert monotonic() - started < 2
 
 
+def test_workflow_accepts_bounded_per_call_timeout() -> None:
+    runner = FakeChildRunner()
+    runtime = _runtime(runner)
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        runtime.execute(_context(), "while (true) {}", timeout_seconds=0.05)
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        runtime.execute(
+            _context(),
+            "return null;",
+            timeout_seconds=runtime.max_wall_seconds + 1,
+        )
+
+
 def test_workflow_rejects_invalid_script_before_child_dispatch() -> None:
     runner = FakeChildRunner()
     with pytest.raises(RuntimeError, match="workflow script failed"):

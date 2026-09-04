@@ -28,12 +28,24 @@ class WorkflowRuntime:
     max_return_bytes: int = MAX_RETURN_BYTES
 
     def execute(
-        self, context: AgentExecutionContext, script: str
+        self,
+        context: AgentExecutionContext,
+        script: str,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         if not isinstance(script, str) or not script.strip():
             raise ValueError("script must be a non-empty string")
         if len(script.encode("utf-8")) > MAX_SCRIPT_BYTES:
             raise ValueError("workflow script exceeds 64 KiB")
+        wall_seconds = (
+            self.max_wall_seconds
+            if timeout_seconds is None
+            else float(timeout_seconds)
+        )
+        if wall_seconds <= 0 or wall_seconds > self.max_wall_seconds:
+            raise ValueError(
+                f"timeout_seconds must be in (0, {self.max_wall_seconds:g}]"
+            )
 
         process_context = get_context("spawn")
         parent_connection, child_connection = process_context.Pipe()
@@ -54,11 +66,11 @@ class WorkflowRuntime:
         pool = ThreadPoolExecutor(max_workers=self.max_parallel_children)
         try:
             while process.is_alive() or futures:
-                if monotonic() - started > self.max_wall_seconds:
+                if monotonic() - started > wall_seconds:
                     raise TimeoutError("workflow execution timed out")
                 task_state = self.task_reader(context.task_id).state
                 while task_state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
-                    if monotonic() - started > self.max_wall_seconds:
+                    if monotonic() - started > wall_seconds:
                         raise TimeoutError("workflow execution timed out while paused")
                     sleep(0.01)
                     task_state = self.task_reader(context.task_id).state

@@ -28,7 +28,14 @@ class WorkflowTool:
             schema_version="1.0",
             input_schema={
                 "type": "object",
-                "properties": {"script": {"type": "string"}},
+                "properties": {
+                    "script": {"type": "string"},
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": self.runtime.max_wall_seconds,
+                    },
+                },
                 "required": ["script"],
                 "additionalProperties": False,
             },
@@ -58,5 +65,11 @@ class WorkflowTool:
         )
 
     def run(self, context: AgentExecutionContext, arguments=None) -> ToolResult:
-        payload = self.runtime.execute(context, str((arguments or {}).get("script", "")))
+        values = arguments or {}
+        timeout = values.get("timeout_seconds")
+        payload = self.runtime.execute(
+            context,
+            str(values.get("script", "")),
+            None if timeout is None else float(timeout),
+        )
         return ToolResult(self.name, context.task_id, payload)
