@@ -1,4 +1,5 @@
 from .base import Tool, ToolResult
+from .bash import BashTool
 from .manager import CapabilityUnavailableError, ToolManager
 from .mock_tools import MockChecklistTool, MockVisionSummaryTool, MockWeatherTool
 from .screen_scene import ScreenSceneTool
@@ -9,6 +10,7 @@ from .text_files import EditTextTool, ReadTextTool, WriteTextTool
 
 __all__ = [
     "CapabilityUnavailableError",
+    "BashTool",
     "DocumentWriteTool",
     "EditTextTool",
     "ReadTextTool",

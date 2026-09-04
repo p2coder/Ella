@@ -39,6 +39,7 @@ from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
 from skill import SkillLoader, SkillManager
 from tools import (
+    BashTool,
     DocumentWriteTool,
     EditTextTool,
     ReadTextTool,
@@ -114,6 +115,7 @@ class AppRuntime:
         tool_manager.register(ReadTextTool(PROJECT_ROOT))
         tool_manager.register(WriteTextTool(PROJECT_ROOT))
         tool_manager.register(EditTextTool(PROJECT_ROOT))
+        tool_manager.register(BashTool(PROJECT_ROOT))
         tool_manager.register(ArtifactExistsTool(settings.document_directory))
         tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
