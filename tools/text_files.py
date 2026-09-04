@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import os
 from pathlib import Path, PurePath
+from tempfile import NamedTemporaryFile
 
 from agent.context import AgentExecutionContext
 
-from .base import ToolDefinition, ToolIdempotency, ToolResult
+from .base import (
+    ToolDefinition,
+    ToolIdempotency,
+    ToolResult,
+    ToolUncertainPolicy,
+)
 
 
 MAX_TEXT_FILE_BYTES = 1_000_000
@@ -125,3 +132,125 @@ class ReadTextTool:
                 "content_hash": sha256(content_bytes).hexdigest(),
             },
         )
+
+
+@dataclass(frozen=True, slots=True)
+class WriteTextTool:
+    project_root: Path
+    max_bytes: int = MAX_TEXT_FILE_BYTES
+    name: str = "write"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
+
+    def __post_init__(self) -> None:
+        if self.max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Create one new UTF-8 text file inside the project root. Existing "
+                "files are never overwritten. The result includes the SHA-256 "
+                "version of the bytes written."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            input_examples=({"path": "notes/result.md", "content": "# Result\n"},),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "byte_count": {"type": "number"},
+                    "created": {"type": "boolean"},
+                    "content_hash_algorithm": {"type": "string"},
+                    "content_hash": {"type": "string"},
+                },
+                "required": [
+                    "path",
+                    "byte_count",
+                    "created",
+                    "content_hash_algorithm",
+                    "content_hash",
+                ],
+                "additionalProperties": False,
+            },
+            result_ttl_seconds=None,
+            idempotency=ToolIdempotency.NON_IDEMPOTENT,
+            side_effecting=True,
+            uncertain_policy=ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH,
+        )
+
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
+        args = arguments or {}
+        content = args.get("content")
+        if not isinstance(content, str):
+            raise TextFileError("content must be UTF-8 text")
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > self.max_bytes:
+            raise TextFileError(
+                f"content exceeds the {self.max_bytes}-byte write limit"
+            )
+        path = resolve_project_path(
+            self.project_root,
+            args.get("path"),
+            must_exist=False,
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        parent = path.parent.resolve(strict=True)
+        try:
+            parent.relative_to(self.project_root.resolve())
+        except ValueError as error:
+            raise TextFileError("path must stay inside the project root") from error
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="wb",
+                dir=parent,
+                prefix=f".{path.name}.",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content_bytes)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.link(temporary_path, path)
+            _fsync_directory(parent)
+        except FileExistsError as error:
+            raise TextFileError("file already exists; use edit to modify it") from error
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+        relative = path.relative_to(self.project_root.resolve()).as_posix()
+        return ToolResult(
+            self.name,
+            context.task_id,
+            context.trace_id,
+            {
+                "path": relative,
+                "byte_count": len(content_bytes),
+                "created": True,
+                "content_hash_algorithm": "sha256",
+                "content_hash": sha256(content_bytes).hexdigest(),
+            },
+        )
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

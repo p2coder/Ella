@@ -5,12 +5,13 @@ from .screen_scene import ScreenSceneTool
 from .ask_user_question import AskUserQuestionTool
 from .web_research import WebPageReadTool, WebSearchTool
 from .document_write import DocumentWriteTool
-from .text_files import ReadTextTool
+from .text_files import ReadTextTool, WriteTextTool
 
 __all__ = [
     "CapabilityUnavailableError",
     "DocumentWriteTool",
     "ReadTextTool",
+    "WriteTextTool",
     "AskUserQuestionTool",
     "MockChecklistTool",
     "MockVisionSummaryTool",
