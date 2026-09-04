@@ -23,7 +23,7 @@ def test_task_is_created_without_intent_and_enqueued_for_first_decision(tmp_path
     store = TaskStore(tmp_path)
     queue = TaskQueue()
     runtime = TaskRuntime(
-        task_factory=TaskFactory(task_id_factory=lambda: "task-flow"),
+        task_factory=TaskFactory(),
         task_store=store,
         task_queue=queue,
     )

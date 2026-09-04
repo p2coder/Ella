@@ -19,7 +19,6 @@ def test_submit_result_completes_without_implicit_verification(tmp_path) -> None
     )
     runtime = TaskRuntime(
         task_factory=TaskFactory(
-            task_id_factory=lambda: "task-trace",
             tool_manager=tool_manager,
         ),
         subagent=subagent,

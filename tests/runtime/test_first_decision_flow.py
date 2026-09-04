@@ -53,7 +53,7 @@ def _event() -> StandardizedEvent:
 
 def test_raw_task_is_submitted_without_a_goal() -> None:
     runtime = TaskRuntime(
-        task_factory=TaskFactory(task_id_factory=lambda: "task-first-decision")
+        task_factory=TaskFactory()
     )
 
     handle = runtime.create_task(_event())

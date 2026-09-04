@@ -14,7 +14,7 @@ class _EventRuntime:
 
 def _app():
     runtime = TaskRuntime(
-        task_factory=TaskFactory(task_id_factory=lambda: "task-projection"),
+        task_factory=TaskFactory(),
         event_publisher=TaskEventPublisher(),
     )
     event = StandardizedEvent(

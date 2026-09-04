@@ -90,7 +90,6 @@ def test_interaction_tool_blocks_until_first_matching_answer() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-question",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
@@ -165,7 +164,6 @@ def test_all_questions_are_published_before_tool_waits_for_answers() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-multiple-questions",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
@@ -237,7 +235,6 @@ def test_answered_first_decision_continues_with_execution_decision() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-progressive-intent",
         ),
         subagent=subagent,
         executor=CapabilityExecutor(SkillManager(), manager, subagent),
@@ -339,7 +336,6 @@ def test_answer_metadata_preserves_question_phase() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-question-phase",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
