@@ -178,7 +178,11 @@ class AppRuntime:
             )
         )
         tool_manager.register(
-            VerificationTool(task_runtime.get_task, verification_agent)
+            VerificationTool(
+                task_runtime.get_task,
+                verification_agent,
+                tool_manager,
+            )
         )
         interaction_broker.set_question_handler(
             lambda question: task_runtime.event_publisher.publish(

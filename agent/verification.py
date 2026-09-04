@@ -88,6 +88,7 @@ class VerificationAgent:
         candidate_result: str,
         draft: str | None = None,
         definitions: tuple[ToolDefinition, ...] = (),
+        verification_results: tuple[Mapping[str, Any], ...] = (),
     ) -> VerificationAction:
         if task.intent is None:
             raise VerificationDecisionError("verification requires TaskIntent")
@@ -106,6 +107,7 @@ class VerificationAgent:
                 ),
                 "candidate_result": candidate_result,
                 "draft_final_response": draft,
+                "verification_results": verification_results,
                 "visible_verification_tools": serialize_tool_definitions(definitions),
             },
         }
