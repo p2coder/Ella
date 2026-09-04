@@ -76,3 +76,33 @@ class SubagentTool:
         return ToolResult(
             self.name, context.task_id, context.trace_id, run.to_dict()
         )
+
+
+@dataclass(frozen=True, slots=True)
+class SubagentForkTool:
+    runner: ChildAgentRunner
+    name: str = "subagent_fork"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return _definition(
+            self.name,
+            "Run a bounded child agent with a dispatch-time copy of the parent context.",
+        )
+
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
+        values = arguments or {}
+        run = self.runner.run(
+            context,
+            prompt=str(values.get("prompt", "")),
+            timeout_seconds=float(values.get("timeout_seconds", 120)),
+            fork=True,
+        )
+        return ToolResult(
+            self.name, context.task_id, context.trace_id, run.to_dict()
+        )

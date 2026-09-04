@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, replace
+from copy import deepcopy
 from datetime import datetime, timezone
 from time import monotonic, sleep
 from typing import Any, Callable
@@ -70,6 +71,7 @@ class ChildAgentRunner:
             handoff_goal=prompt,
         )
         local = self._initial_task(parent_context, prompt, fork=fork)
+        inherited_observation_count = len(local.tool_trace)
         local.execution_context = context
         started = monotonic()
         try:
@@ -83,7 +85,14 @@ class ChildAgentRunner:
                 )
                 if control_error is not None:
                     status, error = control_error
-                    return self._result(local, child_id, status, None, error)
+                    return self._result(
+                        local,
+                        child_id,
+                        status,
+                        None,
+                        error,
+                        inherited_observation_count,
+                    )
                 if advance:
                     decision = self.decision_agent.decide_next_action(
                         None, context, local
@@ -95,6 +104,7 @@ class ChildAgentRunner:
                         "completed",
                         decision.final_response_draft,
                         None,
+                        inherited_observation_count,
                     )
                 local.state = TaskState.TOOL_EXECUTION
                 execution = self.executor.execute(decision, context, local)
@@ -106,7 +116,12 @@ class ChildAgentRunner:
                         else execution.failure.message
                     )
                     return self._result(
-                        local, child_id, "uncertain", None, error
+                        local,
+                        child_id,
+                        "uncertain",
+                        None,
+                        error,
+                        inherited_observation_count,
                     )
                 if execution.failure is not None:
                     local.current_step = replace(
@@ -126,9 +141,17 @@ class ChildAgentRunner:
                 "failed",
                 None,
                 "child advance budget exhausted",
+                inherited_observation_count,
             )
         except Exception as error:
-            return self._result(local, child_id, "failed", None, str(error))
+            return self._result(
+                local,
+                child_id,
+                "failed",
+                None,
+                str(error),
+                inherited_observation_count,
+            )
 
     def _initial_task(
         self,
@@ -137,10 +160,41 @@ class ChildAgentRunner:
         *,
         fork: bool,
     ) -> Task:
+        if not fork:
+            return Task(
+                task_id=parent_context.task_id,
+                state=TaskState.REASONING,
+                task_local_state={"latest_user_input": prompt},
+            )
+        parent = self.task_reader(parent_context.task_id)
+        inherited_context = {
+            "intent": None if parent.intent is None else parent.intent.to_dict(),
+            "original_input": parent.task_local_state.get("latest_user_input"),
+            "message_history": deepcopy(parent.message_history),
+            "observations": deepcopy(parent.tool_trace),
+            "current_step": {
+                "step_number": parent.current_step.step_number,
+                "retry_index": parent.current_step.retry_index,
+                "active_tool_name": parent.current_step.active_tool_name,
+                "blacklisted_tools": parent.current_step.blacklisted_tools,
+                "failures": tuple(
+                    failure.to_dict() for failure in parent.current_step.failures
+                ),
+            },
+            "task_local_state": deepcopy(parent.task_local_state),
+        }
         return Task(
             task_id=parent_context.task_id,
             state=TaskState.REASONING,
-            task_local_state={"latest_user_input": prompt},
+            intent=deepcopy(parent.intent),
+            first_decision_completed=False,
+            task_local_state={
+                "latest_user_input": prompt,
+                "inherited_context": inherited_context,
+            },
+            message_history=deepcopy(parent.message_history),
+            tool_trace=deepcopy(parent.tool_trace),
+            current_step=deepcopy(parent.current_step),
         )
 
     def _control_error(
@@ -165,13 +219,14 @@ class ChildAgentRunner:
         status: str,
         final_response: str | None,
         error: str | None,
+        inherited_observation_count: int,
     ) -> ChildAgentRun:
         calls = task.task_local_state.get("provider_usage_calls", ())
         return ChildAgentRun(
             child_agent_id=child_agent_id,
             status=status,
             final_response=final_response,
-            observations=tuple(task.tool_trace),
+            observations=tuple(task.tool_trace[inherited_observation_count:]),
             error=error,
             provider_usage=aggregate_provider_usage(calls),
             completed_at=datetime.now(timezone.utc).isoformat().replace(

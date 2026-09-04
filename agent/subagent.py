@@ -65,6 +65,9 @@ class SubAgent:
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"
                     ),
+                    "inherited_context": task.task_local_state.get(
+                        "inherited_context"
+                    ),
                 },
             },
         )
@@ -207,6 +210,9 @@ class SubAgent:
                     "current_step": self._step_context(task),
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"
+                    ),
+                    "inherited_context": task.task_local_state.get(
+                        "inherited_context"
                     ),
                 },
             },

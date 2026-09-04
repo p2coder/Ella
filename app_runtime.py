@@ -46,6 +46,7 @@ from tools import (
     ReadTextTool,
     RefreshTool,
     SubagentTool,
+    SubagentForkTool,
     WriteTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -169,6 +170,7 @@ class AppRuntime:
             task_reader=task_runtime.get_task,
         )
         tool_manager.register(SubagentTool(child_runner))
+        tool_manager.register(SubagentForkTool(child_runner))
         tool_manager.register(
             ToolObservationCheckTool(
                 lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)

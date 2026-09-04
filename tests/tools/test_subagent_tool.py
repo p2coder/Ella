@@ -4,7 +4,7 @@ from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDec
 from runtime.executor import CapabilityExecutor
 from skill import SkillManager
 from tasks.task import Task, TaskIntent, TaskState
-from tools import SubagentTool, ToolManager
+from tools import SubagentForkTool, SubagentTool, ToolManager
 from tools.base import ToolDefinition, ToolResult
 
 
@@ -80,7 +80,7 @@ def _context(*, depth=0):
         memory_scope="task_local",
         permissions=("workspace",),
         capability_scope=CapabilityScope(
-            "main_agent", ("skill-a",), ("subagent", "echo")
+            "main_agent", ("skill-a",), ("subagent", "subagent_fork", "echo")
         ),
         agent_depth=depth,
     )
@@ -100,6 +100,7 @@ def _assembly(agent):
         child_agent_id_factory=lambda: "child-agent",
     )
     manager.register(SubagentTool(runner))
+    manager.register(SubagentForkTool(runner))
     return root, executor
 
 
@@ -156,3 +157,31 @@ def test_subagent_rejects_depth_above_four_before_child_dispatch() -> None:
     assert result.failure is not None
     assert result.failure.code == "invalid_tool_input"
     assert agent.first_context is None
+
+
+def test_subagent_fork_copies_parent_context_without_sharing_mutable_state() -> None:
+    agent = ScriptedAgent()
+    root, executor = _assembly(agent)
+    root.intent = TaskIntent("Parent intent", constraints=("keep this",))
+    root.task_local_state["workspace_summary"] = {"branch": "main"}
+    result = executor.execute(
+        ExecutionDecision(
+            CALL_TOOL,
+            "subagent_fork",
+            {"prompt": "inspect inherited state"},
+            "Fork.",
+        ),
+        _context(),
+        root,
+    )
+
+    assert result.failure is None
+    inherited = agent.first_task.task_local_state["inherited_context"]
+    assert inherited["intent"]["goal"] == "Parent intent"
+    assert inherited["message_history"] == root.message_history
+    assert inherited["observations"] == root.tool_trace
+    assert inherited["task_local_state"]["workspace_summary"] == {"branch": "main"}
+    assert result.tool_result.payload["observations"] == ()
+
+    inherited["task_local_state"]["workspace_summary"]["branch"] = "child"
+    assert root.task_local_state["workspace_summary"] == {"branch": "main"}
