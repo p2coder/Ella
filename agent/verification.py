@@ -106,12 +106,6 @@ class VerificationAgent:
                 ),
                 "candidate_result": candidate_result,
                 "draft_final_response": draft,
-                "verification_round": int(
-                    task.task_local_state.get("verification_round", 1)
-                ),
-                "verification_results": tuple(
-                    task.task_local_state.get("verification_results", ())
-                ),
                 "visible_verification_tools": serialize_tool_definitions(definitions),
             },
         }

@@ -42,18 +42,15 @@ def _task() -> Task:
             minimum_acceptance_criteria=("The report exists.",),
         ),
         task_local_state={
-            "pending_reasoning": {"purpose": "verification"},
-            "verification_in_progress": True,
-            "verification_round": 1,
+            "pending_reasoning": {"purpose": "execution"},
             "draft_final_response": "The report is ready.",
-            "verification_results": (
-                {"tool_name": "artifact_exists", "payload": {"exists": True}},
-            ),
         },
     )
 
 
-def test_checkpoint_preserves_verification_continuation(tmp_path) -> None:
+def test_checkpoint_preserves_reasoning_state_without_verification_continuation(
+    tmp_path,
+) -> None:
     store = TaskStore(tmp_path)
     task = _task()
 
@@ -64,15 +61,14 @@ def test_checkpoint_preserves_verification_continuation(tmp_path) -> None:
     assert restored.task.intent == task.intent
     assert restored.task.first_decision_completed
     assert restored.task.task_local_state["pending_reasoning"] == {
-        "purpose": "verification"
+        "purpose": "execution"
     }
-    assert restored.task.task_local_state["verification_round"] == 1
     assert restored.task.task_local_state["draft_final_response"] == (
         "The report is ready."
     )
-    assert restored.task.task_local_state["verification_results"][0][
-        "payload"
-    ]["exists"] is True
+    assert "verification_in_progress" not in restored.task.task_local_state
+    assert "verification_round" not in restored.task.task_local_state
+    assert "verification_results" not in restored.task.task_local_state
 
 
 def test_old_checkpoint_schema_is_explicitly_rejected(tmp_path) -> None:
