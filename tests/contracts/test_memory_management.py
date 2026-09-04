@@ -27,6 +27,9 @@ def make_completion() -> TaskCompletionPackage:
                 tool_name="mock_checklist",
                 task_id=context.task_id,
                 payload={"items": ("keys", "phone")},
+                tool_use_id="tool-use-contract",
+                completed_at="2026-09-04T02:00:00Z",
+                result_ttl_seconds=60,
             ),
         ),
     )
@@ -59,3 +62,4 @@ def test_memory_request_and_record_retain_completion_context(tmp_path):
     assert "task-memory-contract" in record
     assert completion.summary in record
     assert completion.user_visible_output.final_response in record
+    assert '"completed_at":"2026-09-04T02:00:00Z"' in record

@@ -32,6 +32,9 @@ def make_package() -> TaskCompletionPackage:
                 tool_name="mock_checklist",
                 task_id="task-memory",
                 payload={"items": ("phone", "keys", "wallet", "umbrella")},
+                tool_use_id="tool-use-memory",
+                completed_at="2026-09-04T01:02:03Z",
+                result_ttl_seconds=60,
             ),
         ),
     )
@@ -61,6 +64,9 @@ def test_memory_manager_appends_deterministic_memory_record(tmp_path: Path):
         "- user_input: Ella，我要出门了，需要带什么？\n"
         "- summary: Prepared and delivered a short pre-leaving reminder.\n"
         "- final_response: Take your keys and phone. Consider an umbrella.\n"
+        '- tool_observation: {"completed_at":"2026-09-04T01:02:03Z",'
+        '"result_ttl_seconds":60,"tool_name":"mock_checklist",'
+        '"tool_use_id":"tool-use-memory"}\n'
         "\n"
     )
 
