@@ -52,6 +52,8 @@ CONFIG_NAMES = {
     "ELLA_DISPLAY_DIRECTORY": "DISPLAY_DIRECTORY",
     "ELLA_RAW_MEDIA_DIRECTORY": "RAW_MEDIA_DIRECTORY",
     "ELLA_DOCUMENT_DIRECTORY": "DOCUMENT_DIRECTORY",
+    "ELLA_CONTEXT_WINDOW_TOKENS": "CONTEXT_WINDOW_TOKENS",
+    "ELLA_CONTEXT_COMPRESSION_THRESHOLD": "CONTEXT_COMPRESSION_THRESHOLD",
 }
 
 SAFE_DEFAULTS = {
@@ -93,6 +95,8 @@ SAFE_DEFAULTS = {
     "ELLA_DOCUMENT_DIRECTORY": (
         user_config.PROJECT_ROOT / "output" / "documents"
     ),
+    "ELLA_CONTEXT_WINDOW_TOKENS": 1_000_000,
+    "ELLA_CONTEXT_COMPRESSION_THRESHOLD": 0.8,
 }
 
 
@@ -136,6 +140,8 @@ class EllaSettings:
     document_directory: Path = (
         user_config.PROJECT_ROOT / "output" / "documents"
     )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
 
 
 def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
@@ -256,6 +262,12 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         display_directory=_path(values, "ELLA_DISPLAY_DIRECTORY"),
         raw_media_directory=_path(values, "ELLA_RAW_MEDIA_DIRECTORY"),
         document_directory=_path(values, "ELLA_DOCUMENT_DIRECTORY"),
+        context_window_tokens=_positive_integer(
+            values, "ELLA_CONTEXT_WINDOW_TOKENS", 1_000_000
+        ),
+        context_compression_threshold=_bounded_ratio(
+            values, "ELLA_CONTEXT_COMPRESSION_THRESHOLD", 0.8
+        ),
     )
 
 
@@ -294,6 +306,13 @@ def _optional_string(env: Mapping[str, Any], name: str) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _bounded_ratio(values: Mapping[str, Any], name: str, default: float) -> float:
+    value = float(values.get(name, default))
+    if not 0 < value <= 1:
+        raise ValueError(f"{name.removeprefix('ELLA_')} must be in (0, 1]")
+    return value
 
 
 def _path(values: Mapping[str, Any], name: str) -> Path:
