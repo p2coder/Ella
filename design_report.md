@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本报告描述旧 Runtime，仅保留为历史记录。现役契约见 `docs/runtime_tools_workflow_prd.md`。
+
 # Ella Runtime 设计文档：用户故事与成本控制
 
 ## 1. 项目概述

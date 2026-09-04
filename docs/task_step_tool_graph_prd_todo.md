@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本文档已被 `docs/runtime_tools_workflow_prd.md` 取代，仅保留为历史记录；其中的旧 DAG、route、presence、handoff 与多标识设计不再是现役契约。
+
 # Ella Task / Step / Tool Graph PRD Implementation Prompts
 
 本文档依据 `docs/task_step_tool_graph_prd.md` 和当前仓库实现拆分。以下每一节都是可以直接复制给 Codex 的单 PR 提示词。
