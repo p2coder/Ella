@@ -1425,6 +1425,11 @@ class TaskRuntime:
     def _observe_capability_result(self, task: Task, result: ToolResult) -> None:
         if result.tool_name == "plan_written":
             self._activate_plan(task, result.payload)
+        if result.tool_name in {"subagent", "subagent_fork"}:
+            merge_provider_usage_calls(
+                task.task_local_state,
+                result.payload.get("provider_usage_calls", ()),
+            )
 
     @staticmethod
     def _activate_plan(task: Task, payload: Mapping[str, Any]) -> None:

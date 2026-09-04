@@ -127,6 +127,13 @@ def test_subagent_uses_clean_context_and_inherits_scope() -> None:
     assert agent.first_task.message_history == ()
     assert agent.first_task.tool_trace == ()
     assert agent.first_task.task_local_state == {"latest_user_input": "bounded work"}
+    assert result.tool_result.payload["mode"] == "clean"
+    assert result.tool_result.payload["depth"] == 1
+    assert result.tool_result.payload["parent_agent_id"] == "parent-agent"
+    assert result.tool_result.payload["capability_scope"] == (
+        _context().capability_scope.to_dict()
+    )
+    assert result.tool_result.payload["started_at"].endswith("Z")
 
 
 def test_subagent_nests_child_tool_observations() -> None:

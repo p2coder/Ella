@@ -20,6 +20,12 @@ class ChildAgentRun:
     error: str | None
     provider_usage: dict[str, object] | None
     completed_at: str
+    mode: str
+    depth: int
+    parent_agent_id: str
+    capability_scope: dict[str, Any]
+    started_at: str
+    provider_usage_calls: tuple[dict[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +36,12 @@ class ChildAgentRun:
             "error": self.error,
             "provider_usage": self.provider_usage,
             "completed_at": self.completed_at,
+            "mode": self.mode,
+            "depth": self.depth,
+            "parent_agent_id": self.parent_agent_id,
+            "capability_scope": self.capability_scope,
+            "started_at": self.started_at,
+            "provider_usage_calls": self.provider_usage_calls,
         }
 
 
@@ -73,6 +85,7 @@ class ChildAgentRunner:
         local = self._initial_task(parent_context, prompt, fork=fork)
         inherited_observation_count = len(local.tool_trace)
         local.execution_context = context
+        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         started = monotonic()
         try:
             first = self.decision_agent.decide_first_action(context, local)
@@ -92,6 +105,9 @@ class ChildAgentRunner:
                         None,
                         error,
                         inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
                     )
                 if advance:
                     decision = self.decision_agent.decide_next_action(
@@ -105,6 +121,9 @@ class ChildAgentRunner:
                         decision.final_response_draft,
                         None,
                         inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
                     )
                 local.state = TaskState.TOOL_EXECUTION
                 execution = self.executor.execute(decision, context, local)
@@ -122,6 +141,9 @@ class ChildAgentRunner:
                         None,
                         error,
                         inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
                     )
                 if execution.failure is not None:
                     local.current_step = replace(
@@ -142,6 +164,9 @@ class ChildAgentRunner:
                 None,
                 "child advance budget exhausted",
                 inherited_observation_count,
+                parent_context,
+                fork,
+                started_at,
             )
         except Exception as error:
             return self._result(
@@ -151,6 +176,9 @@ class ChildAgentRunner:
                 None,
                 str(error),
                 inherited_observation_count,
+                parent_context,
+                fork,
+                started_at,
             )
 
     def _initial_task(
@@ -220,6 +248,9 @@ class ChildAgentRunner:
         final_response: str | None,
         error: str | None,
         inherited_observation_count: int,
+        parent_context: AgentExecutionContext,
+        fork: bool,
+        started_at: str,
     ) -> ChildAgentRun:
         calls = task.task_local_state.get("provider_usage_calls", ())
         return ChildAgentRun(
@@ -231,5 +262,13 @@ class ChildAgentRunner:
             provider_usage=aggregate_provider_usage(calls),
             completed_at=datetime.now(timezone.utc).isoformat().replace(
                 "+00:00", "Z"
+            ),
+            mode="fork" if fork else "clean",
+            depth=parent_context.agent_depth + 1,
+            parent_agent_id=parent_context.agent_id,
+            capability_scope=parent_context.capability_scope.to_dict(),
+            started_at=started_at,
+            provider_usage_calls=tuple(
+                dict(call) for call in calls if isinstance(call, dict)
             ),
         )
