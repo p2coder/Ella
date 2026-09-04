@@ -60,11 +60,8 @@ class RuntimeTimingSnapshot:
     task_processing_started_at: str | None = None
     task_execution_started_at: str | None = None
     trigger_pipeline_duration_ms: float | None = None
-    routing_duration_ms: float | None = None
-    presence_queue_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
-    planning_duration_ms: float | None = None
     total_execution_duration_ms: float | None = None
     end_to_end_duration_ms: float | None = None
     final_response_generation_duration_ms: float | None = None
@@ -88,11 +85,8 @@ class RuntimeTimingSnapshot:
             "task_processing_started_at": self.task_processing_started_at,
             "task_execution_started_at": self.task_execution_started_at,
             "trigger_pipeline_duration_ms": self.trigger_pipeline_duration_ms,
-            "routing_duration_ms": self.routing_duration_ms,
-            "presence_queue_duration_ms": self.presence_queue_duration_ms,
             "input_to_task_submitted_duration_ms": self.input_to_task_submitted_duration_ms,
             "queue_wait_duration_ms": self.queue_wait_duration_ms,
-            "planning_duration_ms": self.planning_duration_ms,
             "total_execution_duration_ms": self.total_execution_duration_ms,
             "end_to_end_duration_ms": self.end_to_end_duration_ms,
             "final_response_generation_duration_ms": self.final_response_generation_duration_ms,
@@ -117,11 +111,8 @@ class _RuntimeTimingTrace:
     execution_started_perf: float | None = None
     execution_completed_perf: float | None = None
     trigger_pipeline_duration_ms: float | None = None
-    routing_duration_ms: float | None = None
-    presence_queue_duration_ms: float | None = None
     input_to_task_submitted_duration_ms: float | None = None
     queue_wait_duration_ms: float | None = None
-    planning_duration_ms: float | None = None
     total_execution_duration_ms: float | None = None
     end_to_end_duration_ms: float | None = None
     final_response_generation_duration_ms: float | None = None
@@ -137,11 +128,8 @@ class _RuntimeTimingTrace:
             task_processing_started_at=self.task_processing_started_at,
             task_execution_started_at=self.task_execution_started_at,
             trigger_pipeline_duration_ms=self.trigger_pipeline_duration_ms,
-            routing_duration_ms=self.routing_duration_ms,
-            presence_queue_duration_ms=self.presence_queue_duration_ms,
             input_to_task_submitted_duration_ms=self.input_to_task_submitted_duration_ms,
             queue_wait_duration_ms=self.queue_wait_duration_ms,
-            planning_duration_ms=self.planning_duration_ms,
             total_execution_duration_ms=self.total_execution_duration_ms,
             end_to_end_duration_ms=self.end_to_end_duration_ms,
             final_response_generation_duration_ms=self.final_response_generation_duration_ms,

@@ -534,7 +534,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("planning", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
     )
