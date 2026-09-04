@@ -382,6 +382,17 @@ def _quickjs_worker(
           writable: false,
           configurable: false,
         });
+        const __safeConsoleMethod = (..._values) => undefined;
+        Object.defineProperty(globalThis, 'console', {
+          value: Object.freeze({
+            log: __safeConsoleMethod,
+            info: __safeConsoleMethod,
+            warn: __safeConsoleMethod,
+            error: __safeConsoleMethod,
+          }),
+          writable: false,
+          configurable: false,
+        });
         globalThis.eval = undefined;
         globalThis.Function = undefined;
         globalThis.require = undefined;

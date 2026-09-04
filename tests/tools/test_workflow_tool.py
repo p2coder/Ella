@@ -90,6 +90,16 @@ def test_workflow_await_runs_children_in_sequence() -> None:
     assert events[("end", "a")] <= events[("start", "b")]
 
 
+def test_workflow_exposes_only_a_frozen_noop_console() -> None:
+    result = _runtime(FakeChildRunner()).execute(
+        _context(),
+        "console.log('not forwarded'); "
+        "return [Object.isFrozen(console), typeof console.log];",
+    )
+
+    assert result["script_return_value"] == [True, "function"]
+
+
 def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
     runner = FakeChildRunner(Barrier(2))
     result = _runtime(runner).execute(
