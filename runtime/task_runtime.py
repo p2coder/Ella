@@ -877,15 +877,6 @@ class TaskRuntime:
     def step(self, task_id: str) -> TaskRuntimeResult:
         task = self._tasks[task_id]
 
-        if (
-            task.graph is not None
-            and task.state is TaskState.REASONING
-            and not task.task_local_state.get("plan_execution_complete", False)
-            and not task.task_local_state.get(
-                "plan_recovery_reasoning_pending", False
-            )
-        ):
-            return self._step_task_graph(task)
         self.timing_recorder.record_task_processing_started(
             task.execution_context.trace_id
         )
@@ -1423,8 +1414,6 @@ class TaskRuntime:
         )
 
     def _observe_capability_result(self, task: Task, result: ToolResult) -> None:
-        if result.tool_name == "plan_written":
-            self._activate_plan(task, result.payload)
         if result.tool_name in {"subagent", "subagent_fork"}:
             merge_provider_usage_calls(
                 task.task_local_state,

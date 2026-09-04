@@ -186,27 +186,6 @@ class SubAgent:
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": observations,
-                    "plan": (
-                        None
-                        if task.graph is None
-                        else {
-                            "version": task.graph.definition.version,
-                            "node_runs": task.graph.node_runs,
-                            "execution_complete": bool(
-                                task.task_local_state.get(
-                                    "plan_execution_complete", False
-                                )
-                            ),
-                            "recovery_required": bool(
-                                task.task_local_state.get(
-                                    "plan_recovery_reasoning_pending", False
-                                )
-                            ),
-                            "recovery_reason": task.task_local_state.get(
-                                "plan_recovery_reason"
-                            ),
-                        }
-                    ),
                     "current_step": self._step_context(task),
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"

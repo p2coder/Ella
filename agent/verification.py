@@ -100,10 +100,6 @@ class VerificationAgent:
             "workspace": {
                 "task_id": task.task_id,
                 "intent": task.intent.to_dict(),
-                "plan": None if task.graph is None else {
-                    "version": task.graph.definition.version,
-                    "node_runs": task.graph.node_runs,
-                },
                 "observations": task.tool_trace,
                 "failures": tuple(
                     item.to_dict() for item in task.current_step.failures
