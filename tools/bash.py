@@ -155,8 +155,7 @@ def _sandbox_profile(project_root: Path) -> str:
         "(version 1) "
         "(allow default) "
         "(deny file-write*) "
-        f"(allow file-write* (subpath {root}) "
-        '(subpath "/private/tmp") (literal "/dev/null"))'
+        f"(allow file-write* (subpath {root}) (literal \"/dev/null\"))"
     )
 
 

@@ -50,6 +50,14 @@ def test_bash_allows_project_write_and_denies_outside_write(tmp_path) -> None:
     assert result.payload["exit_code"] != 0
     assert not outside.exists()
 
+    system_tmp = Path("/private/tmp") / f"ella-{tmp_path.name}.txt"
+    system_tmp.unlink(missing_ok=True)
+    result = BashTool(tmp_path).run(
+        _context(), {"command": f"print -n outside > {system_tmp}"}
+    )
+    assert result.payload["exit_code"] != 0
+    assert not system_tmp.exists()
+
 
 def test_bash_times_out_process_group(tmp_path) -> None:
     result = BashTool(
