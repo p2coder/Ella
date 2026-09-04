@@ -63,3 +63,4 @@ def test_task_projection_exposes_timing_for_sse_and_web_ui():
 
     assert "timing" in projection
     assert "timing_summary" in projection
+    assert projection["tool_observations"] == ()

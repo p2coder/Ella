@@ -333,6 +333,9 @@ class AppRuntime:
             ),
             "final_response": None,
             "model_output": _current_model_output(task),
+            "tool_observations": tuple(
+                _public_value(observation) for observation in task.tool_trace
+            ),
         }
         result = self._task_runtime.result_for(task.task_id)
         projection["timing"] = (

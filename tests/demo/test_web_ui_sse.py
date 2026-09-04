@@ -60,6 +60,8 @@ def test_web_ui_uses_sse_and_has_no_task_polling_loop():
     assert '"task_interaction_required"' in source
     assert 'fetch("/tasks/input"' in source
     assert 'id="total-duration"' in source
+    assert 'id="tool-timeline"' in source
+    assert "function toolUseDuration(item)" in source
     assert "renderSelectedTask(task)" in source
     assert "task.timing" in source
     assert 'eventName==="task_terminal"' in source
