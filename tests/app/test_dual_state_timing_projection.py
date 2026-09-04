@@ -6,7 +6,7 @@ from runtime.timing import LLMTimingEntry, RuntimeTimingSnapshot
 
 def test_timing_projection_uses_current_decision_boundaries() -> None:
     timing = RuntimeTimingSnapshot(
-        trace_id="trace-1",
+        task_id="task-1",
         llm_calls=(
             LLMTimingEntry("first_decision", 10.0, True),
             LLMTimingEntry("verification_decision", 4.0, True),

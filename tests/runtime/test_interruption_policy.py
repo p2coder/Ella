@@ -12,7 +12,7 @@ FIXED_TIME = datetime(2026, 6, 13, 11, 0, tzinfo=timezone.utc)
 
 def make_event(event_type: str, metadata: dict | None = None) -> StandardizedEvent:
     return StandardizedEvent(
-        trace_id=f"trace-{event_type.lower()}",
+        task_id=f"task-{event_type.lower()}",
         source="test",
         timestamp=FIXED_TIME,
         payload={"text": "Ella，我要出门了"},

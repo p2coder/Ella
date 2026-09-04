@@ -18,7 +18,6 @@ def _context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-bash",
-        trace_id="trace-bash",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("bash",)),
     )

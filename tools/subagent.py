@@ -86,7 +86,7 @@ class SubagentTool:
             timeout_seconds=float(values.get("timeout_seconds", 120)),
         )
         return ToolResult(
-            self.name, context.task_id, context.trace_id, run.to_dict()
+            self.name, context.task_id, run.to_dict()
         )
 
 
@@ -116,5 +116,5 @@ class SubagentForkTool:
             fork=True,
         )
         return ToolResult(
-            self.name, context.task_id, context.trace_id, run.to_dict()
+            self.name, context.task_id, run.to_dict()
         )

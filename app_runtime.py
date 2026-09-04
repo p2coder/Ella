@@ -210,7 +210,7 @@ class AppRuntime:
     def submit_text(self, input_text: str):
         signal = CLITextSignalSource().create_signal(
             text=input_text,
-            trace_id=f"trace-app-{uuid4().hex}",
+            task_id=f"task-app-{uuid4().hex}",
         )
         result = self._event_runtime.publish(signal)
         if not result.submitted or result.task_handle is None:
@@ -302,7 +302,6 @@ class AppRuntime:
         )
         projection = {
             "task_id": task.task_id,
-            "trace_id": task.trace_id,
             "user_input_summary": _task_user_input(task),
             "state": task.state.value,
             "goal_state": None if task.goal_state is None else task.goal_state.value,
@@ -389,7 +388,7 @@ class AppRuntime:
         report_status("Listening...")
         source = self.microphone_source or MicrophoneSource.from_factories()
         source_result = source.capture_transcript(
-            trace_id=f"trace-web-microphone-{uuid4().hex}",
+            task_id=f"task-web-microphone-{uuid4().hex}",
         )
         signal = source_result.raw_signal
         if signal is None:
@@ -401,7 +400,7 @@ class AppRuntime:
         report_status("Transcription complete.")
         text_signal = CLITextSignalSource().create_signal(
             text=normalized,
-            trace_id=f"trace-web-microphone-text-{uuid4().hex}",
+            task_id=f"task-web-microphone-text-{uuid4().hex}",
         )
         result = self._event_runtime.publish(text_signal)
         if not result.submitted or result.task_handle is None:

@@ -22,7 +22,6 @@ WORKSPACE_CACHE_ORDER = (
     "visible_skills",
     "overall_goal",
     "task_id",
-    "trace_id",
     "observations",
     "completion_criteria",
     "current_goal",

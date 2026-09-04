@@ -138,7 +138,6 @@ class BashTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "exit_code": int(process.returncode),
                 "stdout": stdout,

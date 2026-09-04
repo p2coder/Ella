@@ -10,7 +10,7 @@ from tools.verification import ArtifactExistsTool
 
 def _task(*, draft: str = "A clear answer.") -> Task:
     event = StandardizedEvent(
-        trace_id="trace-verification",
+        task_id="task-verification",
         source="test",
         payload={"text": "Answer this request"},
         event_type="USER_UTTERANCE",
@@ -22,13 +22,11 @@ def _task(*, draft: str = "A clear answer.") -> Task:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-verification",
-        trace_id=event.trace_id,
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
     return Task(
         task_id=context.task_id,
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=context,
         state=TaskState.REASONING,
@@ -98,11 +96,11 @@ def test_verifier_may_request_only_a_visible_read_only_tool(tmp_path) -> None:
         provider_name = "verification-test"
         model_name = "test"
 
-        def generate(self, prompt, *, trace_id=None, metadata=None):
+        def generate(self, prompt, *, task_id=None, metadata=None):
             return ProviderResult(
                 self.provider_name,
                 self.model_name,
-                trace_id,
+                task_id,
                 {
                     "action": "CALL_TOOL",
                     "tool_name": "artifact_exists",

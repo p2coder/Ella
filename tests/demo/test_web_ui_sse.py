@@ -11,7 +11,7 @@ class _AppRuntime:
 
     def submit_text(self, text):
         self.inputs.append(text)
-        return SimpleNamespace(task_id="task-api", trace_id="trace-api")
+        return SimpleNamespace(task_id="task-api")
 
     def get_task(self, task_id):
         return {"task_id": task_id, "state": "created"}
@@ -33,7 +33,6 @@ def test_json_task_submission_returns_202_without_waiting_for_completion():
     assert response.status == 202
     assert document == {
         "task_id": "task-api",
-        "trace_id": "trace-api",
         "state": "created",
         "auto_start": True,
     }

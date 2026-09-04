@@ -31,12 +31,12 @@ def test_qwen_provider_construction_does_not_call_network():
 def test_missing_api_key_returns_structured_llm_error():
     provider = QwenLLMProvider(api_key=None, model_name="qwen-plus")
 
-    result = provider.generate("hello", trace_id="trace-missing-key")
+    result = provider.generate("hello", task_id="task-missing-key")
 
     assert result == ProviderResult(
         provider_name="qwen_llm",
         model_name="qwen-plus",
-        trace_id="trace-missing-key",
+        task_id="task-missing-key",
         output=None,
         metadata={"real_provider_requested": True},
         error=ProviderError(
@@ -54,7 +54,7 @@ def test_missing_client_returns_structured_error_without_network():
         model_name="qwen-vl-plus",
     )
 
-    result = provider.describe({"text": "look"}, trace_id="trace-no-client")
+    result = provider.describe({"text": "look"}, task_id="task-no-client")
 
     assert result.failed is True
     assert result.error == ProviderError(
@@ -63,7 +63,7 @@ def test_missing_client_returns_structured_error_without_network():
         code="provider_unavailable",
         metadata={"reason": "client_missing"},
     )
-    assert result.trace_id == "trace-no-client"
+    assert result.task_id == "task-no-client"
 
 
 def test_qwen_llm_uses_injected_client_when_explicitly_provided():
@@ -81,14 +81,14 @@ def test_qwen_llm_uses_injected_client_when_explicitly_provided():
 
     result = provider.generate(
         "Ella，我要出门了",
-        trace_id="trace-qwen",
+        task_id="task-qwen",
         metadata={"source": "test"},
     )
 
     assert result == ProviderResult(
         provider_name="qwen_llm",
         model_name="qwen-plus",
-        trace_id="trace-qwen",
+        task_id="task-qwen",
         output={"text": "真实调用由注入 client 负责"},
         metadata={"source": "test", "real_provider_requested": True},
     )

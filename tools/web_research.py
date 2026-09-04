@@ -153,7 +153,7 @@ class WebSearchTool:
                 code="web_search_failed",
                 message="; ".join(errors) or "no public search results found",
             )
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
     def _try_brave(
         self,
@@ -335,7 +335,7 @@ class WebPageReadTool:
                 "truncated": False,
                 "error": {"code": "web_page_read_failed", "message": str(error)},
             }
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
 
 class _BraveSearchResultParser(HTMLParser):

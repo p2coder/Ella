@@ -202,7 +202,6 @@ def test_workspace_prioritizes_and_sorts_visible_capabilities():
     prompt = build_workspace_prompt(
         {
             "task_id": "task-1",
-            "trace_id": "trace-1",
             "overall_goal": "Overall goal.",
             "completion_criteria": ("done",),
             "current_goal": "Current goal.",
@@ -236,7 +235,6 @@ def test_workspace_prioritizes_and_sorts_visible_capabilities():
 def test_workspace_variable_fields_do_not_invalidate_shared_history_prefix():
     base = {
         "task_id": "task-1",
-        "trace_id": "trace-1",
         "overall_goal": "Overall goal.",
         "visible_skills": ({"name": "a_skill"},),
         "visible_tools": ({"name": "a_tool"},),

@@ -22,7 +22,7 @@ def test_provider_normalizes_chat_completion_content() -> None:
         reasoning_effort="high",
     )
 
-    result = provider.generate("Decide the next action", trace_id="trace-1")
+    result = provider.generate("Decide the next action", task_id="task-1")
 
     assert result.succeeded
     assert result.output == {"text": '{"action":"SUBMIT_RESULT"}'}

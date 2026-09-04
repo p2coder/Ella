@@ -10,11 +10,11 @@ class CountingMicrophoneProvider:
     def __init__(self):
         self.capture_calls = 0
 
-    def capture(self, *, trace_id=None, metadata=None):
+    def capture(self, *, task_id=None, metadata=None):
         self.capture_calls += 1
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "audio",
                 "bytes": b"bounded-audio",
@@ -34,12 +34,12 @@ class CountingSpeechProvider:
     def __init__(self):
         self.transcribe_calls = 0
 
-    def transcribe(self, audio, *, trace_id=None, metadata=None):
+    def transcribe(self, audio, *, task_id=None, metadata=None):
         self.transcribe_calls += 1
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={"text": "Ella，我要出门了"},
         )
 
@@ -91,7 +91,7 @@ def test_factory_assembled_source_performs_one_bounded_capture_and_transcription
         provider_factory=FakeProviderFactory(speech),
     )
 
-    result = source.capture_transcript(trace_id="trace-configured-mic")
+    result = source.capture_transcript(task_id="task-configured-mic")
 
     assert microphone.capture_calls == 1
     assert speech.transcribe_calls == 1

@@ -20,11 +20,6 @@ class MemoryManagementRequest:
     def task_id(self) -> str:
         return self.completion.context.task_id
 
-    @property
-    def trace_id(self) -> str:
-        return self.completion.context.trace_id
-
-
 @dataclass(frozen=True, slots=True)
 class MemoryWriteResult:
     action: str
@@ -70,7 +65,7 @@ class MemoryManager:
         )
         return (
             f"## Task {request.task_id}\n"
-            f"- trace_id: {request.trace_id}\n"
+            f"- task_id: {request.task_id}\n"
             f"{user_input_record}"
             f"- summary: {completion.summary}\n"
             f"- final_response: {final_response}\n"

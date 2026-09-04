@@ -41,7 +41,7 @@ def test_real_llm_transport_calls_dashscope_and_normalizes_text():
         client=DashScopeOpenAITransport(opener=opener, timeout_seconds=12),
     )
 
-    result = provider.generate("给出出门提醒", trace_id="trace-llm")
+    result = provider.generate("给出出门提醒", task_id="task-llm")
 
     assert result.succeeded
     assert result.output == {"text": "带伞并检查钥匙。"}
@@ -191,7 +191,7 @@ def test_multimodal_transport_accepts_encoded_frames_and_normalizes_scene():
                 {"data": b"png-two", "mime_type": "image/png"},
             ),
         },
-        trace_id="trace-vision",
+        task_id="task-vision",
     )
 
     assert result.output == {
@@ -247,7 +247,7 @@ def test_transport_failures_become_structured_provider_errors(
         client=DashScopeOpenAITransport(opener=opener),
     )
 
-    result = provider.generate("hello", trace_id="trace-error")
+    result = provider.generate("hello", task_id="task-error")
 
     assert result.failed
     assert result.error.code == expected_code

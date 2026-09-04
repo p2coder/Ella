@@ -116,7 +116,6 @@ class EffectiveToolExecutionMetadata:
 class ToolResult:
     tool_name: str
     task_id: str
-    trace_id: str
     payload: dict[str, Any]
     tool_use_id: str | None = None
     agent_id: str | None = None
@@ -131,7 +130,6 @@ class ToolResult:
         return {
             "tool_name": self.tool_name,
             "task_id": self.task_id,
-            "trace_id": self.trace_id,
             "payload": self.payload,
             "tool_use_id": self.tool_use_id,
             "agent_id": self.agent_id,

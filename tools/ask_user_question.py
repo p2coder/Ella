@@ -150,7 +150,6 @@ class AskUserQuestionTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {"answers": answers},
         )
 

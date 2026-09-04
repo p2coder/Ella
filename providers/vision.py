@@ -12,7 +12,7 @@ class VisionProvider(Protocol):
         self,
         image: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         ...
@@ -27,7 +27,7 @@ class MultimodalProvider(Protocol):
         self,
         inputs: dict[str, Any],
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         ...

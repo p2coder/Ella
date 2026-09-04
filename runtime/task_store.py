@@ -140,7 +140,6 @@ def _encode_task(task: Task) -> dict[str, Any]:
     return _reject_secrets(
         {
             "task_id": task.task_id,
-            "trace_id": task.trace_id,
             "source_event": _encode_event(task.source_event),
             "execution_context": task.execution_context.to_dict()
             if task.execution_context
@@ -181,7 +180,6 @@ def _decode_task(data: Mapping[str, Any]) -> Task:
     context = _decode_context(context_data) if context_data else None
     task = Task(
         task_id=data["task_id"],
-        trace_id=data["trace_id"],
         source_event=event,
         execution_context=context,
         state=TaskState(data["state"]),
@@ -294,7 +292,6 @@ def _decode_completion(
             ToolResult(
                 tool_name=str(item["tool_name"]),
                 task_id=str(item["task_id"]),
-                trace_id=str(item["trace_id"]),
                 payload=dict(item.get("payload", {})),
                 tool_use_id=item.get("tool_use_id"),
                 agent_id=item.get("agent_id"),
@@ -314,7 +311,7 @@ def _encode_event(event: StandardizedEvent | None) -> dict[str, Any] | None:
     if event is None:
         return None
     return {
-        "trace_id": event.trace_id,
+        "task_id": event.task_id,
         "source": event.source,
         "payload": _json_safe(event.payload),
         "event_type": event.event_type,
@@ -330,7 +327,7 @@ def _decode_event(data: Mapping[str, Any] | None) -> StandardizedEvent:
     if data is None:
         raise ValueError("task checkpoint requires source_event")
     return StandardizedEvent(
-        trace_id=data["trace_id"],
+        task_id=data["task_id"],
         source=data["source"],
         payload=dict(data["payload"]),
         event_type=data["event_type"],
@@ -349,7 +346,6 @@ def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
         agent_role=data["agent_role"],
         parent_agent_id=data.get("parent_agent_id"),
         task_id=data["task_id"],
-        trace_id=data["trace_id"],
         memory_scope=data["memory_scope"],
         permissions=tuple(data.get("permissions", ())),
         agent_depth=int(data.get("agent_depth", 0)),

@@ -142,7 +142,7 @@ class VerificationAgent:
         try:
             result = self.llm_provider.generate(
                 prepared.text,
-                trace_id=task.trace_id,
+                task_id=task.task_id,
                 metadata={"boundary": "verification_decision"},
             )
         except Exception:
@@ -190,7 +190,7 @@ class VerificationAgent:
     ) -> None:
         provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
-            task.trace_id,
+            task.task_id,
             boundary="verification_decision",
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,

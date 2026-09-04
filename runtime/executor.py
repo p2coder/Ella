@@ -307,7 +307,7 @@ class CapabilityExecutor:
         code: str | None,
     ) -> None:
         self.timing_recorder.record_tool_call(
-            context.trace_id,
+            context.task_id,
             tool_name=tool_name,
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,

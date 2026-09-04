@@ -17,7 +17,6 @@ def _context() -> AgentExecutionContext:
         agent_role="verification_agent",
         parent_agent_id="ella-main",
         task_id="task-verify-tools",
-        trace_id="trace-verify-tools",
         memory_scope="task_local",
         capability_scope=CapabilityScope(
             "verification_agent",

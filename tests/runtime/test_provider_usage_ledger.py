@@ -15,7 +15,7 @@ def _result(usage):
     return ProviderResult(
         "test-provider",
         "test-model",
-        "trace-usage",
+        "task-usage",
         {"text": "ok"},
         metadata={"usage": usage},
     )

@@ -10,7 +10,6 @@ def context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-research",
-        trace_id="trace-research",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("web_search", "web_page_read")),
         permissions=("read_context",),

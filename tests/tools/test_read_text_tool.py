@@ -12,7 +12,6 @@ def _context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-read",
-        trace_id="trace-read",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("read",)),
     )

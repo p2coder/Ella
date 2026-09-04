@@ -14,12 +14,12 @@ class FirstDecisionProvider:
     provider_name = "first-decision-test"
     model_name = "test-model"
 
-    def generate(self, prompt, *, trace_id=None, metadata=None):
+    def generate(self, prompt, *, task_id=None, metadata=None):
         assert metadata == {"boundary": "first_decision"}
         return ProviderResult(
             self.provider_name,
             self.model_name,
-            trace_id,
+            task_id,
             {
                 "intent": {
                     "goal": "Greet the user naturally.",
@@ -42,7 +42,7 @@ class FirstDecisionProvider:
 
 def _event() -> StandardizedEvent:
     return StandardizedEvent(
-        trace_id="trace-first-decision",
+        task_id="task-first-decision",
         source="test",
         payload={"text": "你好"},
         event_type="USER_UTTERANCE",
@@ -70,13 +70,11 @@ def test_first_decision_commits_intent_and_pending_action() -> None:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-first-decision",
-        trace_id=event.trace_id,
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
     task = Task(
         task_id=context.task_id,
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=context,
         state=TaskState.REASONING,

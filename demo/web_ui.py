@@ -194,7 +194,6 @@ class LocalWebUI:
                 json.dumps(
                     {
                         "task_id": handle.task_id,
-                        "trace_id": handle.trace_id,
                         "state": task["state"],
                         "auto_start": True,
                     },

@@ -122,7 +122,6 @@ class ReadTextTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "path": relative,
                 "content": content,
@@ -237,7 +236,6 @@ class WriteTextTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "path": relative,
                 "byte_count": len(content_bytes),
@@ -372,7 +370,6 @@ class EditTextTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "path": relative,
                 "replacement_count": 1,

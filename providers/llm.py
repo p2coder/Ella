@@ -15,7 +15,7 @@ class LLMProvider(Protocol):
         self,
         prompt: str,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         ...

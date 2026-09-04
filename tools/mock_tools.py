@@ -63,7 +63,6 @@ class MockWeatherTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "summary": "Light rain is possible later today.",
                 "rain_probability": 0.7,
@@ -114,7 +113,6 @@ class MockVisionSummaryTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "summary": "Desk contains a laptop, headphones, and a water bottle.",
                 "visible_items": ("laptop", "headphones", "water_bottle"),
@@ -164,7 +162,6 @@ class MockChecklistTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "items": ("phone", "keys", "wallet", "umbrella"),
             },

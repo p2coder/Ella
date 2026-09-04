@@ -9,7 +9,7 @@ from tasks.task import Task, TaskIntent, TaskState
 
 def _task() -> Task:
     event = StandardizedEvent(
-        trace_id="trace-resume-verification",
+        task_id="task-resume-verification",
         source="test",
         payload={"text": "Create a report"},
         event_type="USER_UTTERANCE",
@@ -21,13 +21,11 @@ def _task() -> Task:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-resume-verification",
-        trace_id=event.trace_id,
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
     return Task(
         task_id=context.task_id,
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=context,
         state=TaskState.REASONING,

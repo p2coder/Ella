@@ -11,7 +11,7 @@ from tasks.factory import TaskFactory
 
 def signal() -> RawSignal:
     return RawSignal(
-        trace_id="trace-create-flow",
+        task_id="task-flow",
         source="cli_input",
         payload={"text": "hello"},
         signal_type="cli_text",

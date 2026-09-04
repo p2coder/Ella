@@ -5,9 +5,9 @@ from events import StandardizedEvent
 from tasks.task import Task, TaskState
 
 
-def make_event(trace_id: str = "trace-task") -> StandardizedEvent:
+def make_event(task_id: str = "task-task") -> StandardizedEvent:
     return StandardizedEvent(
-        trace_id=trace_id,
+        task_id=task_id,
         source="test",
         timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
         payload={"text": "hello"},
@@ -22,7 +22,6 @@ def make_context(task_id: str = "task-1") -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id=task_id,
-        trace_id="trace-task",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
@@ -32,7 +31,6 @@ def test_task_is_the_single_runtime_aggregate_with_created_invariants():
     event = make_event()
     task = Task(
         "task-1",
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=make_context(),
     )
@@ -47,13 +45,11 @@ def test_task_mutable_state_is_isolated():
     event = make_event()
     first = Task(
         "task-1",
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=make_context("task-1"),
     )
     second = Task(
         "task-2",
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=make_context("task-2"),
     )

@@ -14,12 +14,12 @@ class CapturingProvider:
     def __init__(self) -> None:
         self.prompt = ""
 
-    def generate(self, prompt, *, trace_id=None, metadata=None):
+    def generate(self, prompt, *, task_id=None, metadata=None):
         self.prompt = prompt
         return ProviderResult(
             self.provider_name,
             self.model_name,
-            trace_id,
+            task_id,
             {
                 "intent": {
                     "goal": "Answer the user.",
@@ -47,13 +47,11 @@ def test_first_decision_prompt_contains_exact_action_contract_and_repair() -> No
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-repair",
-        trace_id=event.trace_id,
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
     task = Task(
         task_id=context.task_id,
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=context,
         state=TaskState.REASONING,

@@ -75,7 +75,6 @@ class VerificationTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             action.verdict.to_dict(),
         )
 
@@ -140,7 +139,6 @@ class ArtifactExistsTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "relative_path": relative.as_posix(),
                 "exists": target.exists(),
@@ -208,7 +206,6 @@ class DocumentReadTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "relative_path": relative.as_posix(),
                 "content": content,
@@ -275,6 +272,5 @@ class ToolObservationCheckTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {"matched": bool(observations), "observations": observations},
         )

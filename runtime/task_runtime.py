@@ -48,7 +48,6 @@ from .context_window import ContextTooLargeError
 @dataclass(frozen=True, slots=True)
 class TaskHandle:
     task_id: str
-    trace_id: str
 
 @dataclass(frozen=True, slots=True)
 class TaskRuntimeResult:
@@ -452,21 +451,19 @@ class TaskRuntime:
         user_preference_summary: str = "",
         environment_summary: str = "",
     ) -> TaskHandle:
-        task_id = self.task_factory._new_task_id()
+        task_id = source_event.task_id
         scope = self.task_factory._resolve_capability_scope()
         context = AgentExecutionContext(
             agent_id=self.task_factory.agent_id,
             agent_role=self.task_factory.agent_role,
             parent_agent_id=self.task_factory.parent_agent_id,
             task_id=task_id,
-            trace_id=source_event.trace_id,
             memory_scope=self.task_factory.memory_scope,
             permissions=self.task_factory.permissions,
             capability_scope=scope,
         )
         task = Task(
             task_id=task_id,
-            trace_id=source_event.trace_id,
             source_event=source_event,
             execution_context=context,
             task_local_state={
@@ -484,12 +481,10 @@ class TaskRuntime:
         self._persist(task)
         self._trace_task(task, "task", "created")
         self._trace_task(task, "task", "submitted")
-        self.timing_recorder.record_task_submitted(
-            task.trace_id, task_id=task_id
-        )
+        self.timing_recorder.record_task_submitted(task_id)
         if self.is_running:
             self.schedule(task_id)
-        return TaskHandle(task_id, source_event.trace_id)
+        return TaskHandle(task_id)
 
     def _commit_task_intent(self, task: Task, intent: TaskIntent) -> None:
         event = task.source_event
@@ -844,7 +839,7 @@ class TaskRuntime:
         task = self._tasks[task_id]
 
         self.timing_recorder.record_task_processing_started(
-            task.execution_context.trace_id
+            task.execution_context.task_id
         )
 
         if task.state in {
@@ -870,7 +865,7 @@ class TaskRuntime:
             )
             return self._result(task)
 
-        self.timing_recorder.record_execution_started(task.execution_context.trace_id)
+        self.timing_recorder.record_execution_started(task.execution_context.task_id)
         self._persist(task)
         saved_decision = task.task_local_state.get("current_decision")
         if isinstance(saved_decision, Mapping):
@@ -1102,8 +1097,8 @@ class TaskRuntime:
                 )
             },
         )
-        self.timing_recorder.record_execution_completed(task.execution_context.trace_id)
-        self.timing_recorder.record_task_completed(task.execution_context.trace_id)
+        self.timing_recorder.record_execution_completed(task.execution_context.task_id)
+        self.timing_recorder.record_task_completed(task.execution_context.task_id)
         task.transition_to(TaskState.COMPLETED)
         task.set_goal_state(TaskGoalState.ACHIEVED)
         task.terminal_execution_state = TaskState.COMPLETED
@@ -1360,7 +1355,6 @@ class TaskRuntime:
             ToolResult(
                 tool_name=entry["tool_name"],
                 task_id=entry["task_id"],
-                trace_id=entry["trace_id"],
                 payload=entry["payload"],
                 tool_use_id=entry.get("tool_use_id"),
                 agent_id=entry.get("agent_id"),
@@ -1419,7 +1413,7 @@ class TaskRuntime:
         failure_reason: str | None = None,
         record_trace: bool = True,
     ) -> TaskRuntimeResult:
-        timing = self.timing_recorder.snapshot(task.execution_context.trace_id)
+        timing = self.timing_recorder.snapshot(task.execution_context.task_id)
         if record_trace:
             self._trace_task(
                 task,
@@ -1434,7 +1428,6 @@ class TaskRuntime:
         return TaskRuntimeResult(
             handle=TaskHandle(
                 task_id=task.task_id,
-                trace_id=task.execution_context.trace_id,
             ),
             task=task,
             context=task.execution_context,
@@ -1457,7 +1450,6 @@ class TaskRuntime:
     ) -> None:
         self.trace_recorder.record(
             task_id=task.task_id,
-            trace_id=task.trace_id,
             boundary=boundary,
             event_type=event_type,
             payload=payload or {},
@@ -1490,7 +1482,7 @@ class TaskRuntime:
         )
 
     def _timing_dict(self, task: Task) -> dict:
-        snapshot = self.timing_recorder.snapshot(task.execution_context.trace_id)
+        snapshot = self.timing_recorder.snapshot(task.execution_context.task_id)
         return {} if snapshot is None else snapshot.to_dict()
 
 

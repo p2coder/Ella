@@ -15,7 +15,7 @@ class ScreenProvider(Protocol):
     def capture_screen(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         ...
@@ -107,17 +107,17 @@ class RealScreenProvider:
     def capture_screen(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         try:
             screenshot = self.backend.capture_png()
         except Exception as error:
-            return self._error_result(error, trace_id, metadata)
+            return self._error_result(error, task_id, metadata)
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "image",
                 "bytes": screenshot,
@@ -133,7 +133,7 @@ class RealScreenProvider:
     def _error_result(
         self,
         error: Exception,
-        trace_id: str | None,
+        task_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> DeviceResult:
         if isinstance(error, ScreenBackendError):
@@ -151,7 +151,7 @@ class RealScreenProvider:
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(
@@ -171,12 +171,12 @@ class MockScreenProvider:
     def capture_screen(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "image",
                 "frame": "mock-screen-frame",
@@ -196,12 +196,12 @@ class UnavailableScreenProvider:
     def capture_screen(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(

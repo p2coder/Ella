@@ -48,7 +48,7 @@ def test_real_camera_captures_encoded_frame_and_releases_device():
     )
 
     result = provider.capture_frame(
-        trace_id="trace-camera",
+        task_id="task-camera",
         metadata={"purpose": "task"},
     )
 
@@ -114,11 +114,11 @@ def test_real_camera_maps_backend_failures_to_device_errors(
 ):
     provider = RealCameraProvider(backend=FakeBackend(error=error))
 
-    result = provider.capture_frame(trace_id="trace-error")
+    result = provider.capture_frame(task_id="task-error")
 
     assert result.failed
     assert result.error.code == expected_code
-    assert result.trace_id == "trace-error"
+    assert result.task_id == "task-error"
 
 
 def test_importing_camera_module_does_not_import_or_open_opencv():

@@ -16,7 +16,6 @@ def _context(
         agent_role=agent_role,
         parent_agent_id=None,
         task_id="task-discovery",
-        trace_id="trace-discovery",
         memory_scope="task_local",
         capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=("read_context",),
@@ -151,7 +150,6 @@ class RoleLimitedTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={},
         )
 
@@ -181,6 +179,5 @@ class CountingTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={},
         )

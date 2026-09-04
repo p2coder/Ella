@@ -184,14 +184,12 @@ def test_existing_tool_result_construction_still_works() -> None:
     result = ToolResult(
         tool_name="mock_weather",
         task_id="task-1",
-        trace_id="trace-1",
         payload={"summary": "Light rain is possible later today."},
     )
 
     assert result.to_dict() == {
         "tool_name": "mock_weather",
         "task_id": "task-1",
-        "trace_id": "trace-1",
         "payload": {"summary": "Light rain is possible later today."},
         "tool_use_id": None,
         "agent_id": None,

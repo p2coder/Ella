@@ -13,7 +13,7 @@ def serialize_timestamp(timestamp: datetime) -> str:
 
 @dataclass(frozen=True, slots=True)
 class RawSignal:
-    trace_id: str
+    task_id: str
     source: str
     payload: dict[str, Any]
     timestamp: datetime = field(default_factory=utc_now)
@@ -22,7 +22,7 @@ class RawSignal:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "source": self.source,
             "timestamp": serialize_timestamp(self.timestamp),
             "payload": self.payload,

@@ -8,7 +8,7 @@ from .stage import EVENT_CANDIDATE_STAGE, STANDARDIZED_EVENT_STAGE, EventStage
 
 @dataclass(frozen=True, slots=True)
 class EventCandidate:
-    trace_id: str
+    task_id: str
     source: str
     payload: dict[str, Any]
     event_type: str
@@ -19,7 +19,7 @@ class EventCandidate:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "source": self.source,
             "timestamp": serialize_timestamp(self.timestamp),
             "payload": self.payload,
@@ -32,7 +32,7 @@ class EventCandidate:
 
 @dataclass(frozen=True, slots=True)
 class StandardizedEvent:
-    trace_id: str
+    task_id: str
     source: str
     payload: dict[str, Any]
     event_type: str
@@ -46,7 +46,7 @@ class StandardizedEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "source": self.source,
             "timestamp": serialize_timestamp(self.timestamp),
             "payload": self.payload,

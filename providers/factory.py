@@ -145,7 +145,7 @@ class _UnavailableProviderBase:
             api_key_missing=api_key is None,
         )
 
-    def _result(self, *, trace_id: str | None) -> ProviderResult:
+    def _result(self, *, task_id: str | None) -> ProviderResult:
         message = "real provider is not wired yet"
         metadata: dict[str, Any] = {"requested_provider": self.requested_provider}
         if self.api_key_missing:
@@ -159,7 +159,7 @@ class _UnavailableProviderBase:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_provider_requested": True},
             error=ProviderError(
@@ -182,10 +182,10 @@ class UnavailableLLMProvider(_UnavailableProviderBase):
         self,
         prompt: str,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
-        return self._result(trace_id=trace_id)
+        return self._result(task_id=task_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,10 +199,10 @@ class UnavailableSpeechProvider(_UnavailableProviderBase):
         self,
         audio: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
-        return self._result(trace_id=trace_id)
+        return self._result(task_id=task_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,10 +216,10 @@ class UnavailableVisionProvider(_UnavailableProviderBase):
         self,
         image: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
-        return self._result(trace_id=trace_id)
+        return self._result(task_id=task_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +233,7 @@ class UnavailableMultimodalProvider(_UnavailableProviderBase):
         self,
         inputs: dict[str, Any],
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
-        return self._result(trace_id=trace_id)
+        return self._result(task_id=task_id)

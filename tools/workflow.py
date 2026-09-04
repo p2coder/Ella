@@ -52,4 +52,4 @@ class WorkflowTool:
 
     def run(self, context: AgentExecutionContext, arguments=None) -> ToolResult:
         payload = self.runtime.execute(context, str((arguments or {}).get("script", "")))
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)

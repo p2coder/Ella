@@ -11,7 +11,6 @@ def make_completion() -> TaskCompletionPackage:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-memory-contract",
-        trace_id="trace-memory-contract",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("mock_checklist",)),
         permissions=(),
@@ -27,7 +26,6 @@ def make_completion() -> TaskCompletionPackage:
             ToolResult(
                 tool_name="mock_checklist",
                 task_id=context.task_id,
-                trace_id=context.trace_id,
                 payload={"items": ("keys", "phone")},
             ),
         ),
@@ -57,9 +55,7 @@ def test_memory_request_and_record_retain_completion_context(tmp_path):
 
     assert request.completion is completion
     assert request.task_id == "task-memory-contract"
-    assert request.trace_id == "trace-memory-contract"
     record = memory_path.read_text(encoding="utf-8")
     assert "task-memory-contract" in record
-    assert "trace-memory-contract" in record
     assert completion.summary in record
     assert completion.user_visible_output.final_response in record

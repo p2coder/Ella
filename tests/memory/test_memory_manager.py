@@ -13,7 +13,6 @@ def make_package() -> TaskCompletionPackage:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-memory",
-        trace_id="trace-memory",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("mock_weather", "mock_checklist")),
         permissions=("read_context",),
@@ -32,7 +31,6 @@ def make_package() -> TaskCompletionPackage:
             ToolResult(
                 tool_name="mock_checklist",
                 task_id="task-memory",
-                trace_id="trace-memory",
                 payload={"items": ("phone", "keys", "wallet", "umbrella")},
             ),
         ),
@@ -46,7 +44,6 @@ def test_memory_management_request_wraps_completion_package():
 
     assert request.completion == package
     assert request.task_id == "task-memory"
-    assert request.trace_id == "trace-memory"
 
 
 def test_memory_manager_appends_deterministic_memory_record(tmp_path: Path):
@@ -60,7 +57,7 @@ def test_memory_manager_appends_deterministic_memory_record(tmp_path: Path):
     assert result.memory_path == memory_path
     assert memory_path.read_text(encoding="utf-8") == (
         "## Task task-memory\n"
-        "- trace_id: trace-memory\n"
+        "- task_id: task-memory\n"
         "- user_input: Ella，我要出门了，需要带什么？\n"
         "- summary: Prepared and delivered a short pre-leaving reminder.\n"
         "- final_response: Take your keys and phone. Consider an umbrella.\n"

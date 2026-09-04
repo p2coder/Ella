@@ -10,7 +10,7 @@ from tasks.task import Task, TaskGoalState, TaskState
 
 def _task() -> Task:
     event = StandardizedEvent(
-        trace_id="trace-dual-state",
+        task_id="task-dual-state",
         source="test",
         payload={"text": "hello"},
         event_type="USER_UTTERANCE",
@@ -22,13 +22,11 @@ def _task() -> Task:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-dual-state",
-        trace_id=event.trace_id,
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
     return Task(
         task_id="task-dual-state",
-        trace_id=event.trace_id,
         source_event=event,
         execution_context=context,
     )

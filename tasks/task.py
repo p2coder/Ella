@@ -131,7 +131,6 @@ class Task:
     failure_reason: str | None = None
     current_step: StepExecutionState = field(default_factory=StepExecutionState)
     step_history: tuple[StepExecutionState, ...] = ()
-    trace_id: str = ""
     source_event: StandardizedEvent | None = None
     execution_context: AgentExecutionContext | None = None
     paused_from_state: TaskState | None = None

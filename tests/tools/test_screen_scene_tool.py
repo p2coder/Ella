@@ -12,7 +12,6 @@ def make_context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-screen",
-        trace_id="trace-screen",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("screen_scene",)),
         permissions=("read_context",),
@@ -124,11 +123,11 @@ class CountingScreenProvider:
     def __init__(self) -> None:
         self.capture_count = 0
 
-    def capture_screen(self, *, trace_id=None, metadata=None):
+    def capture_screen(self, *, task_id=None, metadata=None):
         self.capture_count += 1
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "image",
                 "bytes": f"screen-frame-{self.capture_count}".encode(),
@@ -142,10 +141,10 @@ class CountingScreenProvider:
 class UnavailableScreenProvider:
     device_name = "unavailable_screen"
 
-    def capture_screen(self, *, trace_id=None, metadata=None):
+    def capture_screen(self, *, task_id=None, metadata=None):
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=DeviceError(
                 device_name=self.device_name,
@@ -162,12 +161,12 @@ class RecordingMultimodalProvider:
     def __init__(self) -> None:
         self.calls = []
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         self.calls.append(inputs)
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "scene_summary": "Screen shows an editor window.",
                 "visible_items": ("editor", "terminal"),
@@ -179,11 +178,11 @@ class FailingMultimodalProvider:
     provider_name = "failing_multimodal"
     model_name = "failing-mm"
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=ProviderError(
                 provider_name=self.provider_name,

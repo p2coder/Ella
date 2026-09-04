@@ -12,12 +12,12 @@ class CLITextSignalSource:
     def create_signal(
         self,
         text: str,
-        trace_id: str,
+        task_id: str,
         timestamp: datetime | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> RawSignal:
         return RawSignal(
-            trace_id=trace_id,
+            task_id=task_id,
             source=self.source,
             timestamp=timestamp or utc_now(),
             payload={"text": text},

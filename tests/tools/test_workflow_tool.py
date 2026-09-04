@@ -51,7 +51,6 @@ def _context():
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-workflow",
-        trace_id="trace-workflow",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("workflow",)),
     )

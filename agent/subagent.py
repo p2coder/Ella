@@ -56,8 +56,7 @@ class SubAgent:
             {
                 "user_prompt": user_input,
                 "workspace": {
-                    "task_id": task.task_id,
-                    "trace_id": context.trace_id,
+                    "task_id": context.task_id,
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": self._observations(task),
@@ -78,7 +77,7 @@ class SubAgent:
         try:
             result = self.llm_provider.generate(
                 prompt_text,
-                trace_id=context.trace_id,
+                task_id=context.task_id,
                 metadata={"boundary": "first_decision"},
             )
         except Exception:
@@ -127,7 +126,7 @@ class SubAgent:
     ) -> None:
         provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
-            context.trace_id,
+            context.task_id,
             boundary=boundary,
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,
@@ -160,8 +159,7 @@ class SubAgent:
                     "",
                 ),
                 "workspace": {
-                    "task_id": task.task_id,
-                    "trace_id": context.trace_id,
+                    "task_id": context.task_id,
                     "overall_goal": overall_goal,
                     "current_goal": current_goal or overall_goal,
                     "completion_criteria": tuple(
@@ -187,7 +185,6 @@ class SubAgent:
         task.task_local_state["execution_decision_prompt_text"] = prompt_text
         self.trace_recorder.record(
             task_id=task.task_id,
-            trace_id=context.trace_id,
             boundary="reasoning.execution_decision",
             event_type="prompt_built",
             payload={
@@ -205,7 +202,7 @@ class SubAgent:
         try:
             result = self.llm_provider.generate(
                 prompt_text,
-                trace_id=context.trace_id,
+                task_id=context.task_id,
                 metadata={"boundary": "execution_decision"},
             )
         except Exception:

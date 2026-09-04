@@ -146,7 +146,7 @@ class CameraSceneTool:
         frames = []
         for _ in range(frame_limit or 1):
             camera_result = self.camera_provider.capture_frame(
-                trace_id=context.trace_id,
+                task_id=context.task_id,
                 metadata={"max_duration_seconds": duration_limit},
             )
             if camera_result.failed:
@@ -165,7 +165,7 @@ class CameraSceneTool:
                 "frames": tuple(frames),
                 "task_id": context.task_id,
             },
-            trace_id=context.trace_id,
+            task_id=context.task_id,
         )
         if multimodal_result.failed:
             return self._unavailable_result(
@@ -196,7 +196,6 @@ class CameraSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload=payload,
         )
 
@@ -245,7 +244,6 @@ class CameraSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "status": "unavailable",
                 "summary": summary,

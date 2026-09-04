@@ -18,7 +18,7 @@ def _app():
         event_publisher=TaskEventPublisher(),
     )
     event = StandardizedEvent(
-        trace_id="trace-projection",
+        task_id="task-projection",
         source="test",
         timestamp=datetime.now(timezone.utc),
         payload={"text": "hello"},

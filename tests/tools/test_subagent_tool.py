@@ -32,7 +32,6 @@ class EchoTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {"value": (arguments or {})["value"]},
         )
 
@@ -75,7 +74,6 @@ def _context(*, depth=0):
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-child",
-        trace_id="trace-child",
         memory_scope="task_local",
         permissions=("workspace",),
         capability_scope=CapabilityScope(

@@ -14,7 +14,6 @@ def _make_context(*, allowed_tools: tuple[str, ...]) -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-tools",
-        trace_id="trace-tools",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), allowed_tools),
         permissions=("read_context",),

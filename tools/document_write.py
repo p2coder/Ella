@@ -166,7 +166,7 @@ class DocumentWriteTool:
             "sha256": sha256(encoded_content).hexdigest(),
             "overwritten": existed,
         }
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
 
 def _validate_relative_path(value: object) -> PurePosixPath:

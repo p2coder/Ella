@@ -14,7 +14,6 @@ def make_context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-tools",
-        trace_id="trace-tools",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("mock_weather", "mock_vision_summary", "mock_checklist")),
         permissions=("read_context",),
@@ -37,7 +36,6 @@ def test_mock_weather_tool_returns_deterministic_tool_result():
     assert result == ToolResult(
         tool_name="mock_weather",
         task_id="task-tools",
-        trace_id="trace-tools",
         payload={
             "summary": "Light rain is possible later today.",
             "rain_probability": 0.7,
@@ -53,7 +51,7 @@ def test_mock_vision_summary_tool_returns_deterministic_scene_summary():
         "summary": "Desk contains a laptop, headphones, and a water bottle.",
         "visible_items": ("laptop", "headphones", "water_bottle"),
     }
-    assert result.to_dict()["trace_id"] == "trace-tools"
+    assert result.to_dict()["task_id"] == "task-tools"
 
 
 def test_mock_checklist_tool_returns_stable_leaving_checklist():

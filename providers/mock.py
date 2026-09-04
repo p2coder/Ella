@@ -12,13 +12,13 @@ def _missing_input_result(
     *,
     provider_name: str,
     model_name: str,
-    trace_id: str | None,
+    task_id: str | None,
     input_name: str,
 ) -> ProviderResult:
     return ProviderResult(
         provider_name=provider_name,
         model_name=model_name,
-        trace_id=trace_id,
+        task_id=task_id,
         output=None,
         metadata={"mock": True},
         error=ProviderError(
@@ -39,13 +39,13 @@ class MockLLMProvider:
         self,
         prompt: str,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "text": f"Mock response for: {prompt}",
                 "summary": "deterministic mock llm output",
@@ -64,14 +64,14 @@ class MockSpeechProvider:
         self,
         audio: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         if audio is None:
             return _missing_input_result(
                 provider_name=self.provider_name,
                 model_name=self.model_name,
-                trace_id=trace_id,
+                task_id=task_id,
                 input_name="audio",
             )
 
@@ -79,7 +79,7 @@ class MockSpeechProvider:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "text": text,
                 "language": self.default_language,
@@ -99,20 +99,20 @@ class MockVisionProvider:
         self,
         image: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         if image is None:
             return _missing_input_result(
                 provider_name=self.provider_name,
                 model_name=self.model_name,
-                trace_id=trace_id,
+                task_id=task_id,
                 input_name="image",
             )
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "scene_summary": self.scene_summary,
                 "visible_items": self.visible_items,
@@ -131,14 +131,14 @@ class MockMultimodalProvider:
         self,
         inputs: dict[str, Any],
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         if not inputs:
             return ProviderResult(
                 provider_name=self.provider_name,
                 model_name=self.model_name,
-                trace_id=trace_id,
+                task_id=task_id,
                 output=None,
                 metadata={"mock": True},
                 error=ProviderError(
@@ -152,7 +152,7 @@ class MockMultimodalProvider:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "scene_summary": (
                     "Mock scene contains " + ", ".join(self.visible_items) + "."

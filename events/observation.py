@@ -8,7 +8,7 @@ from .stage import OBSERVATION_STAGE, EventStage
 
 @dataclass(frozen=True, slots=True)
 class Observation:
-    trace_id: str
+    task_id: str
     source: str
     payload: dict[str, Any]
     timestamp: datetime = field(default_factory=utc_now)
@@ -18,7 +18,7 @@ class Observation:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "source": self.source,
             "timestamp": serialize_timestamp(self.timestamp),
             "payload": self.payload,

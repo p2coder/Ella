@@ -44,11 +44,11 @@ class EventRuntime:
         self.environment_summary = environment_summary
 
     def publish(self, raw_signal: RawSignal) -> EventRuntimeResult:
-        self.timing_recorder.start_input(raw_signal.trace_id)
+        self.timing_recorder.start_input(raw_signal.task_id)
         stage_started = perf_counter()
         event = self.trigger_pipeline.run(raw_signal)
         self.timing_recorder.record_stage_duration(
-            raw_signal.trace_id,
+            raw_signal.task_id,
             "trigger_pipeline_duration_ms",
             stage_started,
         )
@@ -62,7 +62,7 @@ class EventRuntime:
             user_preference_summary=self.user_preference_summary,
             environment_summary=self.environment_summary,
         )
-        self.timing_recorder.record_input_to_task_submitted(event.trace_id)
+        self.timing_recorder.record_input_to_task_submitted(event.task_id)
         return EventRuntimeResult(
             event=event,
             submitted=True,

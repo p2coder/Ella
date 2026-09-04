@@ -5,7 +5,7 @@ def test_building_first_decision_prompt_returns_result():
     result = PromptEngine().build(
         PromptType.FIRST_DECISION,
         {
-            "trace_id": "trace-prompt",
+            "task_id": "task-prompt",
             "user_input": "Ella，我要出门了",
             "user_preference_summary": "Prefers concise reminders.",
             "environment_summary": "No visual context yet.",
@@ -22,7 +22,7 @@ def test_building_first_decision_prompt_returns_result():
     assert result.context_keys == (
         "environment_summary",
         "event_type",
-        "trace_id",
+        "task_id",
         "user_input",
         "user_preference_summary",
     )
