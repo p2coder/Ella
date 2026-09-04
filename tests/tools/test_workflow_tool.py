@@ -16,12 +16,14 @@ class FakeChildRunner:
 
     def __post_init__(self):
         self.calls = []
+        self.timeouts = []
         self.lock = Lock()
 
     def run(self, context, *, prompt, timeout_seconds, fork=False):
         started = monotonic()
         with self.lock:
             self.calls.append(("start", prompt, started, fork))
+            self.timeouts.append(timeout_seconds)
         if self.barrier is not None:
             self.barrier.wait(timeout=2)
         sleep(0.02)
@@ -80,6 +82,7 @@ def test_workflow_await_runs_children_in_sequence() -> None:
     assert all(item["status"] == "completed" for item in result["child_results"])
     assert all(item["called_at"] for item in result["child_results"])
     assert all(item["completed_at"] for item in result["child_results"])
+    assert runner.timeouts == [300, 300]
     events = {(kind, prompt): timestamp for kind, prompt, timestamp, _ in runner.calls}
     assert events[("end", "a")] <= events[("start", "b")]
 

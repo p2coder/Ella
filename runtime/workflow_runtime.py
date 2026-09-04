@@ -94,7 +94,7 @@ class WorkflowRuntime:
                         prompt = arguments.get("prompt")
                         if not isinstance(prompt, str) or not prompt.strip():
                             raise ValueError("workflow child prompt must be non-empty")
-                        timeout = float(arguments.get("timeout_seconds", 120))
+                        timeout = float(arguments.get("timeout_seconds", 300))
                         calls.append(
                             {
                                 "call_id": call_id,

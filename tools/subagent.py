@@ -12,6 +12,9 @@ from .base import (
 )
 
 
+DEFAULT_CHILD_TIMEOUT_SECONDS = 300
+
+
 def _definition(name: str, description: str) -> ToolDefinition:
     return ToolDefinition(
         name=name,
@@ -90,7 +93,9 @@ class SubagentTool:
         run = self.runner.run(
             context,
             prompt=str(values.get("prompt", "")),
-            timeout_seconds=float(values.get("timeout_seconds", 120)),
+            timeout_seconds=float(
+                values.get("timeout_seconds", DEFAULT_CHILD_TIMEOUT_SECONDS)
+            ),
         )
         return ToolResult(
             self.name, context.task_id, run.to_dict()
@@ -119,7 +124,9 @@ class SubagentForkTool:
         run = self.runner.run(
             context,
             prompt=str(values.get("prompt", "")),
-            timeout_seconds=float(values.get("timeout_seconds", 120)),
+            timeout_seconds=float(
+                values.get("timeout_seconds", DEFAULT_CHILD_TIMEOUT_SECONDS)
+            ),
             fork=True,
         )
         return ToolResult(
