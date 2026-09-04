@@ -121,19 +121,19 @@ class DeepSeekLLMProvider:
         self,
         prompt: str,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         if self.api_key is None:
             return self._error(
-                trace_id,
+                task_id,
                 "provider_unavailable",
                 "DeepSeek API key is missing",
                 {"missing": "DEEPSEEK_API_KEY"},
             )
         if self.client is None:
             return self._error(
-                trace_id,
+                task_id,
                 "provider_unavailable",
                 "DeepSeek client is not configured",
                 {"reason": "client_missing"},
@@ -151,10 +151,10 @@ class DeepSeekLLMProvider:
             content = self._content(response)
             usage = self._usage(response)
         except DeepSeekTransportError as error:
-            return self._error(trace_id, error.code, str(error), {})
+            return self._error(task_id, error.code, str(error), {})
         except Exception:
             return self._error(
-                trace_id,
+                task_id,
                 "transport_error",
                 "DeepSeek client transport failed",
                 {},
@@ -162,7 +162,7 @@ class DeepSeekLLMProvider:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={"text": content},
             metadata={
                 **dict(metadata or {}),
@@ -204,7 +204,7 @@ class DeepSeekLLMProvider:
 
     def _error(
         self,
-        trace_id: str | None,
+        task_id: str | None,
         code: str,
         message: str,
         metadata: dict[str, Any],
@@ -212,7 +212,7 @@ class DeepSeekLLMProvider:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_provider_requested": True},
             error=ProviderError(

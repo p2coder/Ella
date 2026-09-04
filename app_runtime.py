@@ -22,7 +22,6 @@ from memory import MemoryManager
 from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
-from runtime.plan_store import PlanStore
 from runtime.provider_usage import aggregate_provider_usage
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.task_queue import TaskQueue
@@ -35,11 +34,21 @@ from tasks.state import (
     TaskControlType,
 )
 from agent.subagent import SubAgent
+from agent.child_runner import ChildAgentRunner
+from runtime.workflow_runtime import WorkflowRuntime
 from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
 from skill import SkillLoader, SkillManager
 from tools import (
+    BashTool,
     DocumentWriteTool,
+    EditTextTool,
+    ReadTextTool,
+    RefreshTool,
+    SubagentTool,
+    SubagentForkTool,
+    WorkflowTool,
+    WriteTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
     MockWeatherTool,
@@ -50,12 +59,12 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
-from tools.plan import PlanWrittenTool
 from tools.ask_user_question import AskUserQuestionTool
 from tools.verification import (
     ArtifactExistsTool,
     DocumentReadTool,
     ToolObservationCheckTool,
+    VerificationTool,
 )
 from runtime.interactions import InteractionBroker
 
@@ -84,7 +93,7 @@ class AppRuntime:
         )
         skill_manager.refresh()
 
-        tool_manager = ToolManager()
+        tool_manager = ToolManager(settings.tool_result_ttl_overrides)
         screen_provider = device_factory.screen()
 
         # tool改成热插拔
@@ -108,10 +117,13 @@ class AppRuntime:
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
         tool_manager.register(DocumentWriteTool(settings.document_directory))
+        tool_manager.register(ReadTextTool(PROJECT_ROOT))
+        tool_manager.register(WriteTextTool(PROJECT_ROOT))
+        tool_manager.register(EditTextTool(PROJECT_ROOT))
+        tool_manager.register(BashTool(PROJECT_ROOT))
+        tool_manager.register(RefreshTool())
         tool_manager.register(ArtifactExistsTool(settings.document_directory))
         tool_manager.register(DocumentReadTool(settings.document_directory))
-        plan_store = PlanStore(settings.plan_directory)
-        tool_manager.register(PlanWrittenTool(plan_store))
         interaction_broker = InteractionBroker()
         tool_manager.register(AskUserQuestionTool(interaction_broker))
 
@@ -122,11 +134,16 @@ class AppRuntime:
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
+            context_window_tokens=settings.context_window_tokens,
+            context_compression_threshold=settings.context_compression_threshold,
         )
         verification_agent = VerificationAgent(
             prompt_engine=PromptEngine(),
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
+            trace_recorder=trace_recorder,
+            context_window_tokens=settings.context_window_tokens,
+            context_compression_threshold=settings.context_compression_threshold,
         )
         task_runtime = TaskRuntime(
             task_factory=TaskFactory(
@@ -141,15 +158,49 @@ class AppRuntime:
                 timing_recorder=timing_recorder,
             ),
             memory_manager=MemoryManager(memory_path or settings.memory_path),
-            verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
             task_store=TaskStore(settings.task_checkpoint_directory),
             task_queue=TaskQueue(),
         )
+        child_runner = ChildAgentRunner(
+            decision_agent=subagent,
+            executor=task_runtime.executor,
+            task_reader=task_runtime.get_task,
+            progress_recorder=task_runtime.record_child_progress,
+            trace_recorder=trace_recorder,
+            max_depth=settings.subagent_max_depth,
+            max_advances=settings.subagent_max_advances,
+            max_timeout_seconds=settings.subagent_max_timeout_seconds,
+        )
+        tool_manager.register(SubagentTool(child_runner))
+        tool_manager.register(SubagentForkTool(child_runner))
+        tool_manager.register(
+            WorkflowTool(
+                WorkflowRuntime(
+                    child_runner,
+                    task_runtime.get_task,
+                    trace_recorder=trace_recorder,
+                    progress_recorder=task_runtime.record_workflow_progress,
+                    max_script_bytes=settings.workflow_max_script_bytes,
+                    max_wall_seconds=settings.workflow_max_wall_seconds,
+                    max_parallel_children=settings.workflow_max_parallel_children,
+                    max_total_children=settings.workflow_max_total_children,
+                    memory_limit_bytes=settings.workflow_memory_limit_bytes,
+                    max_return_bytes=settings.workflow_max_return_bytes,
+                )
+            )
+        )
         tool_manager.register(
             ToolObservationCheckTool(
                 lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)
+            )
+        )
+        tool_manager.register(
+            VerificationTool(
+                task_runtime.get_task,
+                verification_agent,
+                tool_manager,
             )
         )
         interaction_broker.set_question_handler(
@@ -182,7 +233,7 @@ class AppRuntime:
     def submit_text(self, input_text: str):
         signal = CLITextSignalSource().create_signal(
             text=input_text,
-            trace_id=f"trace-app-{uuid4().hex}",
+            task_id=f"task-app-{uuid4().hex}",
         )
         result = self._event_runtime.publish(signal)
         if not result.submitted or result.task_handle is None:
@@ -211,6 +262,7 @@ class AppRuntime:
         return {
             "active_tasks": self.list_active_tasks(),
             "terminal_tasks": self.list_terminal_tasks(),
+            "recovery_errors": self._task_runtime.recovery_errors,
         }
 
     def subscribe_task_events(self, last_event_id: int | None = None):
@@ -274,7 +326,6 @@ class AppRuntime:
         )
         projection = {
             "task_id": task.task_id,
-            "trace_id": task.trace_id,
             "user_input_summary": _task_user_input(task),
             "state": task.state.value,
             "goal_state": None if task.goal_state is None else task.goal_state.value,
@@ -284,7 +335,6 @@ class AppRuntime:
                 else task.terminal_execution_state.value
             ),
             "execution_stage": _execution_stage(task),
-            "active_step_ids": task.active_step_ids,
             "pending_questions": tuple(
                 item.to_dict()
                 for item in self._task_runtime.pending_questions(task.task_id)
@@ -307,6 +357,20 @@ class AppRuntime:
             ),
             "final_response": None,
             "model_output": _current_model_output(task),
+            "workflow_execution": _public_value(
+                task.task_local_state.get("workflow_execution")
+            ),
+            "child_executions": _public_value(
+                task.task_local_state.get("child_executions", {})
+            ),
+            "tool_observations": tuple(
+                _public_value(observation) for observation in task.tool_trace
+            )
+            + tuple(
+                _public_value(failure.to_dict())
+                for step in (*task.step_history, task.current_step)
+                for failure in step.failures
+            ),
         }
         result = self._task_runtime.result_for(task.task_id)
         projection["timing"] = (
@@ -362,7 +426,7 @@ class AppRuntime:
         report_status("Listening...")
         source = self.microphone_source or MicrophoneSource.from_factories()
         source_result = source.capture_transcript(
-            trace_id=f"trace-web-microphone-{uuid4().hex}",
+            task_id=f"task-web-microphone-{uuid4().hex}",
         )
         signal = source_result.raw_signal
         if signal is None:
@@ -374,7 +438,7 @@ class AppRuntime:
         report_status("Transcription complete.")
         text_signal = CLITextSignalSource().create_signal(
             text=normalized,
-            trace_id=f"trace-web-microphone-text-{uuid4().hex}",
+            task_id=f"task-web-microphone-text-{uuid4().hex}",
         )
         result = self._event_runtime.publish(text_signal)
         if not result.submitted or result.task_handle is None:
@@ -471,7 +535,6 @@ def _build_display_snapshot(
         timing_summary=_timing_summary(task_result),
         task_id=task_result.handle.task_id,
         task_state=task_result.task.state.value,
-        active_step_ids=task_result.task.active_step_ids,
         paused_from_state=(
             ""
             if task_result.task.paused_from_state is None
@@ -507,7 +570,6 @@ def _timing_summary(task_result: TaskRuntimeResult) -> str:
     values = (
         ("input_to_task_submitted", snapshot.input_to_task_submitted_duration_ms),
         ("queue_wait", snapshot.queue_wait_duration_ms),
-        ("planning", snapshot.planning_duration_ms),
         ("runtime_execution", snapshot.total_execution_duration_ms),
         ("end_to_end", snapshot.end_to_end_duration_ms),
     )

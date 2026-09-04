@@ -22,12 +22,12 @@ def test_cli_text_source_creates_raw_signal_without_runtime_side_effects():
 
     signal = source.create_signal(
         text="Ella, I am heading out",
-        trace_id="trace-cli-001",
+        task_id="task-cli-001",
         timestamp=FIXED_TIME,
     )
 
     assert signal == RawSignal(
-        trace_id="trace-cli-001",
+        task_id="task-cli-001",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
@@ -48,7 +48,7 @@ def test_stage_registry_can_add_and_remove_stage_keys():
 
 def test_cli_text_stage_can_be_tested_independently():
     signal = RawSignal(
-        trace_id="trace-cli-002",
+        task_id="task-cli-002",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
@@ -58,7 +58,7 @@ def test_cli_text_stage_can_be_tested_independently():
     event = CliTextToStandardizedEventStage().process(signal)
 
     assert event == StandardizedEvent(
-        trace_id="trace-cli-002",
+        task_id="task-cli-002",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
@@ -75,7 +75,7 @@ def test_pipeline_runs_configured_stages_in_order():
 
         def process(self, item):
             return {
-                "trace_id": item.trace_id,
+                "task_id": item.task_id,
                 "source": item.source,
                 "timestamp": item.timestamp,
                 "payload": item.payload,
@@ -87,7 +87,7 @@ def test_pipeline_runs_configured_stages_in_order():
 
         def process(self, item):
             return StandardizedEvent(
-                trace_id=item["trace_id"],
+                task_id=item["task_id"],
                 source=item["source"],
                 timestamp=item["timestamp"],
                 payload=item["payload"] | {"candidate_seen": item["candidate_seen"]},
@@ -95,7 +95,7 @@ def test_pipeline_runs_configured_stages_in_order():
             )
 
     signal = RawSignal(
-        trace_id="trace-cli-003",
+        task_id="task-cli-003",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
@@ -120,7 +120,7 @@ def test_pipeline_runs_configured_stages_in_order():
 def test_mock_cli_text_input_can_convert_to_standardized_event():
     signal = CLITextSignalSource().create_signal(
         text="Ella, I am heading out",
-        trace_id="trace-cli-004",
+        task_id="task-cli-004",
         timestamp=FIXED_TIME,
     )
     pipeline = EventTriggerPipeline(stages=[CliTextToStandardizedEventStage()])

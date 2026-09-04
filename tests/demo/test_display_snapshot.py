@@ -55,7 +55,6 @@ def test_snapshot_serialization_is_deterministic():
         "timing_summary": "",
         "task_id": "",
         "task_state": "",
-        "active_step_ids": (),
         "paused_from_state": "",
         "terminal_outcome": "",
         "delivery_status": "",

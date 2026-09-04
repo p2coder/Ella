@@ -25,7 +25,7 @@ def test_mock_mode_never_imports_real_qwen_provider():
 
     factory = ProviderFactory(load_settings({"ELLA_USE_REAL_PROVIDERS": "false"}))
 
-    result = factory.llm().generate("hello", trace_id="trace-mock")
+    result = factory.llm().generate("hello", task_id="task-mock")
 
     assert result.succeeded is True
     assert "providers.qwen" not in sys.modules
@@ -36,7 +36,7 @@ def test_real_provider_mode_missing_api_key_returns_structured_unavailable_resul
 
     result = factory.multimodal().describe(
         {"text": "Ella，我要出门了"},
-        trace_id="trace-missing-key",
+        task_id="task-missing-key",
     )
 
     assert result.failed is True

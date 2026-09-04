@@ -10,8 +10,6 @@ def make_context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-frame",
-        trace_id="trace-frame",
-        handoff_goal="Inspect the current scene.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),
@@ -25,12 +23,12 @@ class SequenceCameraProvider:
         self.frames = list(frames)
         self.capture_count = 0
 
-    def capture_frame(self, *, trace_id=None, metadata=None):
+    def capture_frame(self, *, task_id=None, metadata=None):
         output = self.frames[self.capture_count]
         self.capture_count += 1
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=output,
         )
 
@@ -42,12 +40,12 @@ class SuccessfulMultimodalProvider:
     def __init__(self):
         self.frames = None
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         self.frames = inputs["frames"]
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "scene_summary": "Phone and keys are visible.",
                 "visible_items": ("phone", "keys"),
@@ -58,10 +56,10 @@ class SuccessfulMultimodalProvider:
 class FailingCameraProvider:
     device_name = "failing_camera"
 
-    def capture_frame(self, *, trace_id=None, metadata=None):
+    def capture_frame(self, *, task_id=None, metadata=None):
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=DeviceError(
                 device_name=self.device_name,
@@ -75,11 +73,11 @@ class FailingMultimodalProvider:
     provider_name = "failing_multimodal"
     model_name = "failing-model"
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=ProviderError(
                 provider_name=self.provider_name,

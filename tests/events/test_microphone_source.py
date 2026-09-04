@@ -11,12 +11,12 @@ def test_microphone_source_returns_speech_transcript_raw_signal():
         speech_provider=MockSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-mic")
+    result = source.capture_transcript(task_id="task-mic")
 
     assert result.submitted is False
     assert result.error is None
     assert isinstance(result.raw_signal, RawSignal)
-    assert result.raw_signal.trace_id == "trace-mic"
+    assert result.raw_signal.task_id == "task-mic"
     assert result.raw_signal.source == "speech_transcript"
     assert result.raw_signal.payload == {
         "type": "text",
@@ -30,7 +30,7 @@ def test_microphone_source_payload_has_text_type_and_transcript_text():
         speech_provider=MockSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-text")
+    result = source.capture_transcript(task_id="task-text")
 
     assert result.raw_signal is not None
     assert result.raw_signal.payload["type"] == "text"
@@ -43,7 +43,7 @@ def test_microphone_source_does_not_print_transcript(capsys):
         speech_provider=MockSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-print")
+    result = source.capture_transcript(task_id="task-print")
 
     assert result.raw_signal is not None
     assert result.raw_signal.payload["text"] == "quiet transcript"
@@ -57,7 +57,7 @@ def test_transcription_failure_returns_non_submitted_error_result():
         speech_provider=FailingSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-fail")
+    result = source.capture_transcript(task_id="task-fail")
 
     assert result.raw_signal is None
     assert result.submitted is False
@@ -70,7 +70,7 @@ def test_microphone_failure_returns_non_submitted_error_result():
         speech_provider=MockSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-mic-fail")
+    result = source.capture_transcript(task_id="task-mic-fail")
 
     assert result.raw_signal is None
     assert result.submitted is False
@@ -83,7 +83,7 @@ def test_source_does_not_create_task_session_or_call_task_runtime():
         speech_provider=MockSpeechProvider(),
     )
 
-    result = source.capture_transcript(trace_id="trace-boundary")
+    result = source.capture_transcript(task_id="task-boundary")
 
     assert result.raw_signal is not None
     assert result.submitted is False
@@ -94,7 +94,7 @@ def test_source_does_not_create_task_session_or_call_task_runtime():
 def test_default_source_uses_mock_microphone_without_real_device_access():
     source = MicrophoneSource()
 
-    result = source.capture_transcript(trace_id="trace-default")
+    result = source.capture_transcript(task_id="task-default")
 
     assert result.raw_signal is not None
     assert result.metadata == {
@@ -106,10 +106,10 @@ def test_default_source_uses_mock_microphone_without_real_device_access():
 class FailingMicrophoneProvider:
     device_name = "failing_microphone"
 
-    def capture(self, *, trace_id=None, metadata=None):
+    def capture(self, *, task_id=None, metadata=None):
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=DeviceError(
                 device_name=self.device_name,
@@ -123,11 +123,11 @@ class FailingSpeechProvider:
     provider_name = "failing_speech"
     model_name = "failing-speech"
 
-    def transcribe(self, audio, *, trace_id=None, metadata=None):
+    def transcribe(self, audio, *, task_id=None, metadata=None):
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=ProviderError(
                 provider_name=self.provider_name,

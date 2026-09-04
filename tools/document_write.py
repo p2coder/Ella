@@ -42,6 +42,7 @@ class DocumentWriteTool:
                 "result is required before claiming that the artifact exists."
             ),
             schema_version="1.0",
+            result_ttl_seconds=None,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -165,7 +166,7 @@ class DocumentWriteTool:
             "sha256": sha256(encoded_content).hexdigest(),
             "overwritten": existed,
         }
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
 
 def _validate_relative_path(value: object) -> PurePosixPath:

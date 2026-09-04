@@ -13,7 +13,7 @@ class CameraProvider(Protocol):
     def capture_frame(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         ...
@@ -143,7 +143,7 @@ class RealCameraProvider:
     def capture_frame(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         capture: CameraCapture | None = None
@@ -165,14 +165,14 @@ class RealCameraProvider:
                 )
             encoded = self.backend.encode_jpeg(frame)
         except Exception as error:
-            return self._error_result(error, trace_id, metadata)
+            return self._error_result(error, task_id, metadata)
         finally:
             if capture is not None:
                 capture.release()
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "image",
                 "bytes": encoded,
@@ -198,7 +198,7 @@ class RealCameraProvider:
     def _error_result(
         self,
         error: Exception,
-        trace_id: str | None,
+        task_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> DeviceResult:
         if isinstance(error, CameraBackendError):
@@ -220,7 +220,7 @@ class RealCameraProvider:
         }
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(
@@ -240,12 +240,12 @@ class MockCameraProvider:
     def capture_frame(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "image",
                 "frame": "mock-camera-frame",
@@ -265,7 +265,7 @@ class UnavailableCameraProvider:
     def capture_frame(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         error_metadata = {"device_kind": "camera"}
@@ -276,7 +276,7 @@ class UnavailableCameraProvider:
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(

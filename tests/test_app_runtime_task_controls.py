@@ -14,7 +14,7 @@ class FakeEventRuntime:
         self.published.append(signal)
         return SimpleNamespace(
             submitted=True,
-            task_handle=TaskHandle("task-1", signal.trace_id),
+            task_handle=TaskHandle("task-1"),
             reason="",
         )
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from config.config import MEMORY_PATH
@@ -19,11 +20,6 @@ class MemoryManagementRequest:
     @property
     def task_id(self) -> str:
         return self.completion.context.task_id
-
-    @property
-    def trace_id(self) -> str:
-        return self.completion.context.trace_id
-
 
 @dataclass(frozen=True, slots=True)
 class MemoryWriteResult:
@@ -68,11 +64,29 @@ class MemoryManager:
             if isinstance(user_input, str) and user_input
             else ""
         )
+        observation_records = "".join(
+            "- tool_observation: "
+            + json.dumps(
+                {
+                    "tool_name": result.tool_name,
+                    "tool_use_id": result.tool_use_id,
+                    "completed_at": result.completed_at,
+                    "result_ttl_seconds": result.result_ttl_seconds,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+            for result in completion.tool_results
+            if result.completed_at is not None
+        )
         return (
             f"## Task {request.task_id}\n"
-            f"- trace_id: {request.trace_id}\n"
+            f"- task_id: {request.task_id}\n"
             f"{user_input_record}"
             f"- summary: {completion.summary}\n"
             f"- final_response: {final_response}\n"
+            f"{observation_records}"
             "\n"
         )

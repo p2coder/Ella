@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 
 from agent.context import AgentExecutionContext
 
@@ -20,8 +21,12 @@ class CapabilityUnavailableError(RuntimeError):
 
 @dataclass(slots=True)
 class ToolManager:
+    result_ttl_overrides: Mapping[str, float | None] = field(default_factory=dict)
     _tools: dict[str, Tool] = field(default_factory=dict, init=False, repr=False)
     version: int = 0
+
+    def __post_init__(self) -> None:
+        self.result_ttl_overrides = dict(self.result_ttl_overrides)
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -38,6 +43,18 @@ class ToolManager:
     def get_tool(self, tool_name: str) -> Tool | None:
         return self._tools.get(tool_name)
 
+    def get_definition(self, tool_name: str) -> ToolDefinition | None:
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            return None
+        definition = tool.definition
+        if tool_name not in self.result_ttl_overrides:
+            return definition
+        return replace(
+            definition,
+            result_ttl_seconds=self.result_ttl_overrides[tool_name],
+        )
+
     def resolve_execution_metadata(
         self,
         tool_name: str,
@@ -47,7 +64,8 @@ class ToolManager:
         tool = self._tools.get(tool_name)
         if tool is None:
             raise CapabilityUnavailableError(tool_name, "not registered")
-        definition = tool.definition
+        definition = self.get_definition(tool_name)
+        assert definition is not None
         if definition.version != tool_version:
             raise CapabilityUnavailableError(
                 tool_name,
@@ -89,7 +107,7 @@ class ToolManager:
         self, context: AgentExecutionContext
     ) -> tuple[ToolDefinition, ...]:
         return tuple(
-            tool.definition
+            self.get_definition(name)
             for name, tool in tuple(self._tools.items())
             if name in context.capability_scope.allowed_tools
             and context.agent_role in tool.allowed_roles

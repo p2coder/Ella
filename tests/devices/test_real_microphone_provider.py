@@ -49,7 +49,7 @@ def test_real_microphone_records_bounded_pcm_and_releases_backend():
     )
 
     result = provider.capture(
-        trace_id="trace-mic",
+        task_id="task-mic",
         metadata={"purpose": "transcription"},
     )
 
@@ -125,11 +125,11 @@ def test_real_microphone_maps_failures_and_always_releases(
     backend = FakeBackend(error=error)
     provider = RealMicrophoneProvider(backend=backend)
 
-    result = provider.capture(trace_id="trace-error")
+    result = provider.capture(task_id="task-error")
 
     assert result.failed
     assert result.error.code == expected_code
-    assert result.trace_id == "trace-error"
+    assert result.task_id == "task-error"
     assert backend.release_calls == 1
 
 

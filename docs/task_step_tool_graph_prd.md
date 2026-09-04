@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本文档已被 `docs/runtime_tools_workflow_prd.md` 取代，仅保留为历史记录；其中的旧 DAG、route、presence、handoff 与多标识设计不再是现役契约。
+
 # Ella Task / Step / Tool 图执行与分层状态 PRD
 
 ## 1. 文档信息

@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "ok": true,
+  "superseded": true,
+  "replacedBy": "docs/runtime_tools_workflow_prd.md",
   "command": "visual-check",
   "status": "pass",
   "visualReview": "pending",

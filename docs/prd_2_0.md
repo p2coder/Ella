@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本文档已被 `docs/runtime_tools_workflow_prd.md` 取代，仅保留为历史记录；其中的旧 DAG、route、presence、handoff 与多标识设计不再是现役契约。
+
 # Ella Runtime PRD 2.0：真实感知与真实模型接入
 
 ## 1. 产品概要

@@ -2,6 +2,7 @@ from providers.base import ProviderResult
 from runtime.provider_usage import (
     aggregate_provider_usage,
     merge_provider_usage_calls,
+    nested_provider_usage_calls,
     record_provider_usage,
 )
 
@@ -15,7 +16,7 @@ def _result(usage):
     return ProviderResult(
         "test-provider",
         "test-model",
-        "trace-usage",
+        "task-usage",
         {"text": "ok"},
         metadata={"usage": usage},
     )
@@ -194,3 +195,30 @@ def test_empty_child_call_ledger_does_not_replace_existing_usage():
 
     assert state["provider_usage_calls"] == [{"boundary": "first_decision"}]
     assert state["provider_usage"] == {"prompt_tokens": 10}
+
+
+def test_workflow_child_call_ledgers_are_extracted_in_declaration_order():
+    calls = nested_provider_usage_calls(
+        "workflow",
+        {
+            "child_results": [
+                {
+                    "result": {
+                        "provider_usage_calls": [
+                            {"boundary": "child-a", "prompt_tokens": 10}
+                        ]
+                    }
+                },
+                {"status": "failed", "result": None},
+                {
+                    "result": {
+                        "provider_usage_calls": [
+                            {"boundary": "child-b", "prompt_tokens": 20}
+                        ]
+                    }
+                },
+            ]
+        },
+    )
+
+    assert [call["boundary"] for call in calls] == ["child-a", "child-b"]

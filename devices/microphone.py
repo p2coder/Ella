@@ -22,7 +22,7 @@ class DeviceError:
 @dataclass(frozen=True, slots=True)
 class DeviceResult:
     device_name: str
-    trace_id: str | None
+    task_id: str | None
     output: Any
     metadata: dict[str, Any] = field(default_factory=dict)
     error: DeviceError | None = None
@@ -38,7 +38,7 @@ class DeviceResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "device_name": self.device_name,
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "output": self.output,
             "metadata": self.metadata,
             "error": None if self.error is None else self.error.to_dict(),
@@ -52,7 +52,7 @@ class MicrophoneProvider(Protocol):
     def capture(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         ...
@@ -191,7 +191,7 @@ class RealMicrophoneProvider:
     def capture(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         try:
@@ -203,13 +203,13 @@ class RealMicrophoneProvider:
                 timeout_seconds=float(self.duration_seconds + 5),
             )
         except Exception as error:
-            return self._error_result(error, trace_id, metadata)
+            return self._error_result(error, task_id, metadata)
         finally:
             self.backend.release()
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "audio",
                 "bytes": audio_bytes,
@@ -239,7 +239,7 @@ class RealMicrophoneProvider:
     def _error_result(
         self,
         error: Exception,
-        trace_id: str | None,
+        task_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> DeviceResult:
         if isinstance(error, MicrophoneBackendError):
@@ -257,7 +257,7 @@ class RealMicrophoneProvider:
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(
@@ -280,12 +280,12 @@ class MockMicrophoneProvider:
     def capture(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "type": "audio",
                 "transcript": self.transcript,
@@ -304,7 +304,7 @@ class UnavailableMicrophoneProvider:
     def capture(
         self,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> DeviceResult:
         error_metadata = {"device_kind": "microphone"}
@@ -315,7 +315,7 @@ class UnavailableMicrophoneProvider:
 
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_device_requested": True, **dict(metadata or {})},
             error=DeviceError(

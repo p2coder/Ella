@@ -199,8 +199,6 @@ class DashScopeOpenAITransport:
             "scene_summary and visible_items. Do not infer task-specific "
             "checklist fields unless they are directly visible scene facts."
         )
-        if input_payload.get("handoff_goal"):
-            prompt += f" Task goal: {input_payload['handoff_goal']}"
 
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt}
@@ -279,7 +277,7 @@ class _QwenProviderBase:
         self,
         input_payload: dict[str, Any],
         *,
-        trace_id: str | None,
+        task_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> ProviderResult:
         result_metadata = {
@@ -288,14 +286,14 @@ class _QwenProviderBase:
         }
         if self.api_key is None:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen API key is missing",
                 code="provider_unavailable",
                 metadata={"missing": "ELLA_QWEN_API_KEY"},
             )
         if self.client is None:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen client is not configured",
                 code="provider_unavailable",
                 metadata={"reason": "client_missing"},
@@ -319,14 +317,14 @@ class _QwenProviderBase:
             if error.status_code is not None:
                 error_metadata["status_code"] = error.status_code
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message=str(error),
                 code=error.code,
                 metadata=error_metadata,
             )
         except Exception:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen client transport failed",
                 code="transport_error",
                 metadata={},
@@ -335,7 +333,7 @@ class _QwenProviderBase:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=output,
             metadata=result_metadata,
         )
@@ -389,7 +387,7 @@ class _QwenProviderBase:
     def _error_result(
         self,
         *,
-        trace_id: str | None,
+        task_id: str | None,
         message: str,
         code: str,
         metadata: dict[str, Any],
@@ -397,7 +395,7 @@ class _QwenProviderBase:
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             metadata={"real_provider_requested": True},
             error=ProviderError(
@@ -519,12 +517,12 @@ class QwenLLMProvider(_QwenProviderBase):
         self,
         prompt: str,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         return self._call(
             {"prompt": prompt},
-            trace_id=trace_id,
+            task_id=task_id,
             metadata=metadata,
         )
 
@@ -533,7 +531,7 @@ class QwenLLMProvider(_QwenProviderBase):
         prompt: str,
         *,
         tool_definitions: tuple[Any, ...],
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         qwen_tools = qwen_tools_from_definitions(tool_definitions)
@@ -549,7 +547,7 @@ class QwenLLMProvider(_QwenProviderBase):
                 "tools": qwen_tools,
             },
             known_tool_names=known_tool_names,
-            trace_id=trace_id,
+            task_id=task_id,
             metadata=metadata,
         )
 
@@ -558,7 +556,7 @@ class QwenLLMProvider(_QwenProviderBase):
         input_payload: dict[str, Any],
         *,
         known_tool_names: tuple[str, ...],
-        trace_id: str | None,
+        task_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> ProviderResult:
         result_metadata = {
@@ -568,14 +566,14 @@ class QwenLLMProvider(_QwenProviderBase):
         }
         if self.api_key is None:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen API key is missing",
                 code="provider_unavailable",
                 metadata={"missing": "ELLA_QWEN_API_KEY"},
             )
         if self.client is None:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen client is not configured",
                 code="provider_unavailable",
                 metadata={"reason": "client_missing"},
@@ -603,14 +601,14 @@ class QwenLLMProvider(_QwenProviderBase):
             if error.status_code is not None:
                 error_metadata["status_code"] = error.status_code
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message=str(error),
                 code=error.code,
                 metadata=error_metadata,
             )
         except Exception:
             return self._error_result(
-                trace_id=trace_id,
+                task_id=task_id,
                 message="Qwen client transport failed",
                 code="transport_error",
                 metadata={},
@@ -619,7 +617,7 @@ class QwenLLMProvider(_QwenProviderBase):
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=output,
             metadata=result_metadata,
         )
@@ -639,12 +637,12 @@ class QwenSpeechProvider(_QwenProviderBase):
         self,
         audio: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         return self._call(
             {"audio": audio},
-            trace_id=trace_id,
+            task_id=task_id,
             metadata=metadata,
         )
 
@@ -690,12 +688,12 @@ class QwenMultimodalProvider(_QwenProviderBase):
         self,
         inputs: dict[str, Any],
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         return self._call(
             inputs,
-            trace_id=trace_id,
+            task_id=task_id,
             metadata=metadata,
         )
 

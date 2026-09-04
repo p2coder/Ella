@@ -1,6 +1,6 @@
 # Ella Agent Runtime
 
-Ella 是一个面向长期运行、本地交互和可恢复任务执行的 Agent Runtime。它将用户输入转换为异步任务，由 Runtime 负责排队、推理、工具调用、验证、持久化和结果交付；Web UI 只负责提交任务、展示状态以及发送暂停、恢复和取消命令。
+Ella 是一个面向长期运行、本地交互和可恢复任务执行的 Agent Runtime。它将用户输入转换为异步任务，由 Runtime 负责排队、推理、工具调用、持久化和结果交付；Web UI 只负责提交任务、展示状态以及发送暂停、恢复和 kill 命令。
 
 当前仓库重点验证的不是单一聊天功能，而是一套可观察、可控制、可恢复的 Agent 执行骨架。
 
@@ -9,12 +9,13 @@ Ella 是一个面向长期运行、本地交互和可恢复任务执行的 Agent
 - 文本和有界麦克风输入，经事件管线进入任务队列。
 - 统一的 First Decision：识别意图，并直接选择 `CALL_TOOL` 或 `SUBMIT_RESULT`。
 - 自描述 Tool、任务级能力范围、Schema 校验和结构化失败处理。
-- 摄像头、屏幕理解、网页检索、网页读取、文档读写和用户追问等工具。
-- `plan_written` 内部能力与 TaskGraph wave 执行，用于复杂任务规划。
-- 独立的任务执行状态与目标达成状态，以及提交结果后的 Verification。
-- 后台 TaskRuntime worker，支持任务排队、暂停、恢复、取消和安全点 checkpoint。
+- `read`、`write`、`edit`、`bash`、`verification`、`refresh`、`workflow`、`subagent` 和 `subagent_fork` 等统一 Tool。
+- `workflow` 在 QuickJS 隔离环境中用 `await` 与 `Promise.all` 编排子 Agent。
+- Tool observation 统一记录 `tool_use_id`、调用/完成时间和结果 TTL；模型可显式调用 `refresh` 重放来源 Tool use。
+- 独立的任务执行状态与目标达成状态，以及 Agent 显式选择的 `verification` Tool。
+- 后台 TaskRuntime worker，支持任务排队、暂停、恢复、kill 和安全点 checkpoint。
 - 本地 JSONL trace、阶段耗时、任务 checkpoint、Memory 和生成文档持久化。
-- 本地 Web UI，展示任务队列、终态任务、视觉结果、工具过程、Prompt 和耗时。
+- 本地 Web UI，展示任务队列、终态任务、视觉结果、工具时间线和耗时。
 - Qwen 与 DeepSeek 文本模型；Qwen 多模态与语音能力；默认能力可切换为 Mock。
 
 ## 执行链路
@@ -29,19 +30,19 @@ User input
   -> TaskRuntime worker
   -> First Decision / Reasoning
        -> CALL_TOOL -> CapabilityExecutor -> ToolResult -> next Reasoning
-       -> SUBMIT_RESULT -> Verification
+       -> SUBMIT_RESULT
   -> Task terminal state
   -> Web UI delivery
 ```
 
 职责边界：
 
-- `EventRuntime`：标准化输入、路由事件并创建任务。
+- `EventRuntime`：标准化输入并直接创建任务。
 - `TaskRuntime`：任务队列、worker、状态机、执行循环、checkpoint 和交付。
 - `SubAgent`：每轮生成一个结构化动作，不直接执行工具。
 - `PromptEngine`：只接收结构化上下文并生成实际传给 LLM 的字符串。
 - `ToolManager`：注册和发现工具；`CapabilityExecutor` 负责校验并执行单次调用。
-- `VerificationAgent`：在提交结果后判断目标达成情况和回答是否可交付。
+- `VerificationAgent`：只在 Agent 显式调用 `verification` Tool 时评估候选结果。
 - `MemoryManager`：统一持久化和读取当前简化版记忆。
 
 ## 环境要求
@@ -59,7 +60,7 @@ cd /path/to/Ella
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install "openai>=1.0,<2" "opencv-python>=4.12,<5" "sounddevice>=0.5,<1" pytest
+python -m pip install -r requirement.txt
 ```
 
 Windows PowerShell：
@@ -69,7 +70,7 @@ cd C:\path\to\Ella
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install "openai>=1.0,<2" "opencv-python>=4.12,<5" "sounddevice>=0.5,<1" pytest
+python -m pip install -r requirement.txt
 ```
 
 本仓库当前采用 flat-layout 多包结构，不需要先将 Ella 打包或执行 `pip install -e .`。直接在仓库根目录运行即可。
@@ -167,8 +168,8 @@ Web UI 当前支持：
 
 - 提交文本任务和有界麦克风输入。
 - 查看活动任务与已终止任务。
-- 查看任务状态、执行过程、视觉摘要、Prompt、最终回答和耗时。
-- 对活动任务发送暂停、恢复和取消命令。
+- 查看任务状态、执行过程、视觉摘要、Tool 时间线、最终回答和耗时。
+- 对活动任务发送暂停、恢复和 kill 命令。
 - 通过服务端事件流接收任务状态和完成结果。
 
 任务提交后默认进入队列并由 TaskRuntime worker 执行，前端不会调用 `run_until_complete()` 驱动任务。
@@ -182,12 +183,11 @@ Web UI 当前支持：
 | Memory | `memory/memory.md` |
 | Trace | `trace/` |
 | Task checkpoint | `output/tasks/` |
-| Plan | `output/plans/` |
 | 页面显示文件 | `output/display/` |
 | 文档工具输出 | `output/documents/` |
 | 调试原始媒体 | `output/raw_media/` |
 
-`DEBUG_STORE_RAW_MEDIA` 默认应保持关闭；只有本地调试确有需要时再启用。API Key 不会写入 Memory、Trace 或 Prompt 展示数据。
+`DEBUG_STORE_RAW_MEDIA` 默认应保持关闭；只有本地调试确有需要时再启用。API Key 不会写入 Memory、Trace 或公开任务投影。
 
 ## 测试
 
@@ -217,7 +217,7 @@ prompts/     Prompt Engine 与模板
 providers/   Mock、Qwen、DeepSeek、语音和多模态 Provider
 runtime/     EventRuntime、TaskRuntime、执行、trace 和 checkpoint
 skill/       Skill 定义、加载与注册
-tasks/       Task、TaskGraph、状态和计划数据契约
+tasks/       Task、状态和单步推理执行数据契约
 tools/       ToolDefinition、ToolManager 与具体工具
 demo/        本地 Web UI 和展示适配
 tests/       单元、集成与契约测试
@@ -225,14 +225,15 @@ tests/       单元、集成与契约测试
 
 ## 设计文档
 
-- [`docs/design_overview.md`](docs/design_overview.md)：**综合设计文档**，架构演进主线、设计原理、文档地图与当前边界，是当前架构的单一入口。
+- [`docs/runtime_tools_workflow_prd.md`](docs/runtime_tools_workflow_prd.md)：当前工具、Workflow、Subagent、checkpoint 与唯一任务标识契约，是现役架构入口。
+- [`docs/design_overview.md`](docs/design_overview.md)：旧架构综合说明，仅保留为历史记录。
 - [`docs/prompt_prd.md`](docs/prompt_prd.md)：Prompt Engine 设计（最新演进见 `prompt_structure_improve_prd.md`）。
-- [`docs/task_runtime_worker_prd.md`](docs/task_runtime_worker_prd.md)：后台任务执行模型。
-- [`docs/task_step_tool_graph_prd.md`](docs/task_step_tool_graph_prd.md)：Task、Step 与 Tool 图结构。
+- [`docs/task_runtime_worker_prd.md`](docs/task_runtime_worker_prd.md)：旧后台任务执行模型（历史）。
+- [`docs/task_step_tool_graph_prd.md`](docs/task_step_tool_graph_prd.md)：旧图执行结构（历史）。
 - [`docs/tool_failure_prd.md`](docs/tool_failure_prd.md)：Tool 失败分类与重试语义。
 - [`docs/dual_state_task_verification_prd.md`](docs/dual_state_task_verification_prd.md)：双状态与 Verification。
 
-> 注：`docs/` 下部分早期文档（`prd.md`、`architecture.md`、`prd_2_1.md`、`prd3.md` 等）已标记「已过期」，仅作历史记录。完整文档地图见 `docs/design_overview.md`。
+> 注：包含旧架构术语的早期文档均已标记为 superseded，仅作历史记录。
 
 ## 当前限制
 

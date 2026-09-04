@@ -28,6 +28,7 @@ class MockWeatherTool:
                 "or external API-backed weather decisions."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -62,7 +63,6 @@ class MockWeatherTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "summary": "Light rain is possible later today.",
                 "rain_probability": 0.7,
@@ -85,6 +85,7 @@ class MockVisionSummaryTool:
                 "capture or real visual understanding."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),
@@ -112,7 +113,6 @@ class MockVisionSummaryTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "summary": "Desk contains a laptop, headphones, and a water bottle.",
                 "visible_items": ("laptop", "headphones", "water_bottle"),
@@ -135,6 +135,7 @@ class MockChecklistTool:
                 "externally verified packing list."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),
@@ -161,7 +162,6 @@ class MockChecklistTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "items": ("phone", "keys", "wallet", "umbrella"),
             },

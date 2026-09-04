@@ -1,0 +1,419 @@
+from dataclasses import dataclass, field, replace
+from copy import deepcopy
+from datetime import datetime, timezone
+from time import monotonic, sleep
+from typing import Any, Callable
+from uuid import uuid4
+
+from agent.context import AgentExecutionContext
+from agent.decision import SUBMIT_RESULT
+from runtime.provider_usage import (
+    aggregate_provider_usage,
+    merge_provider_usage_calls,
+    nested_provider_usage_calls,
+)
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
+from tasks.task import Task, TaskState
+
+
+@dataclass(frozen=True, slots=True)
+class ChildAgentRun:
+    child_agent_id: str
+    status: str
+    final_response: str | None
+    observations: tuple[dict[str, Any], ...]
+    error: str | None
+    provider_usage: dict[str, object] | None
+    completed_at: str
+    mode: str
+    depth: int
+    parent_agent_id: str
+    capability_scope: dict[str, Any]
+    started_at: str
+    provider_usage_calls: tuple[dict[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "child_agent_id": self.child_agent_id,
+            "status": self.status,
+            "final_response": self.final_response,
+            "observations": self.observations,
+            "error": self.error,
+            "provider_usage": self.provider_usage,
+            "completed_at": self.completed_at,
+            "mode": self.mode,
+            "depth": self.depth,
+            "parent_agent_id": self.parent_agent_id,
+            "capability_scope": self.capability_scope,
+            "started_at": self.started_at,
+            "provider_usage_calls": self.provider_usage_calls,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ChildAgentRunner:
+    decision_agent: Any
+    executor: Any
+    task_reader: Callable[[str], Task]
+    progress_recorder: Callable[[str, dict[str, Any]], None] | None = field(
+        default=None, repr=False, compare=False
+    )
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
+    )
+    child_agent_id_factory: Callable[[], str] = field(
+        default=lambda: f"agent-{uuid4().hex}", repr=False, compare=False
+    )
+    max_depth: int = 4
+    max_advances: int = 50
+    max_timeout_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.max_depth <= 4:
+            raise ValueError("max_depth must be in [1, 4]")
+        if not 1 <= self.max_advances <= 50:
+            raise ValueError("max_advances must be in [1, 50]")
+        if not 0 < self.max_timeout_seconds <= 300:
+            raise ValueError("max_timeout_seconds must be in (0, 300]")
+
+    def run(
+        self,
+        parent_context: AgentExecutionContext,
+        *,
+        prompt: str,
+        timeout_seconds: float,
+        fork: bool = False,
+    ) -> ChildAgentRun:
+        if parent_context.agent_depth >= self.max_depth:
+            raise ValueError("subagent depth limit exceeded")
+        if not prompt.strip():
+            raise ValueError("prompt must be a non-empty string")
+        if timeout_seconds <= 0 or timeout_seconds > self.max_timeout_seconds:
+            raise ValueError(
+                f"timeout_seconds must be in (0, {self.max_timeout_seconds:g}]"
+            )
+
+        child_id = self.child_agent_id_factory()
+        context = replace(
+            parent_context,
+            agent_id=child_id,
+            parent_agent_id=parent_context.agent_id,
+            agent_depth=parent_context.agent_depth + 1,
+        )
+        local = self._initial_task(parent_context, prompt, fork=fork)
+        inherited_observation_count = len(local.tool_trace)
+        local.execution_context = context
+        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        child_state: dict[str, Any] = {
+            "child_agent_id": child_id,
+            "parent_agent_id": parent_context.agent_id,
+            "mode": "fork" if fork else "clean",
+            "depth": parent_context.agent_depth + 1,
+            "capability_scope": parent_context.capability_scope.to_dict(),
+            "started_at": started_at,
+            "completed_at": None,
+            "status": "running",
+            "in_flight_action": None,
+            "observations": (),
+            "failures": (),
+        }
+        self._checkpoint(parent_context.task_id, child_state)
+        self._trace(
+            parent_context.task_id,
+            child_id,
+            "started",
+            {
+                "parent_agent_id": parent_context.agent_id,
+                "mode": child_state["mode"],
+                "depth": child_state["depth"],
+            },
+        )
+        started = monotonic()
+        try:
+            first = self.decision_agent.decide_first_action(context, local)
+            local.intent = first.intent
+            local.first_decision_completed = True
+            decision = first.action
+            for advance in range(self.max_advances):
+                control_error = self._control_error(
+                    parent_context.task_id, started, timeout_seconds
+                )
+                if control_error is not None:
+                    status, error = control_error
+                    return self._result(
+                        local,
+                        child_id,
+                        status,
+                        None,
+                        error,
+                        inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
+                    )
+                if advance:
+                    decision = self.decision_agent.decide_next_action(context, local)
+                if decision.action == SUBMIT_RESULT:
+                    return self._result(
+                        local,
+                        child_id,
+                        "completed",
+                        decision.final_response_draft,
+                        None,
+                        inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
+                    )
+                local.state = TaskState.TOOL_EXECUTION
+                def persist_dispatch(record, called_at, result_ttl_seconds) -> None:
+                    child_state["in_flight_action"] = {
+                        "tool_use_id": record.tool_use_id,
+                        "tool_name": record.tool_name,
+                        "arguments": dict(record.arguments),
+                        "called_at": called_at,
+                        "result_ttl_seconds": result_ttl_seconds,
+                        "dispatch_state": "dispatched",
+                    }
+                    local.task_local_state["_child_in_flight_action"] = deepcopy(
+                        child_state["in_flight_action"]
+                    )
+                    self._checkpoint(parent_context.task_id, child_state)
+                    self._trace(
+                        parent_context.task_id,
+                        child_id,
+                        "tool_dispatched",
+                        child_state["in_flight_action"],
+                    )
+
+                execution = self.executor.execute(
+                    decision,
+                    context,
+                    local,
+                    on_dispatch=persist_dispatch,
+                )
+                local.state = TaskState.REASONING
+                self._trace(
+                    parent_context.task_id,
+                    child_id,
+                    "tool_completed",
+                    {
+                        "tool_name": decision.tool_name,
+                        "status": (
+                            "uncertain"
+                            if execution.uncertain
+                            else "failed"
+                            if execution.failure is not None
+                            else "completed"
+                        ),
+                    },
+                )
+                if execution.uncertain:
+                    error = (
+                        "uncertain child tool outcome"
+                        if execution.failure is None
+                        else execution.failure.message
+                    )
+                    return self._result(
+                        local,
+                        child_id,
+                        "uncertain",
+                        None,
+                        error,
+                        inherited_observation_count,
+                        parent_context,
+                        fork,
+                        started_at,
+                    )
+                if execution.failure is not None:
+                    local.current_step = replace(
+                        local.current_step,
+                        failures=(*local.current_step.failures, execution.failure),
+                    )
+                    child_state["in_flight_action"] = None
+                    local.task_local_state.pop("_child_in_flight_action", None)
+                    child_state["failures"] = tuple(
+                        failure.to_dict() for failure in local.current_step.failures
+                    )
+                    self._checkpoint(parent_context.task_id, child_state)
+                    continue
+                merge_provider_usage_calls(
+                    local.task_local_state,
+                    nested_provider_usage_calls(
+                        execution.tool_result.tool_name,
+                        execution.tool_result.payload,
+                    ),
+                )
+                observation = execution.tool_result.to_dict()
+                observation["observation_id"] = (
+                    f"{local.task_id}:{child_id}:observation:"
+                    f"{len(local.tool_trace) + 1}"
+                )
+                local.tool_trace += (observation,)
+                child_state["in_flight_action"] = None
+                local.task_local_state.pop("_child_in_flight_action", None)
+                child_state["observations"] = tuple(
+                    local.tool_trace[inherited_observation_count:]
+                )
+                self._checkpoint(parent_context.task_id, child_state)
+            return self._result(
+                local,
+                child_id,
+                "failed",
+                None,
+                "child advance budget exhausted",
+                inherited_observation_count,
+                parent_context,
+                fork,
+                started_at,
+            )
+        except Exception as error:
+            return self._result(
+                local,
+                child_id,
+                "failed",
+                None,
+                str(error),
+                inherited_observation_count,
+                parent_context,
+                fork,
+                started_at,
+            )
+
+    def _initial_task(
+        self,
+        parent_context: AgentExecutionContext,
+        prompt: str,
+        *,
+        fork: bool,
+    ) -> Task:
+        if not fork:
+            return Task(
+                task_id=parent_context.task_id,
+                state=TaskState.REASONING,
+                task_local_state={"latest_user_input": prompt},
+            )
+        parent = self.task_reader(parent_context.task_id)
+        inherited_context = {
+            "intent": None if parent.intent is None else parent.intent.to_dict(),
+            "original_input": parent.task_local_state.get("latest_user_input"),
+            "message_history": deepcopy(parent.message_history),
+            "observations": deepcopy(parent.tool_trace),
+            "current_step": {
+                "step_number": parent.current_step.step_number,
+                "retry_index": parent.current_step.retry_index,
+                "active_tool_name": parent.current_step.active_tool_name,
+                "blacklisted_tools": parent.current_step.blacklisted_tools,
+                "failures": tuple(
+                    failure.to_dict() for failure in parent.current_step.failures
+                ),
+            },
+            "task_local_state": deepcopy(parent.task_local_state),
+        }
+        return Task(
+            task_id=parent_context.task_id,
+            state=TaskState.REASONING,
+            intent=deepcopy(parent.intent),
+            first_decision_completed=False,
+            task_local_state={
+                "latest_user_input": prompt,
+                "inherited_context": inherited_context,
+            },
+            message_history=deepcopy(parent.message_history),
+            tool_trace=deepcopy(parent.tool_trace),
+            current_step=deepcopy(parent.current_step),
+        )
+
+    def _control_error(
+        self, task_id: str, started: float, timeout_seconds: float
+    ) -> tuple[str, str] | None:
+        if monotonic() - started >= timeout_seconds:
+            return "timed_out", "child execution timed out"
+        task = self.task_reader(task_id)
+        while task.state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
+            if monotonic() - started >= timeout_seconds:
+                return "timed_out", "child execution timed out while paused"
+            sleep(0.01)
+            task = self.task_reader(task_id)
+        if task.state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
+            return "failed", "parent task was killed"
+        return None
+
+    def _result(
+        self,
+        task: Task,
+        child_agent_id: str,
+        status: str,
+        final_response: str | None,
+        error: str | None,
+        inherited_observation_count: int,
+        parent_context: AgentExecutionContext,
+        fork: bool,
+        started_at: str,
+    ) -> ChildAgentRun:
+        calls = task.task_local_state.get("provider_usage_calls", ())
+        result = ChildAgentRun(
+            child_agent_id=child_agent_id,
+            status=status,
+            final_response=final_response,
+            observations=tuple(task.tool_trace[inherited_observation_count:]),
+            error=error,
+            provider_usage=aggregate_provider_usage(calls),
+            completed_at=datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
+            mode="fork" if fork else "clean",
+            depth=parent_context.agent_depth + 1,
+            parent_agent_id=parent_context.agent_id,
+            capability_scope=parent_context.capability_scope.to_dict(),
+            started_at=started_at,
+            provider_usage_calls=tuple(
+                dict(call) for call in calls if isinstance(call, dict)
+            ),
+        )
+        self._checkpoint(
+            parent_context.task_id,
+            {
+                "child_agent_id": child_agent_id,
+                "parent_agent_id": parent_context.agent_id,
+                "mode": result.mode,
+                "depth": result.depth,
+                "capability_scope": result.capability_scope,
+                "started_at": started_at,
+                "completed_at": result.completed_at,
+                "status": result.status,
+                "in_flight_action": deepcopy(
+                    task.task_local_state.get("_child_in_flight_action")
+                ),
+                "observations": result.observations,
+                "failures": tuple(
+                    failure.to_dict() for failure in task.current_step.failures
+                ),
+                "error": result.error,
+            },
+        )
+        self._trace(
+            parent_context.task_id,
+            child_agent_id,
+            "completed",
+            {"status": result.status, "completed_at": result.completed_at},
+        )
+        return result
+
+    def _checkpoint(self, task_id: str, child_state: dict[str, Any]) -> None:
+        if self.progress_recorder is not None:
+            self.progress_recorder(task_id, deepcopy(child_state))
+
+    def _trace(
+        self,
+        task_id: str,
+        child_agent_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.trace_recorder.record(
+            task_id=task_id,
+            boundary=f"child.{child_agent_id}",
+            event_type=event_type,
+            payload={"child_agent_id": child_agent_id, **payload},
+        )

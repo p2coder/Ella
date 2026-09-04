@@ -8,6 +8,8 @@ from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.provider_usage import record_provider_usage
+from runtime.context_window import prepare_context
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from tasks.task import Task, TaskGoalState
 from tools.base import ToolDefinition
 
@@ -61,15 +63,41 @@ class VerificationAgent:
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
     )
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
+    )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
 
     def decide(
         self,
         task: Task,
         definitions: tuple[ToolDefinition, ...] = (),
     ) -> VerificationAction:
+        draft = str(task.task_local_state.get("draft_final_response", "")).strip()
+        candidate_result = str(
+            task.task_local_state.get("completion_summary", "")
+        )
+        return self.decide_candidate(
+            task,
+            candidate_result=candidate_result,
+            draft=draft,
+            definitions=definitions,
+        )
+
+    def decide_candidate(
+        self,
+        task: Task,
+        *,
+        candidate_result: str,
+        draft: str | None = None,
+        definitions: tuple[ToolDefinition, ...] = (),
+        verification_results: tuple[Mapping[str, Any], ...] = (),
+    ) -> VerificationAction:
         if task.intent is None:
             raise VerificationDecisionError("verification requires TaskIntent")
-        draft = str(task.task_local_state.get("draft_final_response", "")).strip()
+        draft = candidate_result if draft is None else draft
+        draft = str(draft).strip()
         context = {
             "user_prompt": (
                 "" if task.source_event is None else task.source_event.payload.get("text", "")
@@ -77,27 +105,41 @@ class VerificationAgent:
             "workspace": {
                 "task_id": task.task_id,
                 "intent": task.intent.to_dict(),
-                "plan": None if task.graph is None else {
-                    "version": task.graph.definition.version,
-                    "node_runs": task.graph.node_runs,
-                },
                 "observations": task.tool_trace,
                 "failures": tuple(
                     item.to_dict() for item in task.current_step.failures
                 ),
-                "candidate_result": task.task_local_state.get("completion_summary", ""),
+                "candidate_result": candidate_result,
                 "draft_final_response": draft,
-                "verification_round": int(
-                    task.task_local_state.get("verification_round", 1)
-                ),
-                "verification_results": tuple(
-                    task.task_local_state.get("verification_results", ())
-                ),
+                "verification_results": verification_results,
                 "visible_verification_tools": serialize_tool_definitions(definitions),
             },
         }
         prompt = self.prompt_engine.build(PromptType.VERIFICATION_DECISION, context)
-        task.task_local_state["verification_prompt_text"] = prompt.prompt
+        prepared = prepare_context(
+            prompt.prompt,
+            context_window_tokens=self.context_window_tokens,
+            compression_threshold=self.context_compression_threshold,
+        )
+        if prepared.compression_requested:
+            event = {
+                "boundary": "verification_decision",
+                "estimated_tokens": prepared.estimated_tokens,
+            }
+            events = tuple(
+                task.task_local_state.get("context_compression_requested", ())
+            )
+            task.task_local_state["context_compression_requested"] = (
+                *events,
+                event,
+            )
+            self.trace_recorder.record(
+                task_id=task.task_id,
+                boundary="context",
+                event_type="context_compression_requested",
+                payload=event,
+            )
+        task.task_local_state["verification_prompt_text"] = prepared.text
         if self.llm_provider is None:
             return VerificationAction(
                 "VERIFICATION_VERDICT",
@@ -106,8 +148,8 @@ class VerificationAgent:
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
-                trace_id=task.trace_id,
+                prepared.text,
+                task_id=task.task_id,
                 metadata={"boundary": "verification_decision"},
             )
         except Exception:
@@ -155,7 +197,7 @@ class VerificationAgent:
     ) -> None:
         provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
-            task.trace_id,
+            task.task_id,
             boundary="verification_decision",
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,

@@ -14,8 +14,6 @@ def make_context(
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-scope",
-        trace_id="trace-scope",
-        handoff_goal="Complete one scoped task.",
         memory_scope="task_local",
         permissions=("read_context",),
         capability_scope=capability_scope,

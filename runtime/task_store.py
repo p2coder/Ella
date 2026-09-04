@@ -10,18 +10,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Mapping
 
 from agent.context import AgentExecutionContext, CapabilityScope
-from agent.handoff import HandoffRequest
 from events import StandardizedEvent
-from tasks.graph import (
-    GraphEdge,
-    TaskGraphDefinition,
-    TaskGraphNodeDefinition,
-    TaskGraphNodeType,
-    TaskGraphRun,
-    ToolGraphDefinition,
-    ToolGraphRun,
-    ToolNodeDefinition,
-)
 from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from tasks.output import UserVisibleAgentOutput
 from tasks.state import StepExecutionState, ToolFailureKind, ToolFailureObservation
@@ -29,7 +18,7 @@ from tasks.completion import TaskCompletionPackage
 from tools import ToolResult
 
 
-CHECKPOINT_SCHEMA_VERSION = 4
+CHECKPOINT_SCHEMA_VERSION = 5
 _FORBIDDEN_KEYS = frozenset({"api_key", "authorization", "credentials"})
 _OMITTED_KEY_PARTS = frozenset(
     {"prompt_text", "captured_frame", "display_frame", "raw_media"}
@@ -46,6 +35,17 @@ class TaskVersionConflict(TaskStoreError):
 
 class CorruptTaskCheckpoint(TaskStoreError):
     pass
+
+
+class UnsupportedCheckpointSchema(TaskStoreError):
+    def __init__(self, task_id: str, found: object) -> None:
+        self.task_id = task_id
+        self.found = found
+        self.expected = CHECKPOINT_SCHEMA_VERSION
+        super().__init__(
+            f"checkpoint for task {task_id} uses unsupported schema "
+            f"{found!r}; expected {self.expected}; old version cannot be restored"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,11 +100,16 @@ class TaskStore:
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
             if document["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-                return None
+                raise UnsupportedCheckpointSchema(
+                    task_id,
+                    document["schema_version"],
+                )
             return StoredTask(
                 task=_decode_task(document["task"]),
                 version=int(document["version"]),
             )
+        except UnsupportedCheckpointSchema:
+            raise
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise CorruptTaskCheckpoint(
                 f"corrupt checkpoint for task {task_id}: {exc}"
@@ -117,6 +122,11 @@ class TaskStore:
             if record is not None:
                 records.append(record)
         return tuple(records)
+
+    def task_ids(self) -> tuple[str, ...]:
+        if not self.root.exists():
+            return ()
+        return tuple(path.stem for path in sorted(self.root.glob("*.json")))
 
     def version(self, task_id: str) -> int:
         record = self.load(task_id)
@@ -151,9 +161,7 @@ def _encode_task(task: Task) -> dict[str, Any]:
     return _reject_secrets(
         {
             "task_id": task.task_id,
-            "trace_id": task.trace_id,
             "source_event": _encode_event(task.source_event),
-            "handoff": _encode_handoff(task.handoff),
             "execution_context": task.execution_context.to_dict()
             if task.execution_context
             else None,
@@ -166,7 +174,6 @@ def _encode_task(task: Task) -> dict[str, Any]:
             ),
             "intent": None if task.intent is None else task.intent.to_dict(),
             "first_decision_completed": task.first_decision_completed,
-            "graph": _encode_graph(task.graph),
             "paused_from_state": task.paused_from_state.value
             if task.paused_from_state
             else None,
@@ -190,16 +197,12 @@ def _encode_task(task: Task) -> dict[str, Any]:
 
 def _decode_task(data: Mapping[str, Any]) -> Task:
     event = _decode_event(data["source_event"])
-    handoff = _decode_handoff(data.get("handoff"), event)
     context_data = data.get("execution_context")
     context = _decode_context(context_data) if context_data else None
     task = Task(
         task_id=data["task_id"],
-        handoff=handoff,
-        trace_id=data["trace_id"],
         source_event=event,
         execution_context=context,
-        graph=_decode_graph(data.get("graph")),
         state=TaskState(data["state"]),
         goal_state=(
             TaskGoalState(data["goal_state"])
@@ -259,6 +262,14 @@ def _decode_step(data: Mapping[str, Any] | None) -> StepExecutionState:
             message=str(item["message"]),
             arguments=dict(item.get("arguments", {})),
             retryable=bool(item.get("retryable", False)),
+            tool_use_id=item.get("tool_use_id"),
+            task_id=item.get("task_id"),
+            agent_id=item.get("agent_id"),
+            parent_agent_id=item.get("parent_agent_id"),
+            called_at=item.get("called_at"),
+            completed_at=item.get("completed_at"),
+            result_ttl_seconds=item.get("result_ttl_seconds"),
+            refresh_of_tool_use_id=item.get("refresh_of_tool_use_id"),
         )
         for item in data.get("failures", ())
     )
@@ -302,8 +313,15 @@ def _decode_completion(
             ToolResult(
                 tool_name=str(item["tool_name"]),
                 task_id=str(item["task_id"]),
-                trace_id=str(item["trace_id"]),
                 payload=dict(item.get("payload", {})),
+                tool_use_id=item.get("tool_use_id"),
+                agent_id=item.get("agent_id"),
+                parent_agent_id=item.get("parent_agent_id"),
+                arguments=dict(item.get("arguments", {})),
+                called_at=item.get("called_at"),
+                completed_at=item.get("completed_at"),
+                result_ttl_seconds=item.get("result_ttl_seconds"),
+                refresh_of_tool_use_id=item.get("refresh_of_tool_use_id"),
             )
             for item in data.get("tool_results", ())
         ),
@@ -314,7 +332,7 @@ def _encode_event(event: StandardizedEvent | None) -> dict[str, Any] | None:
     if event is None:
         return None
     return {
-        "trace_id": event.trace_id,
+        "task_id": event.task_id,
         "source": event.source,
         "payload": _json_safe(event.payload),
         "event_type": event.event_type,
@@ -330,7 +348,7 @@ def _decode_event(data: Mapping[str, Any] | None) -> StandardizedEvent:
     if data is None:
         raise ValueError("task checkpoint requires source_event")
     return StandardizedEvent(
-        trace_id=data["trace_id"],
+        task_id=data["task_id"],
         source=data["source"],
         payload=dict(data["payload"]),
         event_type=data["event_type"],
@@ -342,22 +360,6 @@ def _decode_event(data: Mapping[str, Any] | None) -> StandardizedEvent:
     )
 
 
-def _encode_handoff(handoff: HandoffRequest | None) -> dict[str, Any] | None:
-    if handoff is None:
-        return None
-    data = handoff.to_dict()
-    data.pop("trigger_event", None)
-    return _json_safe(data)
-
-
-def _decode_handoff(
-    data: Mapping[str, Any] | None, event: StandardizedEvent
-) -> HandoffRequest | None:
-    if data is None:
-        return None
-    return HandoffRequest(trigger_event=event, **data)
-
-
 def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
     scope = data["capability_scope"]
     return AgentExecutionContext(
@@ -365,10 +367,9 @@ def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
         agent_role=data["agent_role"],
         parent_agent_id=data.get("parent_agent_id"),
         task_id=data["task_id"],
-        trace_id=data["trace_id"],
-        handoff_goal=data["handoff_goal"],
         memory_scope=data["memory_scope"],
         permissions=tuple(data.get("permissions", ())),
+        agent_depth=int(data.get("agent_depth", 0)),
         capability_scope=CapabilityScope(
             agent_role=scope["agent_role"],
             allowed_skills=tuple(scope["allowed_skills"]),
@@ -377,126 +378,6 @@ def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
             tool_registry_version=scope.get("tool_registry_version"),
         ),
     )
-
-
-def _encode_graph(run: TaskGraphRun | None) -> dict[str, Any] | None:
-    if run is None:
-        return None
-    definition = run.definition
-    return {
-        "definition": {
-            "graph_id": definition.graph_id,
-            "version": definition.version,
-            "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "node_type": node.node_type.value,
-                    "payload": _encode_graph_value(node.payload),
-                }
-                for node in definition.nodes
-            ],
-            "edges": [
-                {"from_node_id": edge.from_node_id, "to_node_id": edge.to_node_id, "condition": _json_safe(edge.condition), "priority": edge.priority}
-                for edge in definition.edges
-            ],
-            "entry_node_ids": definition.entry_node_ids,
-            "terminal_node_ids": definition.terminal_node_ids,
-        },
-        "node_runs": _encode_graph_value(run.node_runs),
-    }
-
-
-def _decode_graph(data: Mapping[str, Any] | None) -> TaskGraphRun | None:
-    if data is None:
-        return None
-    raw = data["definition"]
-    definition = TaskGraphDefinition(
-        graph_id=raw["graph_id"],
-        version=raw["version"],
-        nodes=tuple(
-            TaskGraphNodeDefinition(
-                node["node_id"],
-                TaskGraphNodeType(node["node_type"]),
-                _decode_graph_value(node["payload"]),
-            )
-            for node in raw["nodes"]
-        ),
-        edges=tuple(GraphEdge(**edge) for edge in raw["edges"]),
-        entry_node_ids=tuple(raw["entry_node_ids"]),
-        terminal_node_ids=tuple(raw["terminal_node_ids"]),
-    )
-    return TaskGraphRun(definition, _decode_graph_value(data["node_runs"]))
-
-
-def _encode_graph_value(value: Any) -> Any:
-    if isinstance(value, ToolGraphRun):
-        definition = value.definition
-        return {
-            "__type__": "ToolGraphRun",
-            "definition": {
-                "graph_id": definition.graph_id,
-                "nodes": [
-                    {
-                        "node_id": node.node_id,
-                        "tool_name": node.tool_name,
-                        "tool_version": node.tool_version,
-                        "input_binding": _json_safe(node.input_binding),
-                        "success_condition": _json_safe(
-                            node.success_condition
-                        ),
-                        "execution_override": _json_safe(
-                            node.execution_override
-                        ),
-                    }
-                    for node in definition.nodes
-                ],
-                "edges": [
-                    {
-                        "from_node_id": edge.from_node_id,
-                        "to_node_id": edge.to_node_id,
-                        "condition": _json_safe(edge.condition),
-                        "priority": edge.priority,
-                    }
-                    for edge in definition.edges
-                ],
-                "entry_node_ids": definition.entry_node_ids,
-                "terminal_node_ids": definition.terminal_node_ids,
-            },
-            "node_runs": _json_safe(value.node_runs),
-        }
-    if isinstance(value, Mapping):
-        return {str(key): _encode_graph_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_encode_graph_value(item) for item in value]
-    return _json_safe(value)
-
-
-def _decode_graph_value(value: Any) -> Any:
-    if isinstance(value, Mapping) and value.get("__type__") == "ToolGraphRun":
-        raw = value["definition"]
-        definition = ToolGraphDefinition(
-            graph_id=str(raw["graph_id"]),
-            nodes=tuple(
-                ToolNodeDefinition(
-                    node_id=str(node["node_id"]),
-                    tool_name=str(node["tool_name"]),
-                    tool_version=str(node["tool_version"]),
-                    input_binding=dict(node.get("input_binding", {})),
-                    success_condition=node.get("success_condition"),
-                    execution_override=node.get("execution_override"),
-                )
-                for node in raw["nodes"]
-            ),
-            edges=tuple(GraphEdge(**edge) for edge in raw["edges"]),
-            entry_node_ids=tuple(raw["entry_node_ids"]),
-            terminal_node_ids=tuple(raw["terminal_node_ids"]),
-        )
-        return ToolGraphRun(definition, value.get("node_runs", {}))
-    if isinstance(value, Mapping):
-        return {str(key): _decode_graph_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return tuple(_decode_graph_value(item) for item in value)
-    return value
 
 
 def _json_safe(value: Any) -> Any:

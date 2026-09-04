@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from dataclasses import replace
 
 from app_runtime import AppRuntime
 from events import StandardizedEvent
@@ -6,6 +7,7 @@ from runtime.task_events import TaskEventPublisher
 from runtime.task_runtime import TaskRuntime
 from tasks.factory import TaskFactory
 from tasks.task import TaskState
+from tasks.state import ToolFailureKind, ToolFailureObservation
 
 
 class _EventRuntime:
@@ -14,11 +16,11 @@ class _EventRuntime:
 
 def _app():
     runtime = TaskRuntime(
-        task_factory=TaskFactory(task_id_factory=lambda: "task-projection"),
+        task_factory=TaskFactory(),
         event_publisher=TaskEventPublisher(),
     )
     event = StandardizedEvent(
-        trace_id="trace-projection",
+        task_id="task-projection",
         source="test",
         timestamp=datetime.now(timezone.utc),
         payload={"text": "hello"},
@@ -54,6 +56,7 @@ def test_subscription_starts_with_full_snapshot():
     assert event["payload"]["active_tasks"][0]["task_id"] == (
         "task-projection"
     )
+    assert event["payload"]["recovery_errors"] == ()
 
 
 def test_task_projection_exposes_timing_for_sse_and_web_ui():
@@ -63,3 +66,47 @@ def test_task_projection_exposes_timing_for_sse_and_web_ui():
 
     assert "timing" in projection
     assert "timing_summary" in projection
+    assert projection["tool_observations"] == ()
+
+
+def test_task_projection_exposes_running_workflow_and_child_summaries():
+    app, runtime = _app()
+    task = runtime.get_task("task-projection")
+    task.task_local_state["workflow_execution"] = {
+        "status": "running",
+        "script_sha256": "abc123",
+        "active_tool_count": 1,
+    }
+    task.task_local_state["child_executions"] = {
+        "agent-child": {"child_agent_id": "agent-child", "status": "running"}
+    }
+
+    projection = app.get_task(task.task_id)
+
+    assert projection["workflow_execution"]["active_tool_count"] == 1
+    assert projection["child_executions"]["agent-child"]["status"] == "running"
+
+
+def test_task_projection_includes_persisted_tool_failures():
+    app, runtime = _app()
+    task = runtime.get_task("task-projection")
+    failure = ToolFailureObservation(
+        attempt_id=task.current_step.attempt_id,
+        tool_name="workflow",
+        kind=ToolFailureKind.TOOL_EXECUTION_FAILED,
+        code="workflow_failed",
+        message="failed",
+        arguments={},
+        retryable=False,
+        tool_use_id="tool-use-failed",
+        task_id=task.task_id,
+        agent_id="ella-main",
+        called_at="2026-09-04T00:00:00Z",
+        completed_at="2026-09-04T00:00:01Z",
+    )
+    task.current_step = replace(task.current_step, failures=(failure,))
+
+    observations = app.get_task(task.task_id)["tool_observations"]
+
+    assert observations[0]["tool_use_id"] == "tool-use-failed"
+    assert observations[0]["completed_at"] == "2026-09-04T00:00:01Z"

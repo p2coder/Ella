@@ -15,8 +15,6 @@ def make_context() -> AgentExecutionContext:
         agent_role="main_agent",
         parent_agent_id=None,
         task_id="task-camera",
-        trace_id="trace-camera",
-        handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),
@@ -36,7 +34,6 @@ def test_camera_scene_tool_captures_bounded_frames_with_max_frames():
     assert isinstance(result, ToolResult)
     assert result.tool_name == "camera_scene"
     assert result.task_id == "task-camera"
-    assert result.trace_id == "trace-camera"
     assert camera.capture_count == 2
 
 
@@ -63,9 +60,6 @@ def test_multimodal_provider_called_with_captured_frames():
                 {"type": "image", "frame": "frame-3"},
             ),
             "task_id": "task-camera",
-            "handoff_goal": (
-                "Give the user a short, necessary reminder before leaving."
-            ),
         }
     ]
 
@@ -159,11 +153,11 @@ class CountingCameraProvider:
     def __init__(self) -> None:
         self.capture_count = 0
 
-    def capture_frame(self, *, trace_id=None, metadata=None):
+    def capture_frame(self, *, task_id=None, metadata=None):
         self.capture_count += 1
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={"type": "image", "frame": f"frame-{self.capture_count}"},
         )
 
@@ -171,10 +165,10 @@ class CountingCameraProvider:
 class UnavailableCameraProvider:
     device_name = "unavailable_camera"
 
-    def capture_frame(self, *, trace_id=None, metadata=None):
+    def capture_frame(self, *, task_id=None, metadata=None):
         return DeviceResult(
             device_name=self.device_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=DeviceError(
                 device_name=self.device_name,
@@ -191,12 +185,12 @@ class RecordingMultimodalProvider:
     def __init__(self) -> None:
         self.calls = []
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         self.calls.append(inputs)
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output={
                 "scene_summary": "Recorded frames summarized.",
                 "visible_items": ("phone",),
@@ -208,11 +202,11 @@ class FailingMultimodalProvider:
     provider_name = "failing_multimodal"
     model_name = "failing-mm"
 
-    def describe(self, inputs, *, trace_id=None, metadata=None):
+    def describe(self, inputs, *, task_id=None, metadata=None):
         return ProviderResult(
             provider_name=self.provider_name,
             model_name=self.model_name,
-            trace_id=trace_id,
+            task_id=task_id,
             output=None,
             error=ProviderError(
                 provider_name=self.provider_name,

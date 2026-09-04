@@ -59,7 +59,7 @@ def test_qwen_speech_encodes_microphone_audio_and_normalizes_transcript():
 
     result = provider.transcribe(
         microphone_audio(),
-        trace_id="trace-speech",
+        task_id="task-speech",
     )
 
     assert result.succeeded

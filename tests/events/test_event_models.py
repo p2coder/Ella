@@ -19,17 +19,17 @@ FIXED_TIME = datetime(2026, 6, 13, 8, 30, tzinfo=timezone.utc)
 
 def test_raw_signal_constructs_and_serializes_payload_context():
     signal = RawSignal(
-        trace_id="trace-001",
+        task_id="task-001",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
     )
 
-    assert signal.trace_id == "trace-001"
+    assert signal.task_id == "task-001"
     assert signal.source == "cli_input"
     assert signal.payload["text"] == "Ella, I am heading out"
     assert signal.to_dict() == {
-        "trace_id": "trace-001",
+        "task_id": "task-001",
         "source": "cli_input",
         "timestamp": "2026-06-13T08:30:00+00:00",
         "payload": {"text": "Ella, I am heading out"},
@@ -41,7 +41,7 @@ def test_raw_signal_constructs_and_serializes_payload_context():
 def test_observation_and_candidate_express_configurable_event_stages():
     custom_stage = EventStage("ambient_observation", "Ambient state update")
     observation = Observation(
-        trace_id="trace-002",
+        task_id="task-002",
         source="multimodal_model",
         timestamp=FIXED_TIME,
         payload={"summary": "environment changed"},
@@ -49,7 +49,7 @@ def test_observation_and_candidate_express_configurable_event_stages():
         confidence=0.72,
     )
     candidate = EventCandidate(
-        trace_id="trace-002",
+        task_id="task-002",
         source="multimodal_model",
         timestamp=FIXED_TIME,
         payload={"summary": "environment changed"},
@@ -65,7 +65,7 @@ def test_observation_and_candidate_express_configurable_event_stages():
 
 def test_standardized_event_has_routing_relevant_contract_fields_only():
     event = StandardizedEvent(
-        trace_id="trace-003",
+        task_id="task-003",
         source="cli_input",
         timestamp=FIXED_TIME,
         payload={"text": "Ella, I am heading out"},
@@ -78,7 +78,7 @@ def test_standardized_event_has_routing_relevant_contract_fields_only():
 
     assert event.stage == STANDARDIZED_EVENT_STAGE
     assert event.to_dict() == {
-        "trace_id": "trace-003",
+        "task_id": "task-003",
         "source": "cli_input",
         "timestamp": "2026-06-13T08:30:00+00:00",
         "payload": {"text": "Ella, I am heading out"},
@@ -95,7 +95,7 @@ def test_standardized_event_has_routing_relevant_contract_fields_only():
 
 def test_raw_media_signal_keeps_media_reference_without_semantic_interpretation():
     signal = RawSignal(
-        trace_id="trace-004",
+        task_id="task-004",
         source="camera_frame",
         timestamp=FIXED_TIME,
         payload={

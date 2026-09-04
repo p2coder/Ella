@@ -40,6 +40,8 @@ def test_improved_ui_has_collapsible_timing_and_usage_metrics():
     assert 'id="total-duration"' in html
     assert 'id="token-usage"' in html
     assert 'id="cache-hit-rate"' in html
+    assert "task.workflow_execution" in html
+    assert "script_sha256" in html
 
 
 def test_usage_projection_calculates_cache_hit_rate_when_available():

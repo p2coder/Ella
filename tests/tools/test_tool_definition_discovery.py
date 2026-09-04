@@ -16,8 +16,6 @@ def _context(
         agent_role=agent_role,
         parent_agent_id=None,
         task_id="task-discovery",
-        trace_id="trace-discovery",
-        handoff_goal="Prepare a reminder.",
         memory_scope="task_local",
         capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=("read_context",),
@@ -129,6 +127,18 @@ def test_registering_once_supports_multiple_discovery_calls() -> None:
     assert manager.list_names() == ("mock_weather",)
 
 
+def test_tool_manager_applies_configured_ttl_override_to_discovery() -> None:
+    manager = ToolManager({"mock_weather": 15})
+    manager.register(MockWeatherTool())
+
+    definition = manager.list_definitions(
+        _context(allowed_tools=("mock_weather",))
+    )[0]
+
+    assert MockWeatherTool().definition.result_ttl_seconds == 60
+    assert definition.result_ttl_seconds == 15
+
+
 @dataclass(slots=True)
 class RoleLimitedTool:
     name: str = "role_limited"
@@ -152,7 +162,6 @@ class RoleLimitedTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={},
         )
 
@@ -182,6 +191,5 @@ class CountingTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={},
         )

@@ -23,7 +23,7 @@ class ClarifyingDecisionProvider:
     def __init__(self) -> None:
         self.boundaries = []
 
-    def generate(self, prompt, *, trace_id=None, metadata=None):
+    def generate(self, prompt, *, task_id=None, metadata=None):
         boundary = metadata["boundary"]
         self.boundaries.append(boundary)
         if boundary == "first_decision":
@@ -66,7 +66,7 @@ class ClarifyingDecisionProvider:
         return ProviderResult(
             self.provider_name,
             self.model_name,
-            trace_id,
+            task_id,
             output,
         )
 
@@ -90,12 +90,11 @@ def test_interaction_tool_blocks_until_first_matching_answer() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-question",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
     event = StandardizedEvent(
-        trace_id="trace-question",
+        task_id="task-question",
         source="test",
         payload={"text": "contact someone"},
         event_type="USER_UTTERANCE",
@@ -165,13 +164,12 @@ def test_all_questions_are_published_before_tool_waits_for_answers() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-multiple-questions",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
     handle = runtime.create_task(
         StandardizedEvent(
-            trace_id="trace-multiple-questions",
+            task_id="task-multiple-questions",
             source="test",
             payload={"text": "schedule a meeting"},
             event_type="USER_UTTERANCE",
@@ -237,14 +235,13 @@ def test_answered_first_decision_continues_with_execution_decision() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-progressive-intent",
         ),
         subagent=subagent,
         executor=CapabilityExecutor(SkillManager(), manager, subagent),
     )
     handle = runtime.create_task(
         StandardizedEvent(
-            trace_id="trace-progressive-intent",
+            task_id="task-progressive-intent",
             source="test",
             payload={"text": "Book dinner tonight, but ask me for the location."},
             event_type="USER_UTTERANCE",
@@ -339,13 +336,12 @@ def test_answer_metadata_preserves_question_phase() -> None:
         task_factory=TaskFactory(
             skill_manager=SkillManager(),
             tool_manager=manager,
-            task_id_factory=lambda: "task-question-phase",
         ),
         executor=CapabilityExecutor(SkillManager(), manager),
     )
     handle = runtime.create_task(
         StandardizedEvent(
-            trace_id="trace-question-phase",
+            task_id="task-question-phase",
             source="test",
             payload={"text": "choose"},
             event_type="USER_UTTERANCE",

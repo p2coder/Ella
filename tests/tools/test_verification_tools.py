@@ -5,7 +5,15 @@ from tools.verification import (
     ArtifactExistsTool,
     DocumentReadTool,
     ToolObservationCheckTool,
+    VerificationTool,
 )
+from agent.verification import (
+    VerificationAction,
+    VerificationAgent,
+    VerificationVerdict,
+)
+from tasks.task import Task, TaskGoalState, TaskIntent
+from tools import ToolManager
 
 
 def _context() -> AgentExecutionContext:
@@ -14,8 +22,6 @@ def _context() -> AgentExecutionContext:
         agent_role="verification_agent",
         parent_agent_id="ella-main",
         task_id="task-verify-tools",
-        trace_id="trace-verify-tools",
-        handoff_goal="verify result",
         memory_scope="task_local",
         capability_scope=CapabilityScope(
             "verification_agent",
@@ -82,3 +88,72 @@ def test_verification_definitions_are_read_only_and_have_no_produces_field(tmp_p
     for tool in tools:
         assert tool.definition.side_effecting is False
         assert "produces" not in tool.definition.to_dict()
+
+
+def test_verification_tool_loads_task_data_from_context() -> None:
+    task = Task("task-verify-tools")
+    task.intent = TaskIntent(goal="Return a useful answer")
+    requested = []
+
+    def read_task(task_id: str) -> Task:
+        requested.append(task_id)
+        return task
+
+    tool = VerificationTool(read_task, VerificationAgent())
+    result = tool.run(_context(), {"candidate_result": "A useful answer"})
+
+    assert requested == ["task-verify-tools"]
+    assert result.payload["goal_state"] == "achieved"
+    assert result.payload["recoverable"] is False
+    assert tool.definition.result_ttl_seconds == 300
+    assert set(tool.definition.input_schema["properties"]) == {"candidate_result"}
+
+
+def test_verification_tool_runs_selected_read_only_check(tmp_path) -> None:
+    artifact = tmp_path / "result.md"
+    artifact.write_text("verified", encoding="utf-8")
+    task = Task("task-verify-tools")
+    task.intent = TaskIntent(goal="Create result.md")
+    manager = ToolManager({"artifact_exists": 42})
+    manager.register(ArtifactExistsTool(tmp_path))
+
+    class SequencedVerifier:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def decide_candidate(self, task, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return VerificationAction(
+                    "CALL_TOOL",
+                    "artifact_exists",
+                    {"relative_path": "result.md"},
+                )
+            return VerificationAction(
+                "VERIFICATION_VERDICT",
+                verdict=VerificationVerdict(
+                    TaskGoalState.ACHIEVED,
+                    ("artifact exists",),
+                    ("result.md",),
+                    (),
+                    False,
+                    "",
+                    "Verified.",
+                ),
+            )
+
+    verifier = SequencedVerifier()
+    result = VerificationTool(lambda _: task, verifier, manager).run(
+        _context(),
+        {"candidate_result": "Created result.md"},
+    )
+
+    assert result.payload["goal_state"] == "achieved"
+    assert len(result.payload["checks"]) == 1
+    check = result.payload["checks"][0]
+    assert check["payload"]["exists"] is True
+    assert check["tool_use_id"].startswith("tool-use-")
+    assert check["called_at"].endswith("Z")
+    assert check["completed_at"].endswith("Z")
+    assert check["result_ttl_seconds"] == 42
+    assert verifier.calls[1]["verification_results"] == result.payload["checks"]

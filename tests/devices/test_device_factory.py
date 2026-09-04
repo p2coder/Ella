@@ -43,7 +43,7 @@ def test_mic_disabled_prevents_real_microphone_provider_creation():
         )
     )
 
-    result = factory.microphone().capture(trace_id="trace-mic-disabled")
+    result = factory.microphone().capture(task_id="task-mic-disabled")
 
     assert result.failed is True
     assert result.error.code == "device_unavailable"
@@ -52,7 +52,7 @@ def test_mic_disabled_prevents_real_microphone_provider_creation():
         "device_kind": "microphone",
         "enabled_flag": "ELLA_MIC_ENABLED",
     }
-    assert result.trace_id == "trace-mic-disabled"
+    assert result.task_id == "task-mic-disabled"
 
 
 def test_camera_disabled_prevents_real_camera_provider_creation():
@@ -65,7 +65,7 @@ def test_camera_disabled_prevents_real_camera_provider_creation():
         )
     )
 
-    result = factory.camera().capture_frame(trace_id="trace-camera-disabled")
+    result = factory.camera().capture_frame(task_id="task-camera-disabled")
 
     assert result.failed is True
     assert result.error.code == "device_unavailable"
@@ -74,7 +74,7 @@ def test_camera_disabled_prevents_real_camera_provider_creation():
         "device_kind": "camera",
         "enabled_flag": "ELLA_CAMERA_ENABLED",
     }
-    assert result.trace_id == "trace-camera-disabled"
+    assert result.task_id == "task-camera-disabled"
 
 
 def test_package_import_has_no_device_access_or_factory_side_effects():

@@ -38,8 +38,8 @@ class MicrophoneSource:
             speech_provider=configured_providers.speech(),
         )
 
-    def capture_transcript(self, *, trace_id: str) -> MicrophoneSourceResult:
-        microphone_result = self.microphone_provider.capture(trace_id=trace_id)
+    def capture_transcript(self, *, task_id: str) -> MicrophoneSourceResult:
+        microphone_result = self.microphone_provider.capture(task_id=task_id)
         if microphone_result.failed:
             return MicrophoneSourceResult(
                 raw_signal=None,
@@ -52,7 +52,7 @@ class MicrophoneSource:
 
         speech_result = self.speech_provider.transcribe(
             microphone_result.output,
-            trace_id=trace_id,
+            task_id=task_id,
         )
         if speech_result.failed:
             return MicrophoneSourceResult(
@@ -67,7 +67,7 @@ class MicrophoneSource:
         text = speech_result.output["text"]
         return MicrophoneSourceResult(
             raw_signal=RawSignal(
-                trace_id=trace_id,
+                task_id=task_id,
                 source="speech_transcript",
                 payload={
                     "type": "text",

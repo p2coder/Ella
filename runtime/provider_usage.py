@@ -93,6 +93,29 @@ def merge_provider_usage_calls(
     task_local_state["provider_usage"] = aggregate_provider_usage(ledger) or {}
 
 
+def nested_provider_usage_calls(
+    tool_name: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Return child Provider calls embedded by an agent-composition Tool."""
+    if tool_name in {"subagent", "subagent_fork"}:
+        calls = payload.get("provider_usage_calls", ())
+        return tuple(dict(call) for call in calls if isinstance(call, Mapping))
+    if tool_name != "workflow":
+        return ()
+
+    nested: list[dict[str, Any]] = []
+    for child in payload.get("child_results", ()):
+        if not isinstance(child, Mapping):
+            continue
+        result = child.get("result")
+        if not isinstance(result, Mapping):
+            continue
+        calls = result.get("provider_usage_calls", ())
+        nested.extend(dict(call) for call in calls if isinstance(call, Mapping))
+    return tuple(nested)
+
+
 def _usage_mapping(result: ProviderResult | None) -> Mapping[str, Any]:
     if result is None:
         return {}

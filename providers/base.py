@@ -22,7 +22,7 @@ class ProviderError:
 class ProviderResult:
     provider_name: str
     model_name: str
-    trace_id: str | None
+    task_id: str | None
     output: Any
     metadata: dict[str, Any] = field(default_factory=dict)
     error: ProviderError | None = None
@@ -39,7 +39,7 @@ class ProviderResult:
         return {
             "provider_name": self.provider_name,
             "model_name": self.model_name,
-            "trace_id": self.trace_id,
+            "task_id": self.task_id,
             "output": self.output,
             "metadata": self.metadata,
             "error": None if self.error is None else self.error.to_dict(),

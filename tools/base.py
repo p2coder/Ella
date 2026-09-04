@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
+import math
 from typing import Any, Protocol, Sequence
 
 from agent.context import AgentExecutionContext
@@ -45,6 +46,7 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     input_examples: Sequence[dict[str, Any]]
     output_schema: dict[str, Any]
+    result_ttl_seconds: float | None = None
     version: str = "1"
     idempotency: ToolIdempotency = ToolIdempotency.UNKNOWN
     side_effecting: bool = False
@@ -59,6 +61,16 @@ class ToolDefinition:
         _require_non_empty_string("version", self.version)
         _require_object_schema("input_schema", self.input_schema)
         _require_object_schema("output_schema", self.output_schema)
+        if self.result_ttl_seconds is not None:
+            if (
+                not isinstance(self.result_ttl_seconds, (int, float))
+                or isinstance(self.result_ttl_seconds, bool)
+                or not math.isfinite(self.result_ttl_seconds)
+                or self.result_ttl_seconds < 0
+            ):
+                raise ValueError(
+                    "result_ttl_seconds must be null or a finite non-negative number"
+                )
         if not isinstance(self.idempotency, ToolIdempotency):
             raise TypeError("idempotency must be a ToolIdempotency")
         if not isinstance(self.side_effecting, bool):
@@ -85,6 +97,7 @@ class ToolDefinition:
             "input_schema": self.input_schema,
             "input_examples": self.input_examples,
             "output_schema": self.output_schema,
+            "result_ttl_seconds": self.result_ttl_seconds,
             "capability_kind": self.capability_kind.value,
         }
 
@@ -103,15 +116,29 @@ class EffectiveToolExecutionMetadata:
 class ToolResult:
     tool_name: str
     task_id: str
-    trace_id: str
     payload: dict[str, Any]
+    tool_use_id: str | None = None
+    agent_id: str | None = None
+    parent_agent_id: str | None = None
+    arguments: dict[str, Any] | None = None
+    called_at: str | None = None
+    completed_at: str | None = None
+    result_ttl_seconds: float | None = None
+    refresh_of_tool_use_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "task_id": self.task_id,
-            "trace_id": self.trace_id,
             "payload": self.payload,
+            "tool_use_id": self.tool_use_id,
+            "agent_id": self.agent_id,
+            "parent_agent_id": self.parent_agent_id,
+            "arguments": dict(self.arguments or {}),
+            "called_at": self.called_at,
+            "completed_at": self.completed_at,
+            "result_ttl_seconds": self.result_ttl_seconds,
+            "refresh_of_tool_use_id": self.refresh_of_tool_use_id,
         }
 
 

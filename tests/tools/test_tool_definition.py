@@ -42,8 +42,38 @@ def test_tool_definition_construction_and_serialization() -> None:
             "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
+        "result_ttl_seconds": None,
         "capability_kind": "external",
     }
+
+
+@pytest.mark.parametrize("value", (-1, float("nan"), float("inf"), True))
+def test_tool_definition_rejects_invalid_result_ttl(value) -> None:
+    with pytest.raises(ValueError, match="result_ttl_seconds"):
+        ToolDefinition(
+            name="mock_weather",
+            description="Get deterministic weather context.",
+            schema_version="1.0",
+            input_schema=_object_schema(),
+            input_examples=(),
+            output_schema=_object_schema(),
+            result_ttl_seconds=value,
+        )
+
+
+@pytest.mark.parametrize("value", (None, 0, 60, 0.5))
+def test_tool_definition_accepts_valid_result_ttl(value) -> None:
+    definition = ToolDefinition(
+        name="mock_weather",
+        description="Get deterministic weather context.",
+        schema_version="1.0",
+        input_schema=_object_schema(),
+        input_examples=(),
+        output_schema=_object_schema(),
+        result_ttl_seconds=value,
+    )
+
+    assert definition.result_ttl_seconds == value
 
 
 @pytest.mark.parametrize(
@@ -154,13 +184,19 @@ def test_existing_tool_result_construction_still_works() -> None:
     result = ToolResult(
         tool_name="mock_weather",
         task_id="task-1",
-        trace_id="trace-1",
         payload={"summary": "Light rain is possible later today."},
     )
 
     assert result.to_dict() == {
         "tool_name": "mock_weather",
         "task_id": "task-1",
-        "trace_id": "trace-1",
         "payload": {"summary": "Light rain is possible later today."},
+        "tool_use_id": None,
+        "agent_id": None,
+        "parent_agent_id": None,
+        "arguments": {},
+        "called_at": None,
+        "completed_at": None,
+        "result_ttl_seconds": None,
+        "refresh_of_tool_use_id": None,
     }

@@ -1,14 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any
 
 from agent.context import AgentExecutionContext
-from agent.handoff import HandoffRequest
 from events import StandardizedEvent
 
 from .state import StepExecutionState
-from .graph import TaskGraphNodeType, TaskGraphRun
 
 
 class TaskState(StrEnum):
@@ -121,7 +119,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 @dataclass(slots=True)
 class Task:
     task_id: str
-    handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
     goal_state: TaskGoalState | None = None
     terminal_execution_state: TaskState | None = None
@@ -134,10 +131,8 @@ class Task:
     failure_reason: str | None = None
     current_step: StepExecutionState = field(default_factory=StepExecutionState)
     step_history: tuple[StepExecutionState, ...] = ()
-    trace_id: str = ""
     source_event: StandardizedEvent | None = None
     execution_context: AgentExecutionContext | None = None
-    graph: TaskGraphRun | None = None
     paused_from_state: TaskState | None = None
     terminal_outcome: Any | None = None
     failure: Any | None = None
@@ -146,23 +141,6 @@ class Task:
     control_request: Any | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    @property
-    def active_step_ids(self) -> tuple[str, ...]:
-        if self.graph is None:
-            return ()
-        step_ids = {
-            node.node_id
-            for node in self.graph.definition.nodes
-            if node.node_type is TaskGraphNodeType.STEP
-        }
-        active_states = {"ready", "running", "paused"}
-        return tuple(
-            node_id
-            for node_id in self.graph.definition.topological_order()
-            if node_id in step_ids
-            and _node_run_state(self.graph.node_runs.get(node_id)) in active_states
-        )
 
     def set_task_state(self, key: str, value: Any) -> None:
         self.task_local_state[key] = value
@@ -197,16 +175,3 @@ class Task:
             raise ValueError("goal state may only be committed at a terminal boundary")
         self.goal_state = goal_state
         self.updated_at = datetime.now(timezone.utc)
-
-
-def _node_run_state(node_run: Any) -> str | None:
-    if node_run is None:
-        return None
-    value = (
-        node_run.get("state")
-        if isinstance(node_run, Mapping)
-        else getattr(node_run, "state", None)
-    )
-    if value is None:
-        return None
-    return str(getattr(value, "value", value)).lower()

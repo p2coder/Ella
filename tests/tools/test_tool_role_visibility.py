@@ -22,8 +22,6 @@ def make_context(
         agent_role=agent_role,
         parent_agent_id=None,
         task_id="task-role",
-        trace_id="trace-role",
-        handoff_goal="Use an allowed capability.",
         memory_scope="task_local",
         capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=(),

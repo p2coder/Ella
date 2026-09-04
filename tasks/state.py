@@ -92,6 +92,14 @@ class ToolFailureObservation:
     message: str
     arguments: Mapping[str, Any]
     retryable: bool
+    tool_use_id: str | None = None
+    task_id: str | None = None
+    agent_id: str | None = None
+    parent_agent_id: str | None = None
+    called_at: str | None = None
+    completed_at: str | None = None
+    result_ttl_seconds: float | None = None
+    refresh_of_tool_use_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("attempt_id", "tool_name", "code", "message"):
@@ -113,6 +121,14 @@ class ToolFailureObservation:
             "message": self.message,
             "arguments": _thaw(self.arguments),
             "retryable": self.retryable,
+            "tool_use_id": self.tool_use_id,
+            "task_id": self.task_id,
+            "agent_id": self.agent_id,
+            "parent_agent_id": self.parent_agent_id,
+            "called_at": self.called_at,
+            "completed_at": self.completed_at,
+            "result_ttl_seconds": self.result_ttl_seconds,
+            "refresh_of_tool_use_id": self.refresh_of_tool_use_id,
         }
 
 

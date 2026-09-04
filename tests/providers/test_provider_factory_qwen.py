@@ -52,7 +52,7 @@ def test_provider_factory_missing_api_key_does_not_crash():
         )
     )
 
-    result = factory.llm().generate("hello", trace_id="trace-factory")
+    result = factory.llm().generate("hello", task_id="task-factory")
 
     assert result.failed is True
     assert result.error.code == "provider_unavailable"

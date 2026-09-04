@@ -1,3 +1,4 @@
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -47,11 +48,22 @@ CONFIG_NAMES = {
     "ELLA_DEBUG_STORE_RAW_MEDIA": "DEBUG_STORE_RAW_MEDIA",
     "ELLA_MEMORY_PATH": "MEMORY_PATH",
     "ELLA_TRACE_DIRECTORY": "TRACE_DIRECTORY",
-    "ELLA_PLAN_DIRECTORY": "PLAN_DIRECTORY",
     "ELLA_TASK_CHECKPOINT_DIRECTORY": "TASK_CHECKPOINT_DIRECTORY",
     "ELLA_DISPLAY_DIRECTORY": "DISPLAY_DIRECTORY",
     "ELLA_RAW_MEDIA_DIRECTORY": "RAW_MEDIA_DIRECTORY",
     "ELLA_DOCUMENT_DIRECTORY": "DOCUMENT_DIRECTORY",
+    "ELLA_CONTEXT_WINDOW_TOKENS": "CONTEXT_WINDOW_TOKENS",
+    "ELLA_CONTEXT_COMPRESSION_THRESHOLD": "CONTEXT_COMPRESSION_THRESHOLD",
+    "ELLA_TOOL_RESULT_TTL_OVERRIDES": "TOOL_RESULT_TTL_OVERRIDES",
+    "ELLA_WORKFLOW_MAX_SCRIPT_BYTES": "WORKFLOW_MAX_SCRIPT_BYTES",
+    "ELLA_WORKFLOW_MAX_WALL_SECONDS": "WORKFLOW_MAX_WALL_SECONDS",
+    "ELLA_WORKFLOW_MAX_PARALLEL_CHILDREN": "WORKFLOW_MAX_PARALLEL_CHILDREN",
+    "ELLA_WORKFLOW_MAX_TOTAL_CHILDREN": "WORKFLOW_MAX_TOTAL_CHILDREN",
+    "ELLA_WORKFLOW_MEMORY_LIMIT_BYTES": "WORKFLOW_MEMORY_LIMIT_BYTES",
+    "ELLA_WORKFLOW_MAX_RETURN_BYTES": "WORKFLOW_MAX_RETURN_BYTES",
+    "ELLA_SUBAGENT_MAX_DEPTH": "SUBAGENT_MAX_DEPTH",
+    "ELLA_SUBAGENT_MAX_ADVANCES": "SUBAGENT_MAX_ADVANCES",
+    "ELLA_SUBAGENT_MAX_TIMEOUT_SECONDS": "SUBAGENT_MAX_TIMEOUT_SECONDS",
 }
 
 SAFE_DEFAULTS = {
@@ -82,7 +94,6 @@ SAFE_DEFAULTS = {
     "ELLA_DEBUG_STORE_RAW_MEDIA": False,
     "ELLA_MEMORY_PATH": user_config.PROJECT_ROOT / "memory" / "memory.md",
     "ELLA_TRACE_DIRECTORY": user_config.PROJECT_ROOT / "trace",
-    "ELLA_PLAN_DIRECTORY": user_config.PROJECT_ROOT / "output" / "plans",
     "ELLA_TASK_CHECKPOINT_DIRECTORY": (
         user_config.PROJECT_ROOT / "output" / "tasks"
     ),
@@ -93,6 +104,18 @@ SAFE_DEFAULTS = {
     "ELLA_DOCUMENT_DIRECTORY": (
         user_config.PROJECT_ROOT / "output" / "documents"
     ),
+    "ELLA_CONTEXT_WINDOW_TOKENS": 1_000_000,
+    "ELLA_CONTEXT_COMPRESSION_THRESHOLD": 0.8,
+    "ELLA_TOOL_RESULT_TTL_OVERRIDES": {},
+    "ELLA_WORKFLOW_MAX_SCRIPT_BYTES": 64 * 1024,
+    "ELLA_WORKFLOW_MAX_WALL_SECONDS": 600,
+    "ELLA_WORKFLOW_MAX_PARALLEL_CHILDREN": 8,
+    "ELLA_WORKFLOW_MAX_TOTAL_CHILDREN": 32,
+    "ELLA_WORKFLOW_MEMORY_LIMIT_BYTES": 64 * 1024 * 1024,
+    "ELLA_WORKFLOW_MAX_RETURN_BYTES": 1024 * 1024,
+    "ELLA_SUBAGENT_MAX_DEPTH": 4,
+    "ELLA_SUBAGENT_MAX_ADVANCES": 50,
+    "ELLA_SUBAGENT_MAX_TIMEOUT_SECONDS": 300,
 }
 
 
@@ -125,7 +148,6 @@ class EllaSettings:
     mic_channels: int = 1
     memory_path: Path = user_config.PROJECT_ROOT / "memory" / "memory.md"
     trace_directory: Path = user_config.PROJECT_ROOT / "trace"
-    plan_directory: Path = user_config.PROJECT_ROOT / "output" / "plans"
     task_checkpoint_directory: Path = (
         user_config.PROJECT_ROOT / "output" / "tasks"
     )
@@ -136,6 +158,25 @@ class EllaSettings:
     document_directory: Path = (
         user_config.PROJECT_ROOT / "output" / "documents"
     )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
+    tool_result_ttl_overrides: Mapping[str, float | None] | None = None
+    workflow_max_script_bytes: int = 64 * 1024
+    workflow_max_wall_seconds: int = 600
+    workflow_max_parallel_children: int = 8
+    workflow_max_total_children: int = 32
+    workflow_memory_limit_bytes: int = 64 * 1024 * 1024
+    workflow_max_return_bytes: int = 1024 * 1024
+    subagent_max_depth: int = 4
+    subagent_max_advances: int = 50
+    subagent_max_timeout_seconds: int = 300
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "tool_result_ttl_overrides",
+            dict(self.tool_result_ttl_overrides or {}),
+        )
 
 
 def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
@@ -248,7 +289,6 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         ),
         memory_path=_path(values, "ELLA_MEMORY_PATH"),
         trace_directory=_path(values, "ELLA_TRACE_DIRECTORY"),
-        plan_directory=_path(values, "ELLA_PLAN_DIRECTORY"),
         task_checkpoint_directory=_path(
             values,
             "ELLA_TASK_CHECKPOINT_DIRECTORY",
@@ -256,6 +296,49 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         display_directory=_path(values, "ELLA_DISPLAY_DIRECTORY"),
         raw_media_directory=_path(values, "ELLA_RAW_MEDIA_DIRECTORY"),
         document_directory=_path(values, "ELLA_DOCUMENT_DIRECTORY"),
+        context_window_tokens=_positive_integer(
+            values, "ELLA_CONTEXT_WINDOW_TOKENS", 1_000_000
+        ),
+        context_compression_threshold=_bounded_ratio(
+            values, "ELLA_CONTEXT_COMPRESSION_THRESHOLD", 0.8
+        ),
+        tool_result_ttl_overrides=_ttl_overrides(
+            values,
+            "ELLA_TOOL_RESULT_TTL_OVERRIDES",
+        ),
+        workflow_max_script_bytes=_bounded_positive_integer(
+            values, "ELLA_WORKFLOW_MAX_SCRIPT_BYTES", 64 * 1024, maximum=64 * 1024
+        ),
+        workflow_max_wall_seconds=_bounded_positive_integer(
+            values, "ELLA_WORKFLOW_MAX_WALL_SECONDS", 600, maximum=600
+        ),
+        workflow_max_parallel_children=_bounded_positive_integer(
+            values, "ELLA_WORKFLOW_MAX_PARALLEL_CHILDREN", 8, maximum=8
+        ),
+        workflow_max_total_children=_bounded_positive_integer(
+            values, "ELLA_WORKFLOW_MAX_TOTAL_CHILDREN", 32, maximum=32
+        ),
+        workflow_memory_limit_bytes=_bounded_positive_integer(
+            values,
+            "ELLA_WORKFLOW_MEMORY_LIMIT_BYTES",
+            64 * 1024 * 1024,
+            maximum=64 * 1024 * 1024,
+        ),
+        workflow_max_return_bytes=_bounded_positive_integer(
+            values,
+            "ELLA_WORKFLOW_MAX_RETURN_BYTES",
+            1024 * 1024,
+            maximum=1024 * 1024,
+        ),
+        subagent_max_depth=_bounded_positive_integer(
+            values, "ELLA_SUBAGENT_MAX_DEPTH", 4, maximum=4
+        ),
+        subagent_max_advances=_bounded_positive_integer(
+            values, "ELLA_SUBAGENT_MAX_ADVANCES", 50, maximum=50
+        ),
+        subagent_max_timeout_seconds=_bounded_positive_integer(
+            values, "ELLA_SUBAGENT_MAX_TIMEOUT_SECONDS", 300, maximum=300
+        ),
     )
 
 
@@ -294,6 +377,38 @@ def _optional_string(env: Mapping[str, Any], name: str) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _bounded_ratio(values: Mapping[str, Any], name: str, default: float) -> float:
+    value = float(values.get(name, default))
+    if not 0 < value < 1:
+        raise ValueError(f"{name.removeprefix('ELLA_')} must be in (0, 1)")
+    return value
+
+
+def _ttl_overrides(
+    values: Mapping[str, Any],
+    name: str,
+) -> dict[str, float | None]:
+    raw = values.get(name, {})
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    result: dict[str, float | None] = {}
+    for tool_name, ttl in raw.items():
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError(f"{name} keys must be non-empty tool names")
+        if ttl is None:
+            result[tool_name] = None
+            continue
+        if (
+            isinstance(ttl, bool)
+            or not isinstance(ttl, (int, float))
+            or not math.isfinite(ttl)
+            or ttl < 0
+        ):
+            raise ValueError(f"invalid TTL override for {tool_name}: {ttl}")
+        result[tool_name] = float(ttl)
+    return result
 
 
 def _path(values: Mapping[str, Any], name: str) -> Path:

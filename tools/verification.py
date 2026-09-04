@@ -1,15 +1,138 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
+from uuid import uuid4
 
 from agent.context import AgentExecutionContext
+from agent.verification import VerificationAgent
+from tasks.task import Task
 
 from .base import ToolDefinition, ToolIdempotency, ToolResult
+from .manager import ToolManager
 
 
 MAX_VERIFICATION_DOCUMENT_BYTES = 200_000
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationTool:
+    task_reader: Callable[[str], Task]
+    verification_agent: VerificationAgent
+    tool_manager: ToolManager | None = None
+    max_mechanical_checks: int = 4
+    name: str = "verification"
+    allowed_roles: tuple[str, ...] = ("main_agent", "subagent")
+
+    @property
+    def definition(self) -> ToolDefinition:
+        string_array = {"type": "array", "items": {"type": "string"}}
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Verify a candidate result against the current task intent and "
+                "observations. Task data is loaded from the execution context."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {"candidate_result": {"type": "string"}},
+                "required": ["candidate_result"],
+                "additionalProperties": False,
+            },
+            input_examples=({"candidate_result": "The requested report is ready."},),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "goal_state": {"type": "string"},
+                    "criterion_results": string_array,
+                    "deliverable_results": string_array,
+                    "draft_quality_issues": string_array,
+                    "recoverable": {"type": "boolean"},
+                    "feedback_for_execution": {"type": "string"},
+                    "public_summary": {"type": "string"},
+                    "checks": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": [
+                    "goal_state",
+                    "criterion_results",
+                    "deliverable_results",
+                    "draft_quality_issues",
+                    "recoverable",
+                    "feedback_for_execution",
+                    "public_summary",
+                    "checks",
+                ],
+                "additionalProperties": False,
+            },
+            result_ttl_seconds=300,
+            idempotency=ToolIdempotency.IDEMPOTENT,
+        )
+
+    def run(self, context: AgentExecutionContext, arguments=None) -> ToolResult:
+        candidate_result = str((arguments or {}).get("candidate_result", ""))
+        task = self.task_reader(context.task_id)
+        tools = self._visible_mechanical_tools(context)
+        definitions = tuple(
+            definition
+            for name in tools
+            if (definition := self.tool_manager.get_definition(name)) is not None
+        )
+        checks: list[Mapping[str, Any]] = []
+        for _ in range(self.max_mechanical_checks + 1):
+            action = self.verification_agent.decide_candidate(
+                task,
+                candidate_result=candidate_result,
+                definitions=definitions,
+                verification_results=tuple(checks),
+            )
+            if action.verdict is not None:
+                return ToolResult(
+                    self.name,
+                    context.task_id,
+                    {**action.verdict.to_dict(), "checks": tuple(checks)},
+                )
+            if len(checks) >= self.max_mechanical_checks:
+                raise RuntimeError("verification mechanical check limit exceeded")
+            tool = tools.get(str(action.tool_name))
+            if tool is None:
+                raise RuntimeError("verification requested an unavailable Tool")
+            called_at = _utc_now()
+            result = tool.run(context, dict(action.arguments or {}))
+            completed_at = _utc_now()
+            checks.append(
+                replace(
+                    result,
+                    tool_use_id=f"tool-use-{uuid4().hex}",
+                    agent_id=context.agent_id,
+                    parent_agent_id=context.parent_agent_id,
+                    arguments=dict(action.arguments or {}),
+                    called_at=called_at,
+                    completed_at=completed_at,
+                    result_ttl_seconds=(
+                        self.tool_manager.get_definition(str(action.tool_name))
+                    ).result_ttl_seconds,
+                ).to_dict()
+            )
+        raise RuntimeError("verification did not produce a verdict")
+
+    def _visible_mechanical_tools(self, context) -> dict[str, Any]:
+        if self.tool_manager is None:
+            return {}
+        names = ("artifact_exists", "document_read", "tool_observation_check")
+        return {
+            name: tool
+            for name in names
+            if name in context.capability_scope.allowed_tools
+            and (tool := self.tool_manager.get_for_role(name, context.agent_role))
+            is not None
+        }
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _safe_target(root: Path, value: object) -> tuple[PurePosixPath, Path]:
@@ -29,7 +152,11 @@ def _safe_target(root: Path, value: object) -> tuple[PurePosixPath, Path]:
 class ArtifactExistsTool:
     root_directory: Path
     name: str = "artifact_exists"
-    allowed_roles: tuple[str, ...] = ("main_agent", "verification_agent")
+    allowed_roles: tuple[str, ...] = (
+        "main_agent",
+        "subagent",
+        "verification_agent",
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -44,6 +171,7 @@ class ArtifactExistsTool:
                 "file-type check; never create or modify the artifact."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {"relative_path": {"type": "string"}},
@@ -71,7 +199,6 @@ class ArtifactExistsTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "relative_path": relative.as_posix(),
                 "exists": target.exists(),
@@ -85,7 +212,11 @@ class DocumentReadTool:
     root_directory: Path
     max_bytes: int = MAX_VERIFICATION_DOCUMENT_BYTES
     name: str = "document_read"
-    allowed_roles: tuple[str, ...] = ("main_agent", "verification_agent")
+    allowed_roles: tuple[str, ...] = (
+        "main_agent",
+        "subagent",
+        "verification_agent",
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -101,6 +232,7 @@ class DocumentReadTool:
                 "byte limit and non-UTF-8 documents are unsupported."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {"relative_path": {"type": "string"}},
@@ -138,7 +270,6 @@ class DocumentReadTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {
                 "relative_path": relative.as_posix(),
                 "content": content,
@@ -152,7 +283,11 @@ class DocumentReadTool:
 class ToolObservationCheckTool:
     observation_reader: Callable[[str], tuple[Mapping[str, Any], ...]]
     name: str = "tool_observation_check"
-    allowed_roles: tuple[str, ...] = ("main_agent", "verification_agent")
+    allowed_roles: tuple[str, ...] = (
+        "main_agent",
+        "subagent",
+        "verification_agent",
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -168,6 +303,7 @@ class ToolObservationCheckTool:
                 "persisted observation was found."
             ),
             schema_version="1.0",
+            result_ttl_seconds=0,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -204,6 +340,5 @@ class ToolObservationCheckTool:
         return ToolResult(
             self.name,
             context.task_id,
-            context.trace_id,
             {"matched": bool(observations), "observations": observations},
         )

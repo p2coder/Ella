@@ -12,7 +12,7 @@ class SpeechProvider(Protocol):
         self,
         audio: Any,
         *,
-        trace_id: str | None = None,
+        task_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ProviderResult:
         ...

@@ -41,7 +41,7 @@ class CliTextToStandardizedEventStage(PipelineStage):
             raise ValueError("CLI text signal payload must contain text")
 
         return StandardizedEvent(
-            trace_id=item.trace_id,
+            task_id=item.task_id,
             source=item.source,
             timestamp=item.timestamp,
             payload={"text": text},

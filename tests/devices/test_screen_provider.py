@@ -7,11 +7,11 @@ from devices.screen import (
 
 
 def test_mock_screen_provider_returns_image_payload():
-    result = MockScreenProvider().capture_screen(trace_id="trace-screen")
+    result = MockScreenProvider().capture_screen(task_id="task-screen")
 
     assert result.succeeded is True
     assert result.device_name == "mock_screen"
-    assert result.trace_id == "trace-screen"
+    assert result.task_id == "task-screen"
     assert result.output == {
         "type": "image",
         "frame": "mock-screen-frame",
@@ -25,7 +25,7 @@ def test_real_screen_provider_uses_backend_without_opening_on_import():
     backend = RecordingScreenBackend()
     provider = RealScreenProvider(backend=backend)
 
-    result = provider.capture_screen(trace_id="trace-real")
+    result = provider.capture_screen(task_id="task-real")
 
     assert result.succeeded is True
     assert backend.capture_count == 1
@@ -48,7 +48,7 @@ def test_real_screen_provider_maps_backend_errors():
         )
     )
 
-    result = provider.capture_screen(trace_id="trace-fail")
+    result = provider.capture_screen(task_id="task-fail")
 
     assert result.failed is True
     assert result.error == DeviceError(

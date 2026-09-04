@@ -63,6 +63,7 @@ class WebSearchTool:
                 "candidate sources and are not proof that a claim is true."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -152,7 +153,7 @@ class WebSearchTool:
                 code="web_search_failed",
                 message="; ".join(errors) or "no public search results found",
             )
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
     def _try_brave(
         self,
@@ -244,6 +245,7 @@ class WebPageReadTool:
                 "when they do not appear in the returned text."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -333,7 +335,7 @@ class WebPageReadTool:
                 "truncated": False,
                 "error": {"code": "web_page_read_failed", "message": str(error)},
             }
-        return ToolResult(self.name, context.task_id, context.trace_id, payload)
+        return ToolResult(self.name, context.task_id, payload)
 
 
 class _BraveSearchResultParser(HTMLParser):

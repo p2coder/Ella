@@ -26,15 +26,16 @@ class AgentExecutionContext:
     agent_role: str
     parent_agent_id: str | None
     task_id: str
-    trace_id: str
-    handoff_goal: str
     memory_scope: str
     capability_scope: CapabilityScope
     permissions: tuple[str, ...] = ()
+    agent_depth: int = 0
 
     def __post_init__(self) -> None:
         if self.capability_scope.agent_role != self.agent_role:
             raise ValueError("capability scope agent role must match context agent role")
+        if self.agent_depth < 0:
+            raise ValueError("agent_depth must be non-negative")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,9 +43,8 @@ class AgentExecutionContext:
             "agent_role": self.agent_role,
             "parent_agent_id": self.parent_agent_id,
             "task_id": self.task_id,
-            "trace_id": self.trace_id,
-            "handoff_goal": self.handoff_goal,
             "memory_scope": self.memory_scope,
             "permissions": self.permissions,
             "capability_scope": self.capability_scope.to_dict(),
+            "agent_depth": self.agent_depth,
         }

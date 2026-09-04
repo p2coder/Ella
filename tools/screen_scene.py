@@ -39,6 +39,7 @@ class ScreenSceneTool:
                 "hidden, occluded, or outside the captured display."
             ),
             schema_version="1.0",
+            result_ttl_seconds=120,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -101,7 +102,7 @@ class ScreenSceneTool:
         frames = []
         for _ in range(screenshot_limit):
             screen_result = self.screen_provider.capture_screen(
-                trace_id=context.trace_id,
+                task_id=context.task_id,
                 metadata={"max_screenshots": screenshot_limit},
             )
             if screen_result.failed:
@@ -119,9 +120,8 @@ class ScreenSceneTool:
             {
                 "frames": tuple(frames),
                 "task_id": context.task_id,
-                "handoff_goal": context.handoff_goal,
             },
-            trace_id=context.trace_id,
+            task_id=context.task_id,
         )
         if multimodal_result.failed:
             return self._unavailable_result(
@@ -152,7 +152,6 @@ class ScreenSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload=payload,
         )
 
@@ -199,7 +198,6 @@ class ScreenSceneTool:
         return ToolResult(
             tool_name=self.name,
             task_id=context.task_id,
-            trace_id=context.trace_id,
             payload={
                 "status": "unavailable",
                 "summary": summary,

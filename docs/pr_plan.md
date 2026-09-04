@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本文档已被 `docs/runtime_tools_workflow_prd.md` 取代，仅保留为历史记录；其中的旧 DAG、route、presence、handoff 与多标识设计不再是现役契约。
+
 # Ella Runtime MVP PR 实施计划
 
 本文档定义 Ella Runtime MVP 的 Pull Request 拆分计划与提交规范。后续实现应以 `docs/prd.md` 和 `docs/architecture.md` 作为产品与架构基线，并通过小粒度 PR 逐步落地。

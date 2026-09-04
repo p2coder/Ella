@@ -1,3 +1,6 @@
+> [!WARNING]
+> 本文档已被 `docs/runtime_tools_workflow_prd.md` 取代，仅保留为历史记录；其中的旧 DAG、route、presence、handoff 与多标识设计不再是现役契约。
+
 # Ella Runtime PRD 3：Prompt Engine 与页面显示器
 
 > **⚠️ 已过期文档（核对日期：2026-08-27）**

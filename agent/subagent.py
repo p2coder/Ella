@@ -5,12 +5,12 @@ from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
-from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.provider_usage import record_provider_usage
+from runtime.context_window import prepare_context
 from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
 from tasks.task import Task, TaskIntent
@@ -35,6 +35,8 @@ class SubAgent:
     trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
         default_factory=NoOpTraceRecorder
     )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
 
     def decide_first_action(
         self,
@@ -54,25 +56,28 @@ class SubAgent:
             {
                 "user_prompt": user_input,
                 "workspace": {
-                    "task_id": task.task_id,
-                    "trace_id": context.trace_id,
+                    "task_id": context.task_id,
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": self._observations(task),
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"
                     ),
+                    "inherited_context": task.task_local_state.get(
+                        "inherited_context"
+                    ),
                 },
             },
         )
-        task.task_local_state["first_decision_prompt_text"] = prompt.prompt
+        prompt_text = self._prepare_prompt(task, "first_decision", prompt.prompt)
+        task.task_local_state["first_decision_prompt_text"] = prompt_text
         if self.llm_provider is None:
             return self._first_decision_fallback(user_input, task, definitions)
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
-                trace_id=context.trace_id,
+                prompt_text,
+                task_id=context.task_id,
                 metadata={"boundary": "first_decision"},
             )
         except Exception:
@@ -121,7 +126,7 @@ class SubAgent:
     ) -> None:
         provider = result if result is not None else self.llm_provider
         self.timing_recorder.record_llm_call(
-            context.trace_id,
+            context.task_id,
             boundary=boundary,
             duration_ms=round((perf_counter() - started) * 1000, 3),
             success=success,
@@ -131,7 +136,6 @@ class SubAgent:
 
     def decide_next_action(
         self,
-        handoff: HandoffRequest,
         context: AgentExecutionContext,
         task: Task,
         *,
@@ -141,57 +145,46 @@ class SubAgent:
         definitions = self._visible_definitions(context, task)
         serialized = serialize_tool_definitions(definitions)
         observations = self._observations(task)
+        overall_goal = task.intent.goal if task.intent is not None else ""
+        inherited_criteria = (
+            task.intent.minimum_acceptance_criteria
+            if task.intent is not None
+            else ()
+        )
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
                 "user_prompt": task.task_local_state.get(
                     "latest_user_input",
-                    handoff.trigger_event.payload.get("text", ""),
+                    "",
                 ),
                 "workspace": {
-                    "task_id": task.task_id,
-                    "trace_id": context.trace_id,
-                    "overall_goal": handoff.task_goal,
-                    "current_goal": current_goal or handoff.task_goal,
+                    "task_id": context.task_id,
+                    "overall_goal": overall_goal,
+                    "current_goal": current_goal or overall_goal,
                     "completion_criteria": tuple(
-                        completion_criteria or handoff.completion_criteria
+                        completion_criteria or inherited_criteria
                     ),
                     "task_state": task.state.value,
                     "visible_skills": self._visible_skills(context),
                     "visible_tools": serialized,
                     "observations": observations,
-                    "plan": (
-                        None
-                        if task.graph is None
-                        else {
-                            "version": task.graph.definition.version,
-                            "node_runs": task.graph.node_runs,
-                            "execution_complete": bool(
-                                task.task_local_state.get(
-                                    "plan_execution_complete", False
-                                )
-                            ),
-                            "recovery_required": bool(
-                                task.task_local_state.get(
-                                    "plan_recovery_reasoning_pending", False
-                                )
-                            ),
-                            "recovery_reason": task.task_local_state.get(
-                                "plan_recovery_reason"
-                            ),
-                        }
-                    ),
                     "current_step": self._step_context(task),
                     "decision_repair": task.task_local_state.get(
                         "decision_repair"
                     ),
+                    "inherited_context": task.task_local_state.get(
+                        "inherited_context"
+                    ),
                 },
             },
         )
-        task.task_local_state["execution_decision_prompt_text"] = prompt.prompt
+        prompt_text = self._prepare_prompt(
+            task, "execution_decision", prompt.prompt
+        )
+        task.task_local_state["execution_decision_prompt_text"] = prompt_text
         self.trace_recorder.record(
             task_id=task.task_id,
-            trace_id=context.trace_id,
             boundary="reasoning.execution_decision",
             event_type="prompt_built",
             payload={
@@ -208,8 +201,8 @@ class SubAgent:
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
-                trace_id=context.trace_id,
+                prompt_text,
+                task_id=context.task_id,
                 metadata={"boundary": "execution_decision"},
             )
         except Exception:
@@ -255,6 +248,32 @@ class SubAgent:
         self._record_boundary_timing(
             context, "execution_decision", started, success, result
         )
+
+    def _prepare_prompt(self, task: Task, boundary: str, text: str) -> str:
+        prepared = prepare_context(
+            text,
+            context_window_tokens=self.context_window_tokens,
+            compression_threshold=self.context_compression_threshold,
+        )
+        if prepared.compression_requested:
+            event = {
+                "boundary": boundary,
+                "estimated_tokens": prepared.estimated_tokens,
+            }
+            events = tuple(
+                task.task_local_state.get("context_compression_requested", ())
+            )
+            task.task_local_state["context_compression_requested"] = (
+                *events,
+                event,
+            )
+            self.trace_recorder.record(
+                task_id=task.task_id,
+                boundary="context",
+                event_type="context_compression_requested",
+                payload=event,
+            )
+        return prepared.text
 
     @classmethod
     def _first_decision_from_payload(

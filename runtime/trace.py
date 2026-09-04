@@ -12,7 +12,7 @@ from typing import Any, Mapping
 
 _SECRET_KEY = re.compile(r"(?:api[_-]?key|authorization|token|secret|password)", re.I)
 _ABSOLUTE_PATH = re.compile(r"(?:(?:[A-Za-z]:\\)|/Users/|/home/)[^\s;,]+")
-_SAFE_TRACE_ID = re.compile(r"[^A-Za-z0-9._-]+")
+_SAFE_TASK_ID = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _redact(value: Any, key: str = "") -> Any:
@@ -33,7 +33,6 @@ def _redact(value: Any, key: str = "") -> Any:
 class TraceEvent:
     sequence: int
     task_id: str
-    trace_id: str
     boundary: str
     event_type: str
     payload: Mapping[str, Any]
@@ -43,7 +42,6 @@ class TraceEvent:
         return {
             "sequence": self.sequence,
             "task_id": self.task_id,
-            "trace_id": self.trace_id,
             "boundary": self.boundary,
             "event_type": self.event_type,
             "payload": dict(self.payload),
@@ -52,51 +50,13 @@ class TraceEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class TaskGraphTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class TaskNodeTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class ReasoningTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class StepTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class ToolNodeTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class ToolAttemptTrace:
-    events: tuple[TraceEvent, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class TaskTraceSnapshot:
     task_id: str
-    trace_id: str
     events: tuple[TraceEvent, ...]
-    task_graph: TaskGraphTrace
-    task_nodes: TaskNodeTrace
-    reasoning: ReasoningTrace
-    steps: StepTrace
-    tool_nodes: ToolNodeTrace
-    tool_attempts: ToolAttemptTrace
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
-            "trace_id": self.trace_id,
             "events": tuple(event.to_dict() for event in self.events),
         }
 
@@ -121,7 +81,6 @@ class TraceRecorder:
         self,
         *,
         task_id: str,
-        trace_id: str,
         boundary: str,
         event_type: str,
         payload: Mapping[str, Any] | None = None,
@@ -131,13 +90,11 @@ class TraceRecorder:
             output_path = self._path_for_task(task_id)
             if task_id not in self._sequence_offsets:
                 self._sequence_offsets[task_id] = self._existing_event_count(
-                    output_path,
-                    task_id,
+                    output_path, task_id
                 )
             event = TraceEvent(
                 sequence=self._sequence_offsets[task_id] + len(task_events) + 1,
                 task_id=task_id,
-                trace_id=trace_id,
                 boundary=boundary,
                 event_type=event_type,
                 payload=_redact(dict(payload or {})),
@@ -147,9 +104,7 @@ class TraceRecorder:
             if output_path is not None:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 with output_path.open("a", encoding="utf-8") as stream:
-                    stream.write(
-                        json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
-                    )
+                    stream.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
             return event
@@ -159,27 +114,14 @@ class TraceRecorder:
             return self.output_path
         if self.output_directory is None:
             return None
-        safe_task_id = _SAFE_TRACE_ID.sub("_", task_id).strip("._")
+        safe_task_id = _SAFE_TASK_ID.sub("_", task_id).strip("._")
         if not safe_task_id:
             raise ValueError("task_id does not contain a safe trace file name")
         return self.output_directory / f"{safe_task_id}.jsonl"
 
     @staticmethod
     def _existing_event_count(path: Path | None, task_id: str) -> int:
-        if path is None or not path.exists():
-            return 0
-        with path.open("r", encoding="utf-8") as stream:
-            count = 0
-            for line in stream:
-                if not line.strip():
-                    continue
-                try:
-                    document = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if document.get("task_id") == task_id:
-                    count += 1
-            return count
+        return len(TraceRecorder._read_events(path, task_id))
 
     def snapshot(self, task_id: str) -> TaskTraceSnapshot | None:
         with self._lock:
@@ -188,22 +130,7 @@ class TraceRecorder:
         by_sequence = {event.sequence: event for event in persisted}
         by_sequence.update({event.sequence: event for event in in_memory})
         events = tuple(by_sequence[key] for key in sorted(by_sequence))
-        if not events:
-            return None
-        matching = lambda prefix: tuple(
-            event for event in events if event.boundary.startswith(prefix)
-        )
-        return TaskTraceSnapshot(
-            task_id,
-            events[0].trace_id,
-            events,
-            TaskGraphTrace(matching("task_graph")),
-            TaskNodeTrace(matching("task_node")),
-            ReasoningTrace(matching("reasoning")),
-            StepTrace(matching("step")),
-            ToolNodeTrace(matching("tool_node")),
-            ToolAttemptTrace(matching("tool_attempt")),
-        )
+        return None if not events else TaskTraceSnapshot(task_id, events)
 
     @staticmethod
     def _read_events(path: Path | None, task_id: str) -> tuple[TraceEvent, ...]:
@@ -222,7 +149,6 @@ class TraceRecorder:
                         TraceEvent(
                             sequence=int(document["sequence"]),
                             task_id=str(document["task_id"]),
-                            trace_id=str(document["trace_id"]),
                             boundary=str(document["boundary"]),
                             event_type=str(document["event_type"]),
                             payload=dict(document.get("payload", {})),
