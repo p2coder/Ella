@@ -5,10 +5,12 @@ from runtime.context_window import (
     estimate_tokens,
     prepare_context,
 )
+from runtime.trace import TraceRecorder
 from agent.context import AgentExecutionContext, CapabilityScope
 from agent.subagent import SubAgent
+from agent.verification import VerificationAgent
 from skill import SkillManager
-from tasks.task import Task, TaskState
+from tasks.task import Task, TaskIntent, TaskState
 
 
 def test_estimate_tokens_uses_prd_character_weights_and_ceiling() -> None:
@@ -64,8 +66,10 @@ def test_subagent_records_compression_request_on_task() -> None:
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
+    recorder = TraceRecorder()
     agent = SubAgent(
         SkillManager(),
+        trace_recorder=recorder,
         context_window_tokens=100_000,
         context_compression_threshold=0.0001,
     )
@@ -75,3 +79,29 @@ def test_subagent_records_compression_request_on_task() -> None:
     event = task.task_local_state["context_compression_requested"][0]
     assert event["boundary"] == "first_decision"
     assert event["estimated_tokens"] > 0
+    snapshot = recorder.snapshot(task.task_id)
+    assert snapshot is not None
+    trace_event = snapshot.events[0]
+    assert trace_event.event_type == "context_compression_requested"
+    assert trace_event.payload["boundary"] == event["boundary"]
+
+
+def test_verification_records_compression_request_in_shared_trace() -> None:
+    task = Task(
+        "task-verification-context",
+        state=TaskState.REASONING,
+        intent=TaskIntent("Verify the result"),
+    )
+    recorder = TraceRecorder()
+    verifier = VerificationAgent(
+        trace_recorder=recorder,
+        context_window_tokens=100_000,
+        context_compression_threshold=0.0001,
+    )
+
+    verifier.decide_candidate(task, candidate_result="candidate")
+
+    snapshot = recorder.snapshot(task.task_id)
+    assert snapshot is not None
+    assert snapshot.events[0].event_type == "context_compression_requested"
+    assert snapshot.events[0].payload["boundary"] == "verification_decision"

@@ -9,6 +9,7 @@ from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.provider_usage import record_provider_usage
 from runtime.context_window import prepare_context
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from tasks.task import Task, TaskGoalState
 from tools.base import ToolDefinition
 
@@ -61,6 +62,9 @@ class VerificationAgent:
     llm_provider: LLMProvider | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
+    )
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
     )
     context_window_tokens: int = 1_000_000
     context_compression_threshold: float = 0.8
@@ -118,15 +122,22 @@ class VerificationAgent:
             compression_threshold=self.context_compression_threshold,
         )
         if prepared.compression_requested:
+            event = {
+                "boundary": "verification_decision",
+                "estimated_tokens": prepared.estimated_tokens,
+            }
             events = tuple(
                 task.task_local_state.get("context_compression_requested", ())
             )
             task.task_local_state["context_compression_requested"] = (
                 *events,
-                {
-                    "boundary": "verification_decision",
-                    "estimated_tokens": prepared.estimated_tokens,
-                },
+                event,
+            )
+            self.trace_recorder.record(
+                task_id=task.task_id,
+                boundary="context",
+                event_type="context_compression_requested",
+                payload=event,
             )
         task.task_local_state["verification_prompt_text"] = prepared.text
         if self.llm_provider is None:

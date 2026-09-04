@@ -256,15 +256,22 @@ class SubAgent:
             compression_threshold=self.context_compression_threshold,
         )
         if prepared.compression_requested:
+            event = {
+                "boundary": boundary,
+                "estimated_tokens": prepared.estimated_tokens,
+            }
             events = tuple(
                 task.task_local_state.get("context_compression_requested", ())
             )
             task.task_local_state["context_compression_requested"] = (
                 *events,
-                {
-                    "boundary": boundary,
-                    "estimated_tokens": prepared.estimated_tokens,
-                },
+                event,
+            )
+            self.trace_recorder.record(
+                task_id=task.task_id,
+                boundary="context",
+                event_type="context_compression_requested",
+                payload=event,
             )
         return prepared.text
 
