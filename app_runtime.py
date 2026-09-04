@@ -152,7 +152,6 @@ class AppRuntime:
                 timing_recorder=timing_recorder,
             ),
             memory_manager=MemoryManager(memory_path or settings.memory_path),
-            verification_agent=verification_agent,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
             task_store=TaskStore(settings.task_checkpoint_directory),

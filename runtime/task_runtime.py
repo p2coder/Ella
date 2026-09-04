@@ -8,7 +8,6 @@ from typing import Any
 from uuid import uuid4
 
 from agent.context import AgentExecutionContext
-from agent.verification import VerificationAgent, VerificationVerdict
 from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
@@ -53,11 +52,6 @@ from .interactions import InteractionBroker, UserAnswer, UserQuestion
 from .provider_usage import merge_provider_usage_calls
 
 
-VERIFICATION_TOOL_NAMES = frozenset(
-    {"artifact_exists", "document_read", "tool_observation_check"}
-)
-
-
 @dataclass(frozen=True, slots=True)
 class TaskHandle:
     task_id: str
@@ -83,10 +77,8 @@ class TaskRuntime:
     task_factory: TaskFactory = field(default_factory=TaskFactory)
     subagent: SubAgent | None = None
     executor: CapabilityExecutor | None = None
-    verification_agent: VerificationAgent | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder
     max_step_retries: int = 2
-    max_verification_rounds: int = 2
     task_store: TaskStore | None = None
     task_queue: TaskQueue | None = None
     max_runtime_ticks: int = 100
@@ -125,10 +117,8 @@ class TaskRuntime:
         subagent: SubAgent | None = None,
         executor: CapabilityExecutor | None = None,
         memory_manager: MemoryManager | None = None,
-        verification_agent: VerificationAgent | None = None,
         timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder | None = None,
         max_step_retries: int = 2,
-        max_verification_rounds: int = 2,
         task_store: TaskStore | None = None,
         task_queue: TaskQueue | None = None,
         max_runtime_ticks: int = 100,
@@ -141,17 +131,13 @@ class TaskRuntime:
     ) -> None:
         if max_step_retries < 0:
             raise ValueError("max_step_retries must be non-negative")
-        if max_verification_rounds < 1:
-            raise ValueError("max_verification_rounds must be positive")
         if max_task_workers < 1:
             raise ValueError("max_task_workers must be positive")
         self.task_factory = task_factory or TaskFactory()
         self.subagent = subagent
         self.executor = executor
-        self.verification_agent = verification_agent
         self.timing_recorder = timing_recorder or NoOpRuntimeTimingRecorder()
         self.max_step_retries = max_step_retries
-        self.max_verification_rounds = max_verification_rounds
         self.task_store = task_store
         self.task_queue = task_queue
         self.max_runtime_ticks = max_runtime_ticks
@@ -928,17 +914,6 @@ class TaskRuntime:
 
         self.timing_recorder.record_execution_started(task.execution_context.trace_id)
         self._persist(task)
-        pending_reasoning = task.task_local_state.get("pending_reasoning")
-        if (
-            isinstance(pending_reasoning, Mapping)
-            and pending_reasoning.get("purpose") == "verification"
-            and task.task_local_state.get("draft_final_response") is not None
-        ):
-            completed = self._verify_candidate(task)
-            return self._result(
-                task,
-                stop_reason="completed" if completed else None,
-            )
         saved_decision = task.task_local_state.get("current_decision")
         if isinstance(saved_decision, Mapping):
             decision = ExecutionDecision.from_dict(saved_decision)
@@ -1327,240 +1302,22 @@ class TaskRuntime:
         )
 
     def _finalize_candidate(self, task: Task) -> bool:
-        task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
-        self._persist(task)
         task.completion = self._build_completion(task)
         self._trace_task(
             task,
             "reasoning.submit_result",
-            "candidate_persisted",
+            "completed",
             {
                 "response_length": len(
                     task.task_local_state["draft_final_response"]
                 )
             },
         )
-        return self._verify_candidate(task)
-
-    def _verify_candidate(self, task: Task) -> bool:
-        in_progress = bool(
-            task.task_local_state.get("verification_in_progress", False)
-        )
-        verification_round = int(
-            task.task_local_state.get("verification_round", 0)
-        ) + (0 if in_progress else 1)
-        task.task_local_state["verification_round"] = verification_round
-        task.task_local_state["pending_reasoning"] = {"purpose": "verification"}
-        task.task_local_state["verification_in_progress"] = True
-        self._persist(task)
-        self._trace_task(
-            task,
-            "reasoning.verification",
-            "started",
-            {"round": verification_round},
-        )
-        if task.intent is not None and not task.intent.minimum_acceptance_criteria:
-            verdict = VerificationVerdict(
-                goal_state=TaskGoalState.ACHIEVED,
-                criterion_results=(),
-                deliverable_results=(),
-                draft_quality_issues=(),
-                recoverable=False,
-                feedback_for_execution="",
-                public_summary=(
-                    "No minimum acceptance criteria were required; the submitted "
-                    "response passed deterministic verification."
-                ),
-            )
-            return self._commit_verification_verdict(
-                task,
-                verdict,
-                verification_round,
-            )
-        verifier = self.verification_agent
-        if verifier is None:
-            subagent, _ = self._execution_components()
-            verifier = VerificationAgent(
-                prompt_engine=subagent.prompt_engine,
-                llm_provider=subagent.llm_provider,
-                timing_recorder=self.timing_recorder,
-            )
-        try:
-            _, executor = self._execution_components()
-            definitions = tuple(
-                item
-                for item in executor.tool_manager.list_definitions(task.execution_context)
-                if item.name in VERIFICATION_TOOL_NAMES
-            )
-            verdict = None
-            for _ in range(4):
-                action = verifier.decide(task, definitions)
-                if action.verdict is not None:
-                    verdict = action.verdict
-                    break
-                decision = ExecutionDecision(
-                    CALL_TOOL,
-                    action.tool_name,
-                    action.arguments or {},
-                    "Verification requires a read-only mechanical check.",
-                )
-                task.task_local_state["pending_tool"] = {
-                    "purpose": "verification",
-                    "tool_name": action.tool_name,
-                    "arguments": action.arguments or {},
-                }
-                task.task_local_state["in_flight_action"] = {
-                    "purpose": "verification",
-                    "tool_name": action.tool_name,
-                    "arguments": action.arguments or {},
-                    "safe_to_retry": True,
-                }
-                self._trace_task(
-                    task,
-                    "reasoning.verification",
-                    "tool_requested",
-                    {
-                        "round": verification_round,
-                        "tool_name": action.tool_name,
-                        "arguments": action.arguments or {},
-                    },
-                )
-                task.transition_to(TaskState.TOOL_EXECUTION)
-                self._persist(task)
-                execution = executor.execute(decision, task.execution_context, task)
-                task.transition_to(TaskState.REASONING)
-                task.task_local_state.pop("pending_tool", None)
-                task.task_local_state.pop("in_flight_action", None)
-                existing = tuple(
-                    task.task_local_state.get("verification_results", ())
-                )
-                if execution.failure is not None:
-                    mechanical_result = {
-                        "tool_name": action.tool_name,
-                        "failure": execution.failure.to_dict(),
-                    }
-                else:
-                    mechanical_result = execution.tool_result.to_dict()
-                task.task_local_state["verification_results"] = (
-                    *existing,
-                    mechanical_result,
-                )
-                self._trace_task(
-                    task,
-                    "reasoning.verification",
-                    "tool_observed",
-                    {
-                        "round": verification_round,
-                        "tool_name": action.tool_name,
-                        "result": mechanical_result,
-                    },
-                )
-                self._persist(task)
-            if verdict is None:
-                raise RuntimeError("verification tool-call budget exhausted")
-        except Exception as error:
-            task.completion = None
-            task.failure = {
-                "code": "verification_failed",
-                "message": str(error),
-            }
-            task.failure_reason = str(error)
-            task.transition_to(TaskState.FAILED)
-            task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
-            self._trace_task(
-                task,
-                "reasoning.verification",
-                "failed",
-                {"round": verification_round, "message": str(error)},
-            )
-            self._persist(task)
-            return False
-        return self._commit_verification_verdict(
-            task,
-            verdict,
-            verification_round,
-        )
-
-    def _commit_verification_verdict(
-        self,
-        task: Task,
-        verdict: VerificationVerdict,
-        verification_round: int,
-    ) -> bool:
-        results = tuple(task.task_local_state.get("verification_results", ()))
-        task.task_local_state["verification_results"] = (
-            *results,
-            verdict.to_dict(),
-        )
-        self._trace_task(
-            task,
-            "reasoning.verification",
-            "verdict",
-            verdict.to_dict(),
-        )
-        requires_revision = verdict.recoverable or bool(verdict.draft_quality_issues)
-        if requires_revision and verification_round < self.max_verification_rounds:
-            task.tool_trace += ({
-                "observation_id": (
-                    f"{task.task_id}:verification_feedback:{verification_round}"
-                ),
-                "tool_name": "verification_feedback",
-                "task_id": task.task_id,
-                "trace_id": task.trace_id,
-                "payload": {
-                    "feedback": verdict.feedback_for_execution,
-                    "draft_quality_issues": verdict.draft_quality_issues,
-                },
-            },)
-            task.completion = None
-            task.task_local_state.pop("draft_final_response", None)
-            task.task_local_state.pop("completion_summary", None)
-            task.task_local_state.pop("completion_evidence_refs", None)
-            task.task_local_state.pop("verification_in_progress", None)
-            task.task_local_state["pending_reasoning"] = {"purpose": "execution"}
-            self._trace_task(
-                task,
-                "reasoning.verification",
-                "returned_to_execution",
-                {
-                    "round": verification_round,
-                    "feedback": verdict.feedback_for_execution,
-                },
-            )
-            self._persist(task)
-            return False
-        if verdict.draft_quality_issues:
-            task.completion = None
-            task.failure = {
-                "code": "unverified_response_draft",
-                "message": (
-                    "The candidate response remained unsafe or inconsistent "
-                    "after the verification budget was exhausted."
-                ),
-                "draft_quality_issues": verdict.draft_quality_issues,
-            }
-            task.failure_reason = task.failure["message"]
-            task.task_local_state.pop("verification_in_progress", None)
-            task.task_local_state.pop("pending_reasoning", None)
-            task.transition_to(TaskState.FAILED)
-            task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
-            self._trace_task(
-                task,
-                "reasoning.verification",
-                "draft_rejected",
-                {
-                    "round": verification_round,
-                    "issues": verdict.draft_quality_issues,
-                },
-            )
-            self._persist(task)
-            return False
         self.timing_recorder.record_execution_completed(task.execution_context.trace_id)
         self.timing_recorder.record_task_completed(task.execution_context.trace_id)
         task.transition_to(TaskState.COMPLETED)
-        task.set_goal_state(verdict.goal_state)
+        task.set_goal_state(TaskGoalState.ACHIEVED)
         task.terminal_execution_state = TaskState.COMPLETED
-        task.task_local_state.pop("verification_in_progress", None)
         task.task_local_state.pop("pending_reasoning", None)
         self._persist(task)
         self._trace_task(
