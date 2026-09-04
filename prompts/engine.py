@@ -13,8 +13,7 @@ USER_PROMPT_CONTEXT_KEYS = frozenset(("user_input", "user_prompt", "UserPrompt")
 # automatic context caching / DashScope context cache) reuses only the
 # byte-identical head of the prompt, so a field that changes between two
 # calls invalidates everything after it. Fields are therefore ordered:
-#   whole-task stable → append-only shared history → per-node → per-wave →
-#   per-decision variable.
+#   whole-task stable → append-only observations → per-decision variable.
 # Unknown workspace keys are appended after these in sorted order, which keeps
 # their position stable as well.
 WORKSPACE_CACHE_ORDER = (
@@ -25,7 +24,6 @@ WORKSPACE_CACHE_ORDER = (
     "observations",
     "completion_criteria",
     "current_goal",
-    "plan",
     "current_step",
     "decision_repair",
     "task_state",

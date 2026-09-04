@@ -218,7 +218,7 @@ def test_workspace_prioritizes_and_sorts_visible_capabilities():
     )[0]
 
     # Cache-friendly order: whole-task stable fields first, then the
-    # append-only shared history, then per-node fields, then per-decision
+    # append-only shared history, then per-decision fields
     # variable fields last — so prefix caching keeps the largest reusable
     # head before the first field that changes between calls.
     assert workspace.index('"visible_tools"') < workspace.index('"visible_skills"')
