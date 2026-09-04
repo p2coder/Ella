@@ -168,6 +168,7 @@ class AppRuntime:
             executor=task_runtime.executor,
             task_reader=task_runtime.get_task,
             progress_recorder=task_runtime.record_child_progress,
+            trace_recorder=trace_recorder,
             max_depth=settings.subagent_max_depth,
             max_advances=settings.subagent_max_advances,
             max_timeout_seconds=settings.subagent_max_timeout_seconds,

@@ -12,6 +12,7 @@ from runtime.provider_usage import (
     merge_provider_usage_calls,
     nested_provider_usage_calls,
 )
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from tasks.task import Task, TaskState
 
 
@@ -56,6 +57,9 @@ class ChildAgentRunner:
     task_reader: Callable[[str], Task]
     progress_recorder: Callable[[str, dict[str, Any]], None] | None = field(
         default=None, repr=False, compare=False
+    )
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
     )
     child_agent_id_factory: Callable[[], str] = field(
         default=lambda: f"agent-{uuid4().hex}", repr=False, compare=False
@@ -114,6 +118,16 @@ class ChildAgentRunner:
             "failures": (),
         }
         self._checkpoint(parent_context.task_id, child_state)
+        self._trace(
+            parent_context.task_id,
+            child_id,
+            "started",
+            {
+                "parent_agent_id": parent_context.agent_id,
+                "mode": child_state["mode"],
+                "depth": child_state["depth"],
+            },
+        )
         started = monotonic()
         try:
             first = self.decision_agent.decide_first_action(context, local)
@@ -165,6 +179,12 @@ class ChildAgentRunner:
                         child_state["in_flight_action"]
                     )
                     self._checkpoint(parent_context.task_id, child_state)
+                    self._trace(
+                        parent_context.task_id,
+                        child_id,
+                        "tool_dispatched",
+                        child_state["in_flight_action"],
+                    )
 
                 execution = self.executor.execute(
                     decision,
@@ -173,6 +193,21 @@ class ChildAgentRunner:
                     on_dispatch=persist_dispatch,
                 )
                 local.state = TaskState.REASONING
+                self._trace(
+                    parent_context.task_id,
+                    child_id,
+                    "tool_completed",
+                    {
+                        "tool_name": decision.tool_name,
+                        "status": (
+                            "uncertain"
+                            if execution.uncertain
+                            else "failed"
+                            if execution.failure is not None
+                            else "completed"
+                        ),
+                    },
+                )
                 if execution.uncertain:
                     error = (
                         "uncertain child tool outcome"
@@ -357,8 +392,28 @@ class ChildAgentRunner:
                 "error": result.error,
             },
         )
+        self._trace(
+            parent_context.task_id,
+            child_agent_id,
+            "completed",
+            {"status": result.status, "completed_at": result.completed_at},
+        )
         return result
 
     def _checkpoint(self, task_id: str, child_state: dict[str, Any]) -> None:
         if self.progress_recorder is not None:
             self.progress_recorder(task_id, deepcopy(child_state))
+
+    def _trace(
+        self,
+        task_id: str,
+        child_agent_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.trace_recorder.record(
+            task_id=task_id,
+            boundary=f"child.{child_agent_id}",
+            event_type=event_type,
+            payload={"child_agent_id": child_agent_id, **payload},
+        )

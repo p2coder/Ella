@@ -2,6 +2,7 @@ from agent.child_runner import ChildAgentRunner
 from agent.context import AgentExecutionContext, CapabilityScope
 from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
 from runtime.executor import CapabilityExecutor
+from runtime.trace import TraceRecorder
 from skill import SkillManager
 from tasks.task import Task, TaskIntent, TaskState
 from tools import SubagentForkTool, SubagentTool, ToolManager
@@ -106,7 +107,7 @@ def _context(*, depth=0):
     )
 
 
-def _assembly(agent, *, progress_recorder=None):
+def _assembly(agent, *, progress_recorder=None, trace_recorder=None):
     root = Task("task-child", state=TaskState.TOOL_EXECUTION)
     root.message_history = ({"role": "user", "content": "parent secret"},)
     root.tool_trace = ({"tool_name": "parent-observation"},)
@@ -118,6 +119,7 @@ def _assembly(agent, *, progress_recorder=None):
         executor,
         lambda _: root,
         progress_recorder=progress_recorder,
+        trace_recorder=trace_recorder or TraceRecorder(),
         child_agent_id_factory=lambda: "child-agent",
     )
     manager.register(SubagentTool(runner))
@@ -198,6 +200,31 @@ def test_subagent_checkpoints_in_flight_tool_and_completed_result() -> None:
     assert checkpoints[-1]["status"] == "completed"
     assert checkpoints[-1]["in_flight_action"] is None
     assert checkpoints[-1]["observations"][0]["tool_name"] == "echo"
+
+
+def test_subagent_traces_child_tool_boundaries_with_child_identity() -> None:
+    recorder = TraceRecorder()
+    agent = ScriptedAgent(use_tool=True)
+    root, executor = _assembly(agent, trace_recorder=recorder)
+
+    executor.execute(
+        ExecutionDecision(CALL_TOOL, "subagent", {"prompt": "echo"}, "Delegate."),
+        _context(),
+        root,
+    )
+
+    snapshot = recorder.snapshot(root.task_id)
+    assert snapshot is not None
+    assert [event.event_type for event in snapshot.events] == [
+        "started",
+        "tool_dispatched",
+        "tool_completed",
+        "completed",
+    ]
+    assert all(
+        event.payload["child_agent_id"] == "child-agent"
+        for event in snapshot.events
+    )
 
 
 def test_subagent_retains_in_flight_tool_when_outcome_is_uncertain() -> None:
