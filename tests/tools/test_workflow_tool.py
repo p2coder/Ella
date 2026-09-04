@@ -102,6 +102,7 @@ def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
         "return eval('1 + 1');",
         "return process.cwd();",
         "return require('fs');",
+        "return await tools.workflow({script: 'return 1'});",
     ),
 )
 def test_workflow_rejects_unexposed_host_capabilities(script) -> None:
@@ -109,6 +110,50 @@ def test_workflow_rejects_unexposed_host_capabilities(script) -> None:
     with pytest.raises(RuntimeError, match="workflow script failed"):
         _runtime(runner).execute(_context(), script)
     assert runner.calls == []
+
+
+def test_workflow_enforces_script_child_and_return_limits() -> None:
+    runner = FakeChildRunner()
+    runtime = _runtime(runner)
+    with pytest.raises(ValueError, match="64 KiB"):
+        runtime.execute(_context(), "a" * (64 * 1024 + 1))
+
+    limited_calls = WorkflowRuntime(
+        runner,
+        runtime.task_reader,
+        max_wall_seconds=3,
+        max_total_children=1,
+    )
+    with pytest.raises(RuntimeError, match="child call limit exceeded"):
+        limited_calls.execute(
+            _context(),
+            "return await Promise.all(["
+            "tools.subagent({prompt:'a'}), tools.subagent({prompt:'b'})]);",
+        )
+
+    limited_return = WorkflowRuntime(
+        runner,
+        runtime.task_reader,
+        max_wall_seconds=3,
+        max_return_bytes=4,
+    )
+    with pytest.raises(ValueError, match="return value"):
+        limited_return.execute(_context(), "return '12345';")
+
+
+def test_workflow_terminates_infinite_script_at_wall_timeout() -> None:
+    runner = FakeChildRunner()
+    task = Task("task-workflow", state=TaskState.TOOL_EXECUTION)
+    runtime = WorkflowRuntime(
+        runner,
+        lambda _: task,
+        max_wall_seconds=0.1,
+    )
+
+    started = monotonic()
+    with pytest.raises(TimeoutError, match="timed out"):
+        runtime.execute(_context(), "while (true) {}")
+    assert monotonic() - started < 2
 
 
 def test_workflow_rejects_invalid_script_before_child_dispatch() -> None:

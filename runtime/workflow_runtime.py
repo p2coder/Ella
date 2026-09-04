@@ -4,6 +4,7 @@ import json
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
 from time import monotonic
+from time import sleep
 from typing import Any
 
 from agent.child_runner import ChildAgentRunner
@@ -47,6 +48,7 @@ class WorkflowRuntime:
         futures: dict[Future, tuple[int, str]] = {}
         script_result: Any = None
         script_done = False
+        connection_open = True
         error: str | None = None
         pool = ThreadPoolExecutor(max_workers=self.max_parallel_children)
         try:
@@ -54,10 +56,21 @@ class WorkflowRuntime:
                 if monotonic() - started > self.max_wall_seconds:
                     raise TimeoutError("workflow execution timed out")
                 task_state = self.task_reader(context.task_id).state
+                while task_state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
+                    if monotonic() - started > self.max_wall_seconds:
+                        raise TimeoutError("workflow execution timed out while paused")
+                    sleep(0.01)
+                    task_state = self.task_reader(context.task_id).state
                 if task_state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
                     raise RuntimeError("parent task was killed")
-                if parent_connection.poll(0.01):
-                    message = parent_connection.recv()
+                if connection_open and parent_connection.poll(0.01):
+                    try:
+                        message = parent_connection.recv()
+                    except EOFError:
+                        connection_open = False
+                        message = None
+                    if message is None:
+                        continue
                     kind = message[0]
                     if kind == "call":
                         _, call_id, tool_name, raw_arguments = message
@@ -133,7 +146,7 @@ class WorkflowRuntime:
             if process.is_alive():
                 process.terminate()
             process.join(timeout=1)
-            pool.shutdown(wait=True, cancel_futures=True)
+            pool.shutdown(wait=False, cancel_futures=True)
             parent_connection.close()
 
 
