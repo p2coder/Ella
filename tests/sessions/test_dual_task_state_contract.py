@@ -79,7 +79,7 @@ def test_checkpoint_round_trips_dual_state(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("terminal", (TaskState.KILLED, TaskState.UNCERTAIN))
-def test_cancelled_or_uncertain_task_is_not_achieved(terminal) -> None:
+def test_killed_or_uncertain_task_is_not_achieved(terminal) -> None:
     task = _task()
     task.transition_to(TaskState.READY)
     if terminal is TaskState.KILLED:

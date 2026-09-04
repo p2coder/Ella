@@ -53,7 +53,7 @@ class UserAnswer:
         }
 
 
-class InteractionCancelled(RuntimeError):
+class InteractionInterrupted(RuntimeError):
     pass
 
 
@@ -67,7 +67,7 @@ class InteractionBroker:
         self._condition = Condition()
         self._questions: dict[str, UserQuestion] = {}
         self._answers: dict[str, UserAnswer] = {}
-        self._cancelled_tasks: set[str] = set()
+        self._interrupted_tasks: set[str] = set()
         self._on_question = on_question
 
     def ask(
@@ -117,9 +117,9 @@ class InteractionBroker:
                 self._on_question(item)
         with self._condition:
             while any(item.question_id not in self._answers for item in items):
-                if task_id in self._cancelled_tasks:
-                    raise InteractionCancelled(
-                        f"interaction cancelled for task {task_id}"
+                if task_id in self._interrupted_tasks:
+                    raise InteractionInterrupted(
+                        f"interaction interrupted for task {task_id}"
                     )
                 self._condition.wait()
             return tuple(self._answers[item.question_id] for item in items)
@@ -149,14 +149,14 @@ class InteractionBroker:
                 if item.task_id == task_id and question_id not in self._answers
             )
 
-    def cancel_task(self, task_id: str) -> None:
+    def interrupt_task(self, task_id: str) -> None:
         with self._condition:
-            self._cancelled_tasks.add(task_id)
+            self._interrupted_tasks.add(task_id)
             self._condition.notify_all()
 
     def reset_task(self, task_id: str) -> None:
         with self._condition:
-            self._cancelled_tasks.discard(task_id)
+            self._interrupted_tasks.discard(task_id)
 
     def set_question_handler(
         self,

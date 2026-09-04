@@ -179,7 +179,7 @@ class TaskRuntime:
         broker = self._interaction_broker()
         if broker is not None:
             for task_id in tuple(self._owned_tasks):
-                broker.cancel_task(task_id)
+                broker.interrupt_task(task_id)
 
     def join(self, timeout: float | None = None) -> bool:
         thread = self._worker_thread
@@ -635,7 +635,7 @@ class TaskRuntime:
                 task.control_request = command
                 broker = self._interaction_broker()
                 if broker is not None:
-                    broker.cancel_task(task.task_id)
+                    broker.interrupt_task(task.task_id)
                 if task.state is not TaskState.KILL_REQUESTED:
                     task.transition_to(TaskState.KILL_REQUESTED)
                 if previous_state not in {
@@ -646,7 +646,7 @@ class TaskRuntime:
                         "code": "task_killed",
                         "message": (
                             command.reason
-                            or "Task was cancelled before completion."
+                            or "Task was killed before completion."
                         ),
                     }
                     task.failure_reason = task.failure["message"]
@@ -661,7 +661,7 @@ class TaskRuntime:
                 task.control_request = command
                 broker = self._interaction_broker()
                 if broker is not None:
-                    broker.cancel_task(task.task_id)
+                    broker.interrupt_task(task.task_id)
                 task.transition_to(TaskState.PAUSE_REQUESTED)
                 if previous_state not in {
                     TaskState.REASONING,
@@ -721,7 +721,7 @@ class TaskRuntime:
             reason = getattr(task.control_request, "reason", None)
             task.failure = {
                 "code": "task_killed",
-                "message": reason or "Task was cancelled before completion.",
+                "message": reason or "Task was killed before completion.",
             }
             task.failure_reason = task.failure["message"]
             task.transition_to(TaskState.KILLED)
