@@ -13,6 +13,7 @@ from tasks.task import Task, TaskState
 @dataclass
 class FakeChildRunner:
     barrier: Barrier | None = None
+    response: str | None = None
 
     def __post_init__(self):
         self.calls = []
@@ -33,7 +34,7 @@ class FakeChildRunner:
         return ChildAgentRun(
             child_agent_id=f"child-{prompt}",
             status="completed",
-            final_response=f"answer-{prompt}",
+            final_response=self.response or f"answer-{prompt}",
             observations=(),
             error=None,
             provider_usage=None,
@@ -145,8 +146,20 @@ def test_workflow_enforces_script_child_and_return_limits() -> None:
         max_wall_seconds=3,
         max_return_bytes=4,
     )
-    with pytest.raises(ValueError, match="return value"):
+    with pytest.raises(ValueError, match="byte limit"):
         limited_return.execute(_context(), "return '12345';")
+
+    limited_child_result = WorkflowRuntime(
+        FakeChildRunner(response="x" * 1000),
+        runtime.task_reader,
+        max_wall_seconds=3,
+        max_return_bytes=500,
+    )
+    with pytest.raises(ValueError, match="byte limit"):
+        limited_child_result.execute(
+            _context(),
+            "await tools.subagent({prompt:'large'}); return null;",
+        )
 
 
 def test_workflow_terminates_infinite_script_at_wall_timeout() -> None:

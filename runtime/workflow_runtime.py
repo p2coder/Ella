@@ -153,15 +153,16 @@ class WorkflowRuntime:
                 raise RuntimeError(f"workflow script failed: {error}")
             if not script_done:
                 raise RuntimeError("workflow isolate exited without a result")
-            encoded = json.dumps(script_result, ensure_ascii=False).encode("utf-8")
-            if len(encoded) > self.max_return_bytes:
-                raise ValueError("workflow return value exceeds 1 MiB")
-            return {
+            result = {
                 "status": "completed",
                 "active_tool_count": 0,
                 "script_return_value": script_result,
                 "child_results": tuple(calls),
             }
+            encoded = json.dumps(result, ensure_ascii=False).encode("utf-8")
+            if len(encoded) > self.max_return_bytes:
+                raise ValueError("workflow result exceeds configured byte limit")
+            return result
         finally:
             if process.is_alive():
                 process.terminate()
