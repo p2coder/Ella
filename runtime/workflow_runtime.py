@@ -107,6 +107,7 @@ class WorkflowRuntime:
         script_done = False
         connection_open = True
         error: str | None = None
+        child_failure: str | None = None
         pool = ThreadPoolExecutor(max_workers=self.max_parallel_children)
         pause_recorded = False
         try:
@@ -140,6 +141,16 @@ class WorkflowRuntime:
                     kind = message[0]
                     if kind == "call":
                         _, call_id, tool_name, raw_arguments = message
+                        if child_failure is not None:
+                            parent_connection.send(
+                                (
+                                    "settle",
+                                    call_id,
+                                    False,
+                                    "workflow dispatch closed after child failure",
+                                )
+                            )
+                            continue
                         if tool_name not in {"subagent", "subagent_fork"}:
                             parent_connection.send(
                                 ("settle", call_id, False, "workflow Tool is not allowed")
@@ -218,6 +229,8 @@ class WorkflowRuntime:
                         calls[call_index]["completed_at"] = _utc_now()
                         succeeded = False
                         payload = str(child_error)
+                    if not succeeded and child_failure is None:
+                        child_failure = payload
                     if process.is_alive():
                         parent_connection.send(("settle", call_id, succeeded, payload))
                     self._trace(
@@ -239,6 +252,8 @@ class WorkflowRuntime:
                         {"completed_calls": len(calls)},
                     )
                     break
+            if child_failure is not None:
+                raise RuntimeError(f"workflow child failed: {child_failure}")
             if error is not None:
                 raise RuntimeError(f"workflow script failed: {error}")
             if not script_done:

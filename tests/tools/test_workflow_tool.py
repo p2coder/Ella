@@ -15,6 +15,7 @@ from tasks.task import Task, TaskState
 class FakeChildRunner:
     barrier: Barrier | None = None
     response: str | None = None
+    status: str = "completed"
 
     def __post_init__(self):
         self.calls = []
@@ -34,10 +35,10 @@ class FakeChildRunner:
             self.calls.append(("end", prompt, completed, fork))
         return ChildAgentRun(
             child_agent_id=f"child-{prompt}",
-            status="completed",
+            status=self.status,
             final_response=self.response or f"answer-{prompt}",
             observations=(),
-            error=None,
+            error=None if self.status == "completed" else "child failed",
             provider_usage=None,
             completed_at="2026-09-04T00:00:01Z",
             mode="fork" if fork else "clean",
@@ -101,6 +102,20 @@ def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
 
     assert result["script_return_value"] == ["answer-a", "answer-b"]
     assert len(result["child_results"]) == 2
+
+
+def test_workflow_child_failure_closes_dispatch_even_when_script_catches() -> None:
+    runner = FakeChildRunner(status="failed")
+
+    with pytest.raises(RuntimeError, match="workflow child failed"):
+        _runtime(runner).execute(
+            _context(),
+            "try { await tools.subagent({prompt: 'a'}); } catch (_) {}\n"
+            "return await tools.subagent({prompt: 'must-not-run'});",
+        )
+
+    starts = [call for call in runner.calls if call[0] == "start"]
+    assert [call[1] for call in starts] == ["a"]
 
 
 def test_workflow_records_script_and_child_trace_events() -> None:
