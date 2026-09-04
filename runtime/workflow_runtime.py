@@ -282,7 +282,7 @@ class WorkflowRuntime:
             )
             self._checkpoint(context, workflow_state)
             return result
-        except BaseException as workflow_error:
+        except Exception as workflow_error:
             self._trace(
                 context,
                 "script_failed",
@@ -298,6 +298,10 @@ class WorkflowRuntime:
                 }
             )
             self._checkpoint(context, workflow_state)
+            uncertain = any(
+                call.get("status") in {"running", "uncertain"} for call in calls
+            )
+            workflow_error.tool_outcome_uncertain = uncertain
             raise
         finally:
             if process.is_alive():

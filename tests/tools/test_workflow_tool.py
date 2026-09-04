@@ -107,7 +107,7 @@ def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
 def test_workflow_child_failure_closes_dispatch_even_when_script_catches() -> None:
     runner = FakeChildRunner(status="failed")
 
-    with pytest.raises(RuntimeError, match="workflow child failed"):
+    with pytest.raises(RuntimeError, match="workflow child failed") as raised:
         _runtime(runner).execute(
             _context(),
             "try { await tools.subagent({prompt: 'a'}); } catch (_) {}\n"
@@ -116,6 +116,19 @@ def test_workflow_child_failure_closes_dispatch_even_when_script_catches() -> No
 
     starts = [call for call in runner.calls if call[0] == "start"]
     assert [call[1] for call in starts] == ["a"]
+    assert raised.value.tool_outcome_uncertain is False
+
+
+def test_workflow_preserves_uncertain_child_outcome() -> None:
+    runner = FakeChildRunner(status="uncertain")
+
+    with pytest.raises(RuntimeError) as raised:
+        _runtime(runner).execute(
+            _context(),
+            "return await tools.subagent({prompt: 'unknown'});",
+        )
+
+    assert raised.value.tool_outcome_uncertain is True
 
 
 def test_workflow_records_script_and_child_trace_events() -> None:
