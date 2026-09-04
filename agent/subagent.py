@@ -135,7 +135,7 @@ class SubAgent:
 
     def decide_next_action(
         self,
-        handoff: HandoffRequest,
+        handoff: HandoffRequest | None,
         context: AgentExecutionContext,
         task: Task,
         *,
@@ -145,20 +145,39 @@ class SubAgent:
         definitions = self._visible_definitions(context, task)
         serialized = serialize_tool_definitions(definitions)
         observations = self._observations(task)
+        overall_goal = (
+            handoff.task_goal
+            if handoff is not None
+            else (task.intent.goal if task.intent is not None else context.handoff_goal)
+        )
+        inherited_criteria = (
+            handoff.completion_criteria
+            if handoff is not None
+            else (
+                task.intent.minimum_acceptance_criteria
+                if task.intent is not None
+                else ()
+            )
+        )
+        fallback_input = (
+            handoff.trigger_event.payload.get("text", "")
+            if handoff is not None
+            else ""
+        )
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
                 "user_prompt": task.task_local_state.get(
                     "latest_user_input",
-                    handoff.trigger_event.payload.get("text", ""),
+                    fallback_input,
                 ),
                 "workspace": {
                     "task_id": task.task_id,
                     "trace_id": context.trace_id,
-                    "overall_goal": handoff.task_goal,
-                    "current_goal": current_goal or handoff.task_goal,
+                    "overall_goal": overall_goal,
+                    "current_goal": current_goal or overall_goal,
                     "completion_criteria": tuple(
-                        completion_criteria or handoff.completion_criteria
+                        completion_criteria or inherited_criteria
                     ),
                     "task_state": task.state.value,
                     "visible_skills": self._visible_skills(context),

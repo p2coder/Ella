@@ -1,6 +1,7 @@
 from .base import Tool, ToolResult
 from .bash import BashTool
 from .refresh import RefreshTool
+from .subagent import SubagentTool
 from .manager import CapabilityUnavailableError, ToolManager
 from .mock_tools import MockChecklistTool, MockVisionSummaryTool, MockWeatherTool
 from .screen_scene import ScreenSceneTool
@@ -13,6 +14,7 @@ __all__ = [
     "CapabilityUnavailableError",
     "BashTool",
     "RefreshTool",
+    "SubagentTool",
     "DocumentWriteTool",
     "EditTextTool",
     "ReadTextTool",

@@ -35,6 +35,7 @@ from tasks.state import (
     TaskControlType,
 )
 from agent.subagent import SubAgent
+from agent.child_runner import ChildAgentRunner
 from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
 from skill import SkillLoader, SkillManager
@@ -44,6 +45,7 @@ from tools import (
     EditTextTool,
     ReadTextTool,
     RefreshTool,
+    SubagentTool,
     WriteTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -161,6 +163,12 @@ class AppRuntime:
             task_store=TaskStore(settings.task_checkpoint_directory),
             task_queue=TaskQueue(),
         )
+        child_runner = ChildAgentRunner(
+            decision_agent=subagent,
+            executor=task_runtime.executor,
+            task_reader=task_runtime.get_task,
+        )
+        tool_manager.register(SubagentTool(child_runner))
         tool_manager.register(
             ToolObservationCheckTool(
                 lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)

@@ -385,6 +385,7 @@ def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
         handoff_goal=data["handoff_goal"],
         memory_scope=data["memory_scope"],
         permissions=tuple(data.get("permissions", ())),
+        agent_depth=int(data.get("agent_depth", 0)),
         capability_scope=CapabilityScope(
             agent_role=scope["agent_role"],
             allowed_skills=tuple(scope["allowed_skills"]),

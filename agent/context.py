@@ -31,10 +31,13 @@ class AgentExecutionContext:
     memory_scope: str
     capability_scope: CapabilityScope
     permissions: tuple[str, ...] = ()
+    agent_depth: int = 0
 
     def __post_init__(self) -> None:
         if self.capability_scope.agent_role != self.agent_role:
             raise ValueError("capability scope agent role must match context agent role")
+        if self.agent_depth < 0:
+            raise ValueError("agent_depth must be non-negative")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,4 +50,5 @@ class AgentExecutionContext:
             "memory_scope": self.memory_scope,
             "permissions": self.permissions,
             "capability_scope": self.capability_scope.to_dict(),
+            "agent_depth": self.agent_depth,
         }

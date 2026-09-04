@@ -1,0 +1,158 @@
+from agent.child_runner import ChildAgentRunner
+from agent.context import AgentExecutionContext, CapabilityScope
+from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
+from runtime.executor import CapabilityExecutor
+from skill import SkillManager
+from tasks.task import Task, TaskIntent, TaskState
+from tools import SubagentTool, ToolManager
+from tools.base import ToolDefinition, ToolResult
+
+
+class EchoTool:
+    name = "echo"
+    allowed_roles = ("main_agent",)
+
+    @property
+    def definition(self):
+        return ToolDefinition(
+            self.name,
+            "Echo a value.",
+            "1.0",
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+            ({"value": "ok"},),
+            {"type": "object"},
+        )
+
+    def run(self, context, arguments=None):
+        return ToolResult(
+            self.name,
+            context.task_id,
+            context.trace_id,
+            {"value": (arguments or {})["value"]},
+        )
+
+
+class ScriptedAgent:
+    def __init__(self, *, use_tool=False):
+        self.use_tool = use_tool
+        self.first_context = None
+        self.first_task = None
+
+    def decide_first_action(self, context, task):
+        self.first_context = context
+        self.first_task = task
+        action = (
+            ExecutionDecision(CALL_TOOL, "echo", {"value": "child"}, "Echo.")
+            if self.use_tool
+            else self._submit()
+        )
+        return FirstDecision(TaskIntent("Complete child prompt"), action)
+
+    def decide_next_action(self, handoff, context, task):
+        return self._submit()
+
+    @staticmethod
+    def _submit():
+        return ExecutionDecision(
+            SUBMIT_RESULT,
+            None,
+            None,
+            "Done.",
+            "Child completed.",
+            (),
+            "child answer",
+        )
+
+
+def _context(*, depth=0):
+    return AgentExecutionContext(
+        agent_id="parent-agent",
+        agent_role="main_agent",
+        parent_agent_id=None,
+        task_id="task-child",
+        trace_id="trace-child",
+        handoff_goal="Parent goal",
+        memory_scope="task_local",
+        permissions=("workspace",),
+        capability_scope=CapabilityScope(
+            "main_agent", ("skill-a",), ("subagent", "echo")
+        ),
+        agent_depth=depth,
+    )
+
+
+def _assembly(agent):
+    root = Task("task-child", state=TaskState.TOOL_EXECUTION)
+    root.message_history = ({"role": "user", "content": "parent secret"},)
+    root.tool_trace = ({"tool_name": "parent-observation"},)
+    manager = ToolManager()
+    manager.register(EchoTool())
+    executor = CapabilityExecutor(SkillManager(), manager)
+    runner = ChildAgentRunner(
+        agent,
+        executor,
+        lambda _: root,
+        child_agent_id_factory=lambda: "child-agent",
+    )
+    manager.register(SubagentTool(runner))
+    return root, executor
+
+
+def test_subagent_uses_clean_context_and_inherits_scope() -> None:
+    agent = ScriptedAgent()
+    root, executor = _assembly(agent)
+    result = executor.execute(
+        ExecutionDecision(
+            CALL_TOOL, "subagent", {"prompt": "bounded work"}, "Delegate."
+        ),
+        _context(),
+        root,
+    )
+
+    assert result.failure is None
+    assert result.tool_result.payload["status"] == "completed"
+    assert result.tool_result.payload["final_response"] == "child answer"
+    assert agent.first_context.task_id == "task-child"
+    assert agent.first_context.agent_id == "child-agent"
+    assert agent.first_context.parent_agent_id == "parent-agent"
+    assert agent.first_context.capability_scope == _context().capability_scope
+    assert agent.first_context.permissions == _context().permissions
+    assert agent.first_context.agent_depth == 1
+    assert agent.first_task.message_history == ()
+    assert agent.first_task.tool_trace == ()
+    assert agent.first_task.task_local_state == {"latest_user_input": "bounded work"}
+
+
+def test_subagent_nests_child_tool_observations() -> None:
+    agent = ScriptedAgent(use_tool=True)
+    root, executor = _assembly(agent)
+    result = executor.execute(
+        ExecutionDecision(CALL_TOOL, "subagent", {"prompt": "echo"}, "Delegate."),
+        _context(),
+        root,
+    )
+
+    observations = result.tool_result.payload["observations"]
+    assert len(observations) == 1
+    assert observations[0]["tool_name"] == "echo"
+    assert observations[0]["task_id"] == "task-child"
+    assert observations[0]["agent_id"] == "child-agent"
+
+
+def test_subagent_rejects_depth_above_four_before_child_dispatch() -> None:
+    agent = ScriptedAgent()
+    root, executor = _assembly(agent)
+    result = executor.execute(
+        ExecutionDecision(CALL_TOOL, "subagent", {"prompt": "too deep"}, "Delegate."),
+        _context(depth=4),
+        root,
+    )
+
+    assert result.failure is not None
+    assert result.failure.code == "invalid_tool_input"
+    assert agent.first_context is None
