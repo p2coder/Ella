@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
+from time import sleep
 
 from agent.context import AgentExecutionContext, CapabilityScope
 from agent.decision import CALL_TOOL, ExecutionDecision
@@ -37,6 +40,18 @@ class RecordingTool:
         values = dict(arguments or {})
         self.calls.append(values)
         return ToolResult(self.name, context.task_id, context.trace_id, values)
+
+
+class BlockingRecordingTool(RecordingTool):
+    def __init__(self) -> None:
+        super().__init__()
+        self._lock = Lock()
+
+    def run(self, context, arguments=None) -> ToolResult:
+        with self._lock:
+            result = super().run(context, arguments)
+        sleep(0.02)
+        return result
 
 
 def _context(*, agent_id: str = "agent-main") -> AgentExecutionContext:
@@ -155,3 +170,36 @@ def test_refresh_revalidates_current_tool_schema_and_permissions() -> None:
     assert result.failure is not None
     assert result.failure.code == "tool_not_allowed"
     assert result.failure.refresh_of_tool_use_id == original.tool_result.tool_use_id
+
+
+def test_concurrent_refreshes_share_one_replay() -> None:
+    manager = ToolManager()
+    recording = BlockingRecordingTool()
+    manager.register(recording)
+    manager.register(RefreshTool())
+    executor = CapabilityExecutor(SkillManager(), manager)
+    task = Task("task-refresh")
+    original = executor.execute(
+        _decision("recording", {"value": "once"}), _context(), task
+    )
+    source_id = original.tool_result.tool_use_id
+    barrier = Barrier(3)
+
+    def refresh_once():
+        barrier.wait()
+        return executor.execute(
+            _decision("refresh", {"tool_use_id": source_id}), _context(), task
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(refresh_once)
+        second = pool.submit(refresh_once)
+        barrier.wait()
+        results = (first.result(), second.result())
+
+    assert len(recording.calls) == 2
+    assert all(item.tool_result is not None for item in results)
+    assert results[0].tool_result.tool_use_id == results[1].tool_result.tool_use_id
+    assert all(
+        item.tool_result.refresh_of_tool_use_id == source_id for item in results
+    )

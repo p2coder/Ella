@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field, replace
+from concurrent.futures import Future
 from datetime import datetime, timezone
+from threading import RLock
 from time import perf_counter
 from typing import Any, Callable
 from uuid import uuid4
@@ -63,6 +65,12 @@ class CapabilityExecutor:
     _tool_uses: dict[str, ToolUseRecord] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
+    _refreshes: dict[str, Future[CapabilityExecutionResult]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _tool_use_lock: RLock = field(
+        default_factory=RLock, init=False, repr=False, compare=False
+    )
 
     def execute(
         self,
@@ -110,7 +118,7 @@ class CapabilityExecutor:
             return self._execute_refresh(decision, context, task, arguments)
 
         tool_use_id = self.tool_use_id_factory()
-        self._tool_uses[tool_use_id] = ToolUseRecord(
+        tool_use_record = ToolUseRecord(
             tool_use_id=tool_use_id,
             task_id=context.task_id,
             agent_id=context.agent_id,
@@ -124,7 +132,7 @@ class CapabilityExecutor:
         except ValueError as error:
             completed_at = _utc_timestamp(self.clock())
             self._record_timing(context, tool_name, started, False, "invalid_tool_input")
-            return self._failure(
+            outcome = self._failure(
                 decision, task, ToolFailureKind.INVALID_ARGUMENTS,
                 "invalid_tool_input", f"invalid_tool_input: {error}",
                 retryable=True,
@@ -134,6 +142,8 @@ class CapabilityExecutor:
                 completed_at=completed_at,
                 result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
+            self._remember_tool_use(tool_use_record)
+            return outcome
         except Exception as error:
             completed_at = _utc_timestamp(self.clock())
             uncertain = _may_have_unconfirmed_side_effect(tool)
@@ -151,11 +161,13 @@ class CapabilityExecutor:
                 completed_at=completed_at,
                 result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
-            return CapabilityExecutionResult(
+            outcome = CapabilityExecutionResult(
                 decision=decision,
                 failure=failure.failure,
                 uncertain=uncertain,
             )
+            self._remember_tool_use(tool_use_record)
+            return outcome
 
         completed_at = _utc_timestamp(self.clock())
         result = replace(
@@ -175,7 +187,7 @@ class CapabilityExecutor:
         )
         if output_error is not None:
             self._record_timing(context, tool_name, started, False, "invalid_tool_output")
-            return self._failure(
+            outcome = self._failure(
                 decision, task, ToolFailureKind.TOOL_EXECUTION_FAILED,
                 "invalid_tool_output", f"invalid_tool_output: {output_error}",
                 raw_result=result,
@@ -185,7 +197,10 @@ class CapabilityExecutor:
                 completed_at=completed_at,
                 result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
+            self._remember_tool_use(tool_use_record)
+            return outcome
         self._record_timing(context, tool_name, started, True, None)
+        self._remember_tool_use(tool_use_record)
         return CapabilityExecutionResult(decision, tool_result=result)
 
     def _execute_refresh(
@@ -196,7 +211,8 @@ class CapabilityExecutor:
         arguments: dict[str, Any],
     ) -> CapabilityExecutionResult:
         source_id = str(arguments["tool_use_id"])
-        source = self._tool_uses.get(source_id)
+        with self._tool_use_lock:
+            source = self._tool_uses.get(source_id)
         if source is None:
             return self._failure(
                 decision,
@@ -222,16 +238,38 @@ class CapabilityExecutor:
                 "refresh cannot replay refresh",
             )
 
-        replay = self.execute(
-            ExecutionDecision(
-                CALL_TOOL,
-                source.tool_name,
-                dict(source.arguments),
-                f"Refresh tool use {source_id}.",
-            ),
-            context,
-            task,
-        )
+        with self._tool_use_lock:
+            pending = self._refreshes.get(source_id)
+            if pending is None:
+                pending = Future()
+                self._refreshes[source_id] = pending
+                owns_replay = True
+            else:
+                owns_replay = False
+
+        if owns_replay:
+            try:
+                replay = self.execute(
+                    ExecutionDecision(
+                        CALL_TOOL,
+                        source.tool_name,
+                        dict(source.arguments),
+                        f"Refresh tool use {source_id}.",
+                    ),
+                    context,
+                    task,
+                )
+            except BaseException as error:
+                pending.set_exception(error)
+                with self._tool_use_lock:
+                    self._refreshes.pop(source_id, None)
+                raise
+            else:
+                pending.set_result(replay)
+                with self._tool_use_lock:
+                    self._refreshes.pop(source_id, None)
+        else:
+            replay = pending.result()
         if replay.tool_result is not None:
             return replace(
                 replay,
@@ -251,6 +289,10 @@ class CapabilityExecutor:
                 ),
             )
         return replace(replay, decision=decision)
+
+    def _remember_tool_use(self, record: ToolUseRecord) -> None:
+        with self._tool_use_lock:
+            self._tool_uses[record.tool_use_id] = record
 
     def _record_timing(
         self,
