@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 from dataclasses import dataclass
 from hashlib import sha256
 import os
@@ -108,16 +109,29 @@ class ReadTextTool:
         )
         if not path.is_file():
             raise TextFileError("path must reference a regular file")
-        size = path.stat().st_size
-        if size > self.max_bytes:
-            raise TextFileError(
-                f"text file exceeds the {self.max_bytes}-byte read limit"
-            )
-        content_bytes = path.read_bytes()
+        digest = sha256()
+        validator = codecs.getincrementaldecoder("utf-8")()
         try:
-            content = content_bytes.decode("utf-8")
+            with path.open("rb") as source:
+                preview = source.read(self.max_bytes + 1)
+                chunk = preview
+                while chunk:
+                    digest.update(chunk)
+                    validator.decode(chunk, final=False)
+                    chunk = source.read(64 * 1024)
+                validator.decode(b"", final=True)
         except UnicodeDecodeError as error:
             raise TextFileError("file is not valid UTF-8 text") from error
+        truncated = len(preview) > self.max_bytes
+        bounded = preview[: self.max_bytes]
+        try:
+            content = codecs.getincrementaldecoder("utf-8")().decode(
+                bounded,
+                final=not truncated,
+            )
+        except UnicodeDecodeError as error:
+            raise TextFileError("file is not valid UTF-8 text") from error
+        bytes_returned = len(content.encode("utf-8"))
         relative = path.relative_to(self.project_root.resolve()).as_posix()
         return ToolResult(
             self.name,
@@ -125,10 +139,10 @@ class ReadTextTool:
             {
                 "path": relative,
                 "content": content,
-                "byte_count": len(content_bytes),
-                "truncated": False,
+                "byte_count": bytes_returned,
+                "truncated": truncated,
                 "content_hash_algorithm": "sha256",
-                "content_hash": sha256(content_bytes).hexdigest(),
+                "content_hash": digest.hexdigest(),
             },
         )
 

@@ -48,13 +48,30 @@ def test_read_rejects_symlink_escape(tmp_path) -> None:
         ReadTextTool(tmp_path).run(_context(), {"path": "escape.txt"})
 
 
-def test_read_rejects_invalid_utf8_and_oversized_files(tmp_path) -> None:
+def test_read_rejects_invalid_utf8_and_truncates_oversized_files(tmp_path) -> None:
     (tmp_path / "binary.txt").write_bytes(b"\xff")
     with pytest.raises(TextFileError, match="UTF-8"):
         ReadTextTool(tmp_path).run(_context(), {"path": "binary.txt"})
 
     (tmp_path / "large.txt").write_text("12345", encoding="utf-8")
-    with pytest.raises(TextFileError, match="limit"):
-        ReadTextTool(tmp_path, max_bytes=4).run(
-            _context(), {"path": "large.txt"}
-        )
+    result = ReadTextTool(tmp_path, max_bytes=4).run(
+        _context(), {"path": "large.txt"}
+    )
+    assert result.payload["content"] == "1234"
+    assert result.payload["byte_count"] == 4
+    assert result.payload["truncated"] is True
+    assert result.payload["content_hash"] == sha256(b"12345").hexdigest()
+
+
+def test_read_truncation_does_not_split_utf8_character(tmp_path) -> None:
+    payload = "a中b".encode("utf-8")
+    (tmp_path / "unicode.txt").write_bytes(payload)
+
+    result = ReadTextTool(tmp_path, max_bytes=3).run(
+        _context(), {"path": "unicode.txt"}
+    )
+
+    assert result.payload["content"] == "a"
+    assert result.payload["byte_count"] == 1
+    assert result.payload["truncated"] is True
+    assert result.payload["content_hash"] == sha256(payload).hexdigest()
