@@ -200,4 +200,5 @@ def test_existing_tool_result_construction_still_works() -> None:
         "called_at": None,
         "completed_at": None,
         "result_ttl_seconds": None,
+        "refresh_of_tool_use_id": None,
     }

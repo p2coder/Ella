@@ -40,7 +40,6 @@ def test_final_ownership_modules_importable():
     from agent.subagent import SubAgent
     from runtime.executor import CapabilityExecutor
     from tasks.factory import TaskFactory
-    from tasks.graph import TaskGraphDefinition
     from tasks.state import StepState
     from tasks.task import Task
 
@@ -50,7 +49,6 @@ def test_final_ownership_modules_importable():
             SubAgent,
             CapabilityExecutor,
             TaskFactory,
-            TaskGraphDefinition,
             StepState,
             Task,
         )

@@ -98,7 +98,6 @@ class TaskEventPublisher:
                 "goal_state": _goal_state(task),
                 "terminal_execution_state": _terminal_execution_state(task),
                 "execution_stage": execution_stage,
-                "active_step_ids": task.active_step_ids,
                 "tool_name": tool_name,
             },
         )

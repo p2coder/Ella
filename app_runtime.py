@@ -312,7 +312,6 @@ class AppRuntime:
                 else task.terminal_execution_state.value
             ),
             "execution_stage": _execution_stage(task),
-            "active_step_ids": task.active_step_ids,
             "pending_questions": tuple(
                 item.to_dict()
                 for item in self._task_runtime.pending_questions(task.task_id)
@@ -499,7 +498,7 @@ def _build_display_snapshot(
         timing_summary=_timing_summary(task_result),
         task_id=task_result.handle.task_id,
         task_state=task_result.task.state.value,
-        active_step_ids=task_result.task.active_step_ids,
+        active_step_ids=(),
         paused_from_state=(
             ""
             if task_result.task.paused_from_state is None
