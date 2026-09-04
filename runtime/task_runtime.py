@@ -41,7 +41,7 @@ from .task_store import TaskStore, UnsupportedCheckpointSchema
 from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 from .interactions import InteractionBroker, UserAnswer, UserQuestion
-from .provider_usage import merge_provider_usage_calls
+from .provider_usage import merge_provider_usage_calls, nested_provider_usage_calls
 from .context_window import ContextTooLargeError
 
 
@@ -1171,11 +1171,10 @@ class TaskRuntime:
         return True
 
     def _observe_capability_result(self, task: Task, result: ToolResult) -> None:
-        if result.tool_name in {"subagent", "subagent_fork"}:
-            merge_provider_usage_calls(
-                task.task_local_state,
-                result.payload.get("provider_usage_calls", ()),
-            )
+        merge_provider_usage_calls(
+            task.task_local_state,
+            nested_provider_usage_calls(result.tool_name, result.payload),
+        )
 
     def _repair_violation(
         self,

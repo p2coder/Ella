@@ -7,7 +7,11 @@ from uuid import uuid4
 
 from agent.context import AgentExecutionContext
 from agent.decision import SUBMIT_RESULT
-from runtime.provider_usage import aggregate_provider_usage
+from runtime.provider_usage import (
+    aggregate_provider_usage,
+    merge_provider_usage_calls,
+    nested_provider_usage_calls,
+)
 from tasks.task import Task, TaskState
 
 
@@ -156,6 +160,13 @@ class ChildAgentRunner:
                         failures=(*local.current_step.failures, execution.failure),
                     )
                     continue
+                merge_provider_usage_calls(
+                    local.task_local_state,
+                    nested_provider_usage_calls(
+                        execution.tool_result.tool_name,
+                        execution.tool_result.payload,
+                    ),
+                )
                 observation = execution.tool_result.to_dict()
                 observation["observation_id"] = (
                     f"{local.task_id}:{child_id}:observation:"
