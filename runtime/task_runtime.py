@@ -2020,6 +2020,7 @@ class TaskRuntime:
                 called_at=entry.get("called_at"),
                 completed_at=entry.get("completed_at"),
                 result_ttl_seconds=entry.get("result_ttl_seconds"),
+                refresh_of_tool_use_id=entry.get("refresh_of_tool_use_id"),
             )
             for entry in task.tool_trace
         )

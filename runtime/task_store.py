@@ -266,6 +266,7 @@ def _decode_step(data: Mapping[str, Any] | None) -> StepExecutionState:
             called_at=item.get("called_at"),
             completed_at=item.get("completed_at"),
             result_ttl_seconds=item.get("result_ttl_seconds"),
+            refresh_of_tool_use_id=item.get("refresh_of_tool_use_id"),
         )
         for item in data.get("failures", ())
     )
@@ -318,6 +319,7 @@ def _decode_completion(
                 called_at=item.get("called_at"),
                 completed_at=item.get("completed_at"),
                 result_ttl_seconds=item.get("result_ttl_seconds"),
+                refresh_of_tool_use_id=item.get("refresh_of_tool_use_id"),
             )
             for item in data.get("tool_results", ())
         ),

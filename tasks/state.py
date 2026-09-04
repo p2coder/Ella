@@ -99,6 +99,7 @@ class ToolFailureObservation:
     called_at: str | None = None
     completed_at: str | None = None
     result_ttl_seconds: float | None = None
+    refresh_of_tool_use_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("attempt_id", "tool_name", "code", "message"):
@@ -127,6 +128,7 @@ class ToolFailureObservation:
             "called_at": self.called_at,
             "completed_at": self.completed_at,
             "result_ttl_seconds": self.result_ttl_seconds,
+            "refresh_of_tool_use_id": self.refresh_of_tool_use_id,
         }
 
 

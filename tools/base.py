@@ -125,6 +125,7 @@ class ToolResult:
     called_at: str | None = None
     completed_at: str | None = None
     result_ttl_seconds: float | None = None
+    refresh_of_tool_use_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,6 +140,7 @@ class ToolResult:
             "called_at": self.called_at,
             "completed_at": self.completed_at,
             "result_ttl_seconds": self.result_ttl_seconds,
+            "refresh_of_tool_use_id": self.refresh_of_tool_use_id,
         }
 
 

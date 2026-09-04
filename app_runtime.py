@@ -43,6 +43,7 @@ from tools import (
     DocumentWriteTool,
     EditTextTool,
     ReadTextTool,
+    RefreshTool,
     WriteTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -116,6 +117,7 @@ class AppRuntime:
         tool_manager.register(WriteTextTool(PROJECT_ROOT))
         tool_manager.register(EditTextTool(PROJECT_ROOT))
         tool_manager.register(BashTool(PROJECT_ROOT))
+        tool_manager.register(RefreshTool())
         tool_manager.register(ArtifactExistsTool(settings.document_directory))
         tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)

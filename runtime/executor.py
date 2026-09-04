@@ -26,6 +26,15 @@ class CapabilityExecutionResult:
         if self.tool_result is not None and self.failure is not None:
             raise ValueError("tool_result and failure are mutually exclusive")
 
+
+@dataclass(frozen=True, slots=True)
+class ToolUseRecord:
+    tool_use_id: str
+    task_id: str
+    agent_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+
     @property
     def tool_results(self) -> tuple[ToolResult, ...]:
         return () if self.tool_result is None else (self.tool_result,)
@@ -50,6 +59,9 @@ class CapabilityExecutor:
     )
     tool_use_id_factory: Callable[[], str] = field(
         default=lambda: f"tool-use-{uuid4().hex}", repr=False, compare=False
+    )
+    _tool_uses: dict[str, ToolUseRecord] = field(
+        default_factory=dict, init=False, repr=False, compare=False
     )
 
     def execute(
@@ -94,7 +106,17 @@ class CapabilityExecutor:
                 retryable=True,
             )
 
+        if tool_name == "refresh":
+            return self._execute_refresh(decision, context, task, arguments)
+
         tool_use_id = self.tool_use_id_factory()
+        self._tool_uses[tool_use_id] = ToolUseRecord(
+            tool_use_id=tool_use_id,
+            task_id=context.task_id,
+            agent_id=context.agent_id,
+            tool_name=tool_name,
+            arguments=dict(arguments),
+        )
         called_at = _utc_timestamp(self.clock())
         started = perf_counter()
         try:
@@ -166,6 +188,70 @@ class CapabilityExecutor:
         self._record_timing(context, tool_name, started, True, None)
         return CapabilityExecutionResult(decision, tool_result=result)
 
+    def _execute_refresh(
+        self,
+        decision: ExecutionDecision,
+        context: AgentExecutionContext,
+        task: Task,
+        arguments: dict[str, Any],
+    ) -> CapabilityExecutionResult:
+        source_id = str(arguments["tool_use_id"])
+        source = self._tool_uses.get(source_id)
+        if source is None:
+            return self._failure(
+                decision,
+                task,
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "refresh_source_not_found",
+                f"tool use {source_id} is not available for refresh",
+            )
+        if source.task_id != context.task_id or source.agent_id != context.agent_id:
+            return self._failure(
+                decision,
+                task,
+                ToolFailureKind.PERMISSION_DENIED,
+                "refresh_source_not_visible",
+                f"tool use {source_id} is not visible to this agent",
+            )
+        if source.tool_name == "refresh":
+            return self._failure(
+                decision,
+                task,
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "recursive_refresh_not_allowed",
+                "refresh cannot replay refresh",
+            )
+
+        replay = self.execute(
+            ExecutionDecision(
+                CALL_TOOL,
+                source.tool_name,
+                dict(source.arguments),
+                f"Refresh tool use {source_id}.",
+            ),
+            context,
+            task,
+        )
+        if replay.tool_result is not None:
+            return replace(
+                replay,
+                decision=decision,
+                tool_result=replace(
+                    replay.tool_result,
+                    refresh_of_tool_use_id=source_id,
+                ),
+            )
+        if replay.failure is not None:
+            return replace(
+                replay,
+                decision=decision,
+                failure=replace(
+                    replay.failure,
+                    refresh_of_tool_use_id=source_id,
+                ),
+            )
+        return replace(replay, decision=decision)
+
     def _record_timing(
         self,
         context: AgentExecutionContext,
@@ -198,6 +284,7 @@ class CapabilityExecutor:
         called_at: str | None = None,
         completed_at: str | None = None,
         result_ttl_seconds: float | None = None,
+        refresh_of_tool_use_id: str | None = None,
     ) -> CapabilityExecutionResult:
         return CapabilityExecutionResult(
             decision=decision,
@@ -216,6 +303,7 @@ class CapabilityExecutor:
                 called_at=called_at,
                 completed_at=completed_at,
                 result_ttl_seconds=result_ttl_seconds,
+                refresh_of_tool_use_id=refresh_of_tool_use_id,
             ),
             raw_result=raw_result,
         )
