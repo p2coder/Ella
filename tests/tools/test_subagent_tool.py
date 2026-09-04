@@ -5,7 +5,7 @@ from runtime.executor import CapabilityExecutor
 from skill import SkillManager
 from tasks.task import Task, TaskIntent, TaskState
 from tools import SubagentForkTool, SubagentTool, ToolManager
-from tools.base import ToolDefinition, ToolResult
+from tools.base import ToolDefinition, ToolResult, ToolUncertainPolicy
 
 
 class EchoTool:
@@ -131,6 +131,11 @@ def test_subagent_uses_clean_context_and_inherits_scope() -> None:
         _context().capability_scope.to_dict()
     )
     assert result.tool_result.payload["started_at"].endswith("Z")
+    definition = executor.tool_manager.get_definition("subagent")
+    assert definition.side_effecting is True
+    assert definition.uncertain_policy is (
+        ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH
+    )
 
 
 def test_subagent_nests_child_tool_observations() -> None:

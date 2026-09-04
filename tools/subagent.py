@@ -4,7 +4,12 @@ from typing import Any
 from agent.child_runner import ChildAgentRunner
 from agent.context import AgentExecutionContext
 
-from .base import CapabilityKind, ToolDefinition, ToolResult
+from .base import (
+    CapabilityKind,
+    ToolDefinition,
+    ToolResult,
+    ToolUncertainPolicy,
+)
 
 
 def _definition(name: str, description: str) -> ToolDefinition:
@@ -57,6 +62,8 @@ def _definition(name: str, description: str) -> ToolDefinition:
             "additionalProperties": False,
         },
         result_ttl_seconds=None,
+        side_effecting=True,
+        uncertain_policy=ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH,
         capability_kind=CapabilityKind.RUNTIME,
     )
 
