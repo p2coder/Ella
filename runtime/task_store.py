@@ -123,6 +123,11 @@ class TaskStore:
                 records.append(record)
         return tuple(records)
 
+    def task_ids(self) -> tuple[str, ...]:
+        if not self.root.exists():
+            return ()
+        return tuple(path.stem for path in sorted(self.root.glob("*.json")))
+
     def version(self, task_id: str) -> int:
         record = self.load(task_id)
         return 0 if record is None else record.version

@@ -243,6 +243,7 @@ class AppRuntime:
         return {
             "active_tasks": self.list_active_tasks(),
             "terminal_tasks": self.list_terminal_tasks(),
+            "recovery_errors": self._task_runtime.recovery_errors,
         }
 
     def subscribe_task_events(self, last_event_id: int | None = None):

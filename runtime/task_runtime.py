@@ -37,7 +37,7 @@ from .timing import (
     RuntimeTimingSnapshot,
 )
 from .task_queue import TaskQueue
-from .task_store import TaskStore
+from .task_store import TaskStore, UnsupportedCheckpointSchema
 from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 from .interactions import InteractionBroker, UserAnswer, UserQuestion
@@ -99,6 +99,10 @@ class TaskRuntime:
     _worker_results: dict[str, TaskRuntimeResult] = field(init=False, repr=False)
     _owned_tasks: dict[str, Future] = field(init=False, repr=False)
     _control_queue: Queue = field(init=False, repr=False)
+    recovery_errors: tuple[dict[str, object], ...] = field(
+        init=False,
+        repr=False,
+    )
 
     def __init__(
         self,
@@ -144,6 +148,7 @@ class TaskRuntime:
         self._worker_results = {}
         self._owned_tasks = {}
         self._control_queue = Queue()
+        self.recovery_errors = ()
 
     @property
     def is_running(self) -> bool:
@@ -383,7 +388,21 @@ class TaskRuntime:
     def _restore_from_checkpoints(self) -> None:
         if self.task_store is None:
             return
-        for stored in self.task_store.list():
+        self.recovery_errors = ()
+        for task_id in self.task_store.task_ids():
+            try:
+                stored = self.task_store.load(task_id)
+            except UnsupportedCheckpointSchema as error:
+                self.recovery_errors += (
+                    {
+                        "task_id": error.task_id,
+                        "code": "unsupported_checkpoint_schema",
+                        "message": str(error),
+                    },
+                )
+                continue
+            if stored is None:
+                continue
             task = stored.task
             if task.execution_context is None:
                 continue

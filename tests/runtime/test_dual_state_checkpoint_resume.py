@@ -10,6 +10,7 @@ from runtime.task_store import (
     TaskStore,
     UnsupportedCheckpointSchema,
 )
+from runtime.task_runtime import TaskRuntime
 from tasks.task import Task, TaskIntent, TaskState
 
 
@@ -83,3 +84,17 @@ def test_old_checkpoint_schema_is_explicitly_rejected(tmp_path) -> None:
         match="old version cannot be restored",
     ):
         TaskStore(tmp_path).load("legacy")
+
+
+def test_runtime_isolates_old_checkpoint_and_reports_recovery_error(tmp_path) -> None:
+    path = tmp_path / "legacy.json"
+    path.write_text(
+        json.dumps({"schema_version": CHECKPOINT_SCHEMA_VERSION - 1, "version": 1}),
+        encoding="utf-8",
+    )
+    runtime = TaskRuntime(task_store=TaskStore(tmp_path))
+
+    runtime._restore_from_checkpoints()
+
+    assert runtime.recovery_errors[0]["task_id"] == "legacy"
+    assert runtime.recovery_errors[0]["code"] == "unsupported_checkpoint_schema"

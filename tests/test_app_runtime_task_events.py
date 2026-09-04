@@ -54,6 +54,7 @@ def test_subscription_starts_with_full_snapshot():
     assert event["payload"]["active_tasks"][0]["task_id"] == (
         "task-projection"
     )
+    assert event["payload"]["recovery_errors"] == ()
 
 
 def test_task_projection_exposes_timing_for_sse_and_web_ui():

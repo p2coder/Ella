@@ -61,6 +61,7 @@ def test_web_ui_uses_sse_and_has_no_task_polling_loop():
     assert 'fetch("/tasks/input"' in source
     assert 'id="total-duration"' in source
     assert 'id="tool-timeline"' in source
+    assert 'id="recovery-errors"' in source
     assert "function toolUseDuration(item)" in source
     assert "renderSelectedTask(task)" in source
     assert "task.timing" in source
