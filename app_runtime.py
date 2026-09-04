@@ -355,6 +355,12 @@ class AppRuntime:
             ),
             "final_response": None,
             "model_output": _current_model_output(task),
+            "workflow_execution": _public_value(
+                task.task_local_state.get("workflow_execution")
+            ),
+            "child_executions": _public_value(
+                task.task_local_state.get("child_executions", {})
+            ),
             "tool_observations": tuple(
                 _public_value(observation) for observation in task.tool_trace
             )

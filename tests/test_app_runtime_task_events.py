@@ -69,6 +69,24 @@ def test_task_projection_exposes_timing_for_sse_and_web_ui():
     assert projection["tool_observations"] == ()
 
 
+def test_task_projection_exposes_running_workflow_and_child_summaries():
+    app, runtime = _app()
+    task = runtime.get_task("task-projection")
+    task.task_local_state["workflow_execution"] = {
+        "status": "running",
+        "script_sha256": "abc123",
+        "active_tool_count": 1,
+    }
+    task.task_local_state["child_executions"] = {
+        "agent-child": {"child_agent_id": "agent-child", "status": "running"}
+    }
+
+    projection = app.get_task(task.task_id)
+
+    assert projection["workflow_execution"]["active_tool_count"] == 1
+    assert projection["child_executions"]["agent-child"]["status"] == "running"
+
+
 def test_task_projection_includes_persisted_tool_failures():
     app, runtime = _app()
     task = runtime.get_task("task-projection")
