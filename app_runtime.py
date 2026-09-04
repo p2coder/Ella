@@ -340,6 +340,11 @@ class AppRuntime:
             "model_output": _current_model_output(task),
             "tool_observations": tuple(
                 _public_value(observation) for observation in task.tool_trace
+            )
+            + tuple(
+                _public_value(failure.to_dict())
+                for step in (*task.step_history, task.current_step)
+                for failure in step.failures
             ),
         }
         result = self._task_runtime.result_for(task.task_id)
