@@ -5,7 +5,7 @@ from agent.decision import CALL_TOOL, ExecutionDecision
 from runtime.executor import CapabilityExecutor
 from skill import SkillManager
 from tasks.task import Task
-from tools.base import ToolDefinition, ToolResult
+from tools.base import ToolDefinition, ToolResult, ToolUncertainPolicy
 from tools.manager import ToolManager
 
 
@@ -41,6 +41,31 @@ class EchoTool:
             context.task_id,
             {"value": str((arguments or {})["value"])},
         )
+
+
+class ConfirmedFailure(RuntimeError):
+    tool_outcome_uncertain = False
+
+
+class ConfirmedFailureTool(EchoTool):
+    name = "confirmed_failure"
+
+    @property
+    def definition(self) -> ToolDefinition:
+        base = super().definition
+        return ToolDefinition(
+            name=self.name,
+            description=base.description,
+            schema_version=base.schema_version,
+            input_schema=base.input_schema,
+            input_examples=base.input_examples,
+            output_schema=base.output_schema,
+            side_effecting=True,
+            uncertain_policy=ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH,
+        )
+
+    def run(self, context, arguments=None) -> ToolResult:
+        raise ConfirmedFailure("execution failed with a confirmed outcome")
 
 
 def _context() -> AgentExecutionContext:
@@ -128,3 +153,33 @@ def test_validation_failure_does_not_create_tool_use() -> None:
     assert result.failure.tool_use_id is None
     assert result.failure.called_at is None
     assert result.failure.completed_at is None
+
+
+def test_tool_can_report_confirmed_failure_after_dispatch() -> None:
+    manager = ToolManager()
+    manager.register(ConfirmedFailureTool())
+    executor = CapabilityExecutor(SkillManager(), manager)
+    context = _context()
+    context = AgentExecutionContext(
+        agent_id=context.agent_id,
+        agent_role=context.agent_role,
+        parent_agent_id=context.parent_agent_id,
+        task_id=context.task_id,
+        memory_scope=context.memory_scope,
+        capability_scope=CapabilityScope("main_agent", (), ("confirmed_failure",)),
+    )
+
+    result = executor.execute(
+        ExecutionDecision(
+            CALL_TOOL,
+            "confirmed_failure",
+            {"value": "hello"},
+            "Exercise confirmed failure.",
+        ),
+        context,
+        Task("task-metadata"),
+    )
+
+    assert result.failure is not None
+    assert result.failure.code == "tool_execution_failed"
+    assert result.uncertain is False

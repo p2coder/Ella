@@ -162,7 +162,12 @@ class CapabilityExecutor:
             return outcome
         except Exception as error:
             completed_at = _utc_timestamp(self.clock())
-            uncertain = _may_have_unconfirmed_side_effect(tool)
+            uncertainty_override = getattr(error, "tool_outcome_uncertain", None)
+            uncertain = (
+                _may_have_unconfirmed_side_effect(tool)
+                if uncertainty_override is None
+                else bool(uncertainty_override)
+            )
             code = (
                 "uncertain_tool_outcome"
                 if uncertain
