@@ -21,11 +21,29 @@ MAX_RETURN_BYTES = 1024 * 1024
 class WorkflowRuntime:
     child_runner: ChildAgentRunner
     task_reader: Any
+    max_script_bytes: int = MAX_SCRIPT_BYTES
     max_wall_seconds: float = 600
     max_parallel_children: int = 8
     max_total_children: int = 32
     memory_limit_bytes: int = 64 * 1024 * 1024
     max_return_bytes: int = MAX_RETURN_BYTES
+
+    def __post_init__(self) -> None:
+        limits = (
+            ("max_script_bytes", self.max_script_bytes, MAX_SCRIPT_BYTES),
+            ("max_wall_seconds", self.max_wall_seconds, 600),
+            ("max_parallel_children", self.max_parallel_children, 8),
+            ("max_total_children", self.max_total_children, 32),
+            ("memory_limit_bytes", self.memory_limit_bytes, 64 * 1024 * 1024),
+            ("max_return_bytes", self.max_return_bytes, MAX_RETURN_BYTES),
+        )
+        for name, value, hard_limit in limits:
+            if value <= 0 or value > hard_limit:
+                raise ValueError(f"{name} must be in (0, {hard_limit}]")
+        if self.max_total_children < self.max_parallel_children:
+            raise ValueError(
+                "max_total_children must allow max_parallel_children"
+            )
 
     def execute(
         self,
@@ -35,8 +53,8 @@ class WorkflowRuntime:
     ) -> dict[str, Any]:
         if not isinstance(script, str) or not script.strip():
             raise ValueError("script must be a non-empty string")
-        if len(script.encode("utf-8")) > MAX_SCRIPT_BYTES:
-            raise ValueError("workflow script exceeds 64 KiB")
+        if len(script.encode("utf-8")) > self.max_script_bytes:
+            raise ValueError("workflow script exceeds configured byte limit")
         wall_seconds = (
             self.max_wall_seconds
             if timeout_seconds is None

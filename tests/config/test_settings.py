@@ -90,6 +90,35 @@ def test_invalid_tool_result_ttl_override_is_rejected():
         load_settings({"ELLA_TOOL_RESULT_TTL_OVERRIDES": {"camera_scene": -1}})
 
 
+def test_workflow_and_subagent_budgets_can_be_reduced() -> None:
+    settings = load_settings(
+        {
+            "ELLA_WORKFLOW_MAX_PARALLEL_CHILDREN": 2,
+            "ELLA_WORKFLOW_MAX_TOTAL_CHILDREN": 4,
+            "ELLA_WORKFLOW_MAX_WALL_SECONDS": 60,
+            "ELLA_SUBAGENT_MAX_DEPTH": 2,
+            "ELLA_SUBAGENT_MAX_ADVANCES": 20,
+            "ELLA_SUBAGENT_MAX_TIMEOUT_SECONDS": 120,
+        }
+    )
+
+    assert settings.workflow_max_parallel_children == 2
+    assert settings.workflow_max_total_children == 4
+    assert settings.workflow_max_wall_seconds == 60
+    assert settings.subagent_max_depth == 2
+    assert settings.subagent_max_advances == 20
+    assert settings.subagent_max_timeout_seconds == 120
+
+
+def test_workflow_and_subagent_hard_limits_are_enforced() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="ELLA_WORKFLOW_MAX_TOTAL_CHILDREN"):
+        load_settings({"ELLA_WORKFLOW_MAX_TOTAL_CHILDREN": 33})
+    with pytest.raises(ValueError, match="ELLA_SUBAGENT_MAX_DEPTH"):
+        load_settings({"ELLA_SUBAGENT_MAX_DEPTH": 5})
+
+
 def test_missing_qwen_api_key_does_not_crash_settings_loading():
     settings = load_settings({"ELLA_USE_REAL_PROVIDERS": "true"})
 

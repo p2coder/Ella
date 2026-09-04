@@ -124,13 +124,14 @@ def test_workflow_rejects_unexposed_host_capabilities(script) -> None:
 def test_workflow_enforces_script_child_and_return_limits() -> None:
     runner = FakeChildRunner()
     runtime = _runtime(runner)
-    with pytest.raises(ValueError, match="64 KiB"):
+    with pytest.raises(ValueError, match="byte limit"):
         runtime.execute(_context(), "a" * (64 * 1024 + 1))
 
     limited_calls = WorkflowRuntime(
         runner,
         runtime.task_reader,
         max_wall_seconds=3,
+        max_parallel_children=1,
         max_total_children=1,
     )
     with pytest.raises(RuntimeError, match="child call limit exceeded"):

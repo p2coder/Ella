@@ -166,11 +166,25 @@ class AppRuntime:
             decision_agent=subagent,
             executor=task_runtime.executor,
             task_reader=task_runtime.get_task,
+            max_depth=settings.subagent_max_depth,
+            max_advances=settings.subagent_max_advances,
+            max_timeout_seconds=settings.subagent_max_timeout_seconds,
         )
         tool_manager.register(SubagentTool(child_runner))
         tool_manager.register(SubagentForkTool(child_runner))
         tool_manager.register(
-            WorkflowTool(WorkflowRuntime(child_runner, task_runtime.get_task))
+            WorkflowTool(
+                WorkflowRuntime(
+                    child_runner,
+                    task_runtime.get_task,
+                    max_script_bytes=settings.workflow_max_script_bytes,
+                    max_wall_seconds=settings.workflow_max_wall_seconds,
+                    max_parallel_children=settings.workflow_max_parallel_children,
+                    max_total_children=settings.workflow_max_total_children,
+                    memory_limit_bytes=settings.workflow_memory_limit_bytes,
+                    max_return_bytes=settings.workflow_max_return_bytes,
+                )
+            )
         )
         tool_manager.register(
             ToolObservationCheckTool(

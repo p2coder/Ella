@@ -57,6 +57,14 @@ class ChildAgentRunner:
     max_advances: int = 50
     max_timeout_seconds: float = 300.0
 
+    def __post_init__(self) -> None:
+        if not 1 <= self.max_depth <= 4:
+            raise ValueError("max_depth must be in [1, 4]")
+        if not 1 <= self.max_advances <= 50:
+            raise ValueError("max_advances must be in [1, 50]")
+        if not 0 < self.max_timeout_seconds <= 300:
+            raise ValueError("max_timeout_seconds must be in (0, 300]")
+
     def run(
         self,
         parent_context: AgentExecutionContext,
