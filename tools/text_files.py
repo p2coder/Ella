@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path, PurePath
+
+from agent.context import AgentExecutionContext
+
+from .base import ToolDefinition, ToolIdempotency, ToolResult
+
+
+MAX_TEXT_FILE_BYTES = 1_000_000
+
+
+class TextFileError(ValueError):
+    pass
+
+
+def resolve_project_path(
+    project_root: Path,
+    raw_path: object,
+    *,
+    must_exist: bool,
+) -> Path:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise TextFileError("path must be a non-empty relative path")
+    relative = Path(raw_path)
+    if relative.is_absolute() or PurePath(raw_path).anchor:
+        raise TextFileError("absolute paths are not allowed")
+    root = project_root.resolve()
+    candidate = (root / relative).resolve(strict=must_exist)
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise TextFileError("path must stay inside the project root") from error
+    return candidate
+
+
+@dataclass(frozen=True, slots=True)
+class ReadTextTool:
+    project_root: Path
+    max_bytes: int = MAX_TEXT_FILE_BYTES
+    name: str = "read"
+    allowed_roles: tuple[str, ...] = ("main_agent",)
+
+    def __post_init__(self) -> None:
+        if self.max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Read one UTF-8 text file inside the project root. The result "
+                "includes a SHA-256 content version. A prior hash describes only "
+                "that observed version; read again to establish current content."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            input_examples=({"path": "README.md"},),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "byte_count": {"type": "number"},
+                    "truncated": {"type": "boolean"},
+                    "content_hash_algorithm": {"type": "string"},
+                    "content_hash": {"type": "string"},
+                },
+                "required": [
+                    "path",
+                    "content",
+                    "byte_count",
+                    "truncated",
+                    "content_hash_algorithm",
+                    "content_hash",
+                ],
+                "additionalProperties": False,
+            },
+            result_ttl_seconds=None,
+            idempotency=ToolIdempotency.IDEMPOTENT,
+        )
+
+    def run(
+        self,
+        context: AgentExecutionContext,
+        arguments: dict[str, object] | None = None,
+    ) -> ToolResult:
+        args = arguments or {}
+        path = resolve_project_path(
+            self.project_root,
+            args.get("path"),
+            must_exist=True,
+        )
+        if not path.is_file():
+            raise TextFileError("path must reference a regular file")
+        size = path.stat().st_size
+        if size > self.max_bytes:
+            raise TextFileError(
+                f"text file exceeds the {self.max_bytes}-byte read limit"
+            )
+        content_bytes = path.read_bytes()
+        try:
+            content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise TextFileError("file is not valid UTF-8 text") from error
+        relative = path.relative_to(self.project_root.resolve()).as_posix()
+        return ToolResult(
+            self.name,
+            context.task_id,
+            context.trace_id,
+            {
+                "path": relative,
+                "content": content,
+                "byte_count": len(content_bytes),
+                "truncated": False,
+                "content_hash_algorithm": "sha256",
+                "content_hash": sha256(content_bytes).hexdigest(),
+            },
+        )

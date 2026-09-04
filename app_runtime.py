@@ -40,6 +40,7 @@ from tasks.factory import TaskFactory
 from skill import SkillLoader, SkillManager
 from tools import (
     DocumentWriteTool,
+    ReadTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
     MockWeatherTool,
@@ -108,6 +109,7 @@ class AppRuntime:
         tool_manager.register(WebSearchTool())
         tool_manager.register(WebPageReadTool())
         tool_manager.register(DocumentWriteTool(settings.document_directory))
+        tool_manager.register(ReadTextTool(PROJECT_ROOT))
         tool_manager.register(ArtifactExistsTool(settings.document_directory))
         tool_manager.register(DocumentReadTool(settings.document_directory))
         plan_store = PlanStore(settings.plan_directory)
