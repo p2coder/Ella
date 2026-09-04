@@ -7,6 +7,7 @@ import pytest
 from agent.child_runner import ChildAgentRun
 from agent.context import AgentExecutionContext, CapabilityScope
 from runtime.workflow_runtime import WorkflowRuntime
+from runtime.trace import TraceRecorder
 from tasks.task import Task, TaskState
 
 
@@ -100,6 +101,34 @@ def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
 
     assert result["script_return_value"] == ["answer-a", "answer-b"]
     assert len(result["child_results"]) == 2
+
+
+def test_workflow_records_script_and_child_trace_events() -> None:
+    runner = FakeChildRunner()
+    recorder = TraceRecorder()
+    task = Task("task-workflow", state=TaskState.TOOL_EXECUTION)
+    runtime = WorkflowRuntime(
+        runner,
+        lambda _: task,
+        trace_recorder=recorder,
+        max_wall_seconds=3,
+    )
+
+    runtime.execute(
+        _context(),
+        "return await tools.subagent({prompt: 'trace'});",
+    )
+
+    snapshot = recorder.snapshot("task-workflow")
+    assert snapshot is not None
+    assert [event.event_type for event in snapshot.events] == [
+        "script_started",
+        "tool_dispatched",
+        "tool_completed",
+        "promise_join",
+        "script_completed",
+    ]
+    assert "script" not in snapshot.events[0].payload
 
 
 @pytest.mark.parametrize(

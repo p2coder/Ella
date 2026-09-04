@@ -1,6 +1,7 @@
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
@@ -11,6 +12,7 @@ from typing import Any
 from agent.child_runner import ChildAgentRunner
 from agent.context import AgentExecutionContext
 from tasks.task import TaskState
+from runtime.trace import NoOpTraceRecorder, TraceRecorder
 
 
 MAX_SCRIPT_BYTES = 64 * 1024
@@ -21,6 +23,9 @@ MAX_RETURN_BYTES = 1024 * 1024
 class WorkflowRuntime:
     child_runner: ChildAgentRunner
     task_reader: Any
+    trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
+        default_factory=NoOpTraceRecorder
+    )
     max_script_bytes: int = MAX_SCRIPT_BYTES
     max_wall_seconds: float = 600
     max_parallel_children: int = 8
@@ -64,6 +69,14 @@ class WorkflowRuntime:
             raise ValueError(
                 f"timeout_seconds must be in (0, {self.max_wall_seconds:g}]"
             )
+        self._trace(
+            context,
+            "script_started",
+            {
+                "script_sha256": sha256(script.encode("utf-8")).hexdigest(),
+                "script_bytes": len(script.encode("utf-8")),
+            },
+        )
 
         process_context = get_context("spawn")
         parent_connection, child_connection = process_context.Pipe()
@@ -82,17 +95,23 @@ class WorkflowRuntime:
         connection_open = True
         error: str | None = None
         pool = ThreadPoolExecutor(max_workers=self.max_parallel_children)
+        pause_recorded = False
         try:
             while process.is_alive() or futures:
                 if monotonic() - started > wall_seconds:
                     raise TimeoutError("workflow execution timed out")
                 task_state = self.task_reader(context.task_id).state
                 while task_state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
+                    if not pause_recorded:
+                        self._trace(context, "control_safe_point", {"state": task_state.value})
+                        pause_recorded = True
                     if monotonic() - started > wall_seconds:
                         raise TimeoutError("workflow execution timed out while paused")
                     sleep(0.01)
                     task_state = self.task_reader(context.task_id).state
+                pause_recorded = False
                 if task_state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
+                    self._trace(context, "control_safe_point", {"state": task_state.value})
                     raise RuntimeError("parent task was killed")
                 if connection_open and parent_connection.poll(0.01):
                     try:
@@ -134,6 +153,11 @@ class WorkflowRuntime:
                                 "completed_at": None,
                                 "result": None,
                             }
+                        )
+                        self._trace(
+                            context,
+                            "tool_dispatched",
+                            {"call_id": call_id, "tool_name": tool_name},
                         )
                         future = pool.submit(
                             self.child_runner.run,
@@ -177,7 +201,21 @@ class WorkflowRuntime:
                         payload = str(child_error)
                     if process.is_alive():
                         parent_connection.send(("settle", call_id, succeeded, payload))
+                    self._trace(
+                        context,
+                        "tool_completed",
+                        {
+                            "call_id": call_id,
+                            "tool_name": calls[call_index]["tool_name"],
+                            "status": calls[call_index]["status"],
+                        },
+                    )
                 if script_done and not futures:
+                    self._trace(
+                        context,
+                        "promise_join",
+                        {"completed_calls": len(calls)},
+                    )
                     break
             if error is not None:
                 raise RuntimeError(f"workflow script failed: {error}")
@@ -192,13 +230,38 @@ class WorkflowRuntime:
             encoded = json.dumps(result, ensure_ascii=False).encode("utf-8")
             if len(encoded) > self.max_return_bytes:
                 raise ValueError("workflow result exceeds configured byte limit")
+            self._trace(
+                context,
+                "script_completed",
+                {"completed_calls": len(calls)},
+            )
             return result
+        except BaseException as workflow_error:
+            self._trace(
+                context,
+                "script_failed",
+                {"error": str(workflow_error), "completed_calls": len(calls)},
+            )
+            raise
         finally:
             if process.is_alive():
                 process.terminate()
             process.join(timeout=1)
             pool.shutdown(wait=False, cancel_futures=True)
             parent_connection.close()
+
+    def _trace(
+        self,
+        context: AgentExecutionContext,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.trace_recorder.record(
+            task_id=context.task_id,
+            boundary="workflow",
+            event_type=event_type,
+            payload=payload,
+        )
 
 
 def _utc_now() -> str:
