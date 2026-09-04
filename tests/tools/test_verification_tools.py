@@ -5,7 +5,10 @@ from tools.verification import (
     ArtifactExistsTool,
     DocumentReadTool,
     ToolObservationCheckTool,
+    VerificationTool,
 )
+from agent.verification import VerificationAgent
+from tasks.task import Task, TaskIntent
 
 
 def _context() -> AgentExecutionContext:
@@ -82,3 +85,22 @@ def test_verification_definitions_are_read_only_and_have_no_produces_field(tmp_p
     for tool in tools:
         assert tool.definition.side_effecting is False
         assert "produces" not in tool.definition.to_dict()
+
+
+def test_verification_tool_loads_task_data_from_context() -> None:
+    task = Task("task-verify-tools")
+    task.intent = TaskIntent(goal="Return a useful answer")
+    requested = []
+
+    def read_task(task_id: str) -> Task:
+        requested.append(task_id)
+        return task
+
+    tool = VerificationTool(read_task, VerificationAgent())
+    result = tool.run(_context(), {"candidate_result": "A useful answer"})
+
+    assert requested == ["task-verify-tools"]
+    assert result.payload["goal_state"] == "achieved"
+    assert result.payload["recoverable"] is False
+    assert tool.definition.result_ttl_seconds == 300
+    assert set(tool.definition.input_schema["properties"]) == {"candidate_result"}

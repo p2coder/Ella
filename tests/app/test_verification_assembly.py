@@ -19,3 +19,4 @@ def test_default_app_runtime_wires_verification_agent_and_tools(
     assert tool_manager.get_tool("artifact_exists") is not None
     assert tool_manager.get_tool("document_read") is not None
     assert tool_manager.get_tool("tool_observation_check") is not None
+    assert tool_manager.get_tool("verification") is not None

@@ -61,6 +61,7 @@ from tools.verification import (
     ArtifactExistsTool,
     DocumentReadTool,
     ToolObservationCheckTool,
+    VerificationTool,
 )
 from runtime.interactions import InteractionBroker
 
@@ -161,6 +162,9 @@ class AppRuntime:
             ToolObservationCheckTool(
                 lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)
             )
+        )
+        tool_manager.register(
+            VerificationTool(task_runtime.get_task, verification_agent)
         )
         interaction_broker.set_question_handler(
             lambda question: task_runtime.event_publisher.publish(

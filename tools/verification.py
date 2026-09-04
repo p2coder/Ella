@@ -5,11 +5,79 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from agent.context import AgentExecutionContext
+from agent.verification import VerificationAgent
+from tasks.task import Task
 
 from .base import ToolDefinition, ToolIdempotency, ToolResult
 
 
 MAX_VERIFICATION_DOCUMENT_BYTES = 200_000
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationTool:
+    task_reader: Callable[[str], Task]
+    verification_agent: VerificationAgent
+    name: str = "verification"
+    allowed_roles: tuple[str, ...] = ("main_agent", "subagent")
+
+    @property
+    def definition(self) -> ToolDefinition:
+        string_array = {"type": "array", "items": {"type": "string"}}
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Verify a candidate result against the current task intent and "
+                "observations. Task data is loaded from the execution context."
+            ),
+            schema_version="1.0",
+            input_schema={
+                "type": "object",
+                "properties": {"candidate_result": {"type": "string"}},
+                "required": ["candidate_result"],
+                "additionalProperties": False,
+            },
+            input_examples=({"candidate_result": "The requested report is ready."},),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "goal_state": {"type": "string"},
+                    "criterion_results": string_array,
+                    "deliverable_results": string_array,
+                    "draft_quality_issues": string_array,
+                    "recoverable": {"type": "boolean"},
+                    "feedback_for_execution": {"type": "string"},
+                    "public_summary": {"type": "string"},
+                },
+                "required": [
+                    "goal_state",
+                    "criterion_results",
+                    "deliverable_results",
+                    "draft_quality_issues",
+                    "recoverable",
+                    "feedback_for_execution",
+                    "public_summary",
+                ],
+                "additionalProperties": False,
+            },
+            result_ttl_seconds=300,
+            idempotency=ToolIdempotency.IDEMPOTENT,
+        )
+
+    def run(self, context: AgentExecutionContext, arguments=None) -> ToolResult:
+        candidate_result = str((arguments or {}).get("candidate_result", ""))
+        action = self.verification_agent.decide_candidate(
+            self.task_reader(context.task_id),
+            candidate_result=candidate_result,
+        )
+        if action.verdict is None:
+            raise RuntimeError("verification did not produce a verdict")
+        return ToolResult(
+            self.name,
+            context.task_id,
+            context.trace_id,
+            action.verdict.to_dict(),
+        )
 
 
 def _safe_target(root: Path, value: object) -> tuple[PurePosixPath, Path]:

@@ -67,9 +67,29 @@ class VerificationAgent:
         task: Task,
         definitions: tuple[ToolDefinition, ...] = (),
     ) -> VerificationAction:
+        draft = str(task.task_local_state.get("draft_final_response", "")).strip()
+        candidate_result = str(
+            task.task_local_state.get("completion_summary", "")
+        )
+        return self.decide_candidate(
+            task,
+            candidate_result=candidate_result,
+            draft=draft,
+            definitions=definitions,
+        )
+
+    def decide_candidate(
+        self,
+        task: Task,
+        *,
+        candidate_result: str,
+        draft: str | None = None,
+        definitions: tuple[ToolDefinition, ...] = (),
+    ) -> VerificationAction:
         if task.intent is None:
             raise VerificationDecisionError("verification requires TaskIntent")
-        draft = str(task.task_local_state.get("draft_final_response", "")).strip()
+        draft = candidate_result if draft is None else draft
+        draft = str(draft).strip()
         context = {
             "user_prompt": (
                 "" if task.source_event is None else task.source_event.payload.get("text", "")
@@ -85,7 +105,7 @@ class VerificationAgent:
                 "failures": tuple(
                     item.to_dict() for item in task.current_step.failures
                 ),
-                "candidate_result": task.task_local_state.get("completion_summary", ""),
+                "candidate_result": candidate_result,
                 "draft_final_response": draft,
                 "verification_round": int(
                     task.task_local_state.get("verification_round", 1)
