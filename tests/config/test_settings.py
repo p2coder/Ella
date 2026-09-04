@@ -119,6 +119,14 @@ def test_workflow_and_subagent_hard_limits_are_enforced() -> None:
         load_settings({"ELLA_SUBAGENT_MAX_DEPTH": 5})
 
 
+def test_context_compression_threshold_rejects_closed_boundaries() -> None:
+    import pytest
+
+    for threshold in (0, 1):
+        with pytest.raises(ValueError, match="must be in"):
+            load_settings({"ELLA_CONTEXT_COMPRESSION_THRESHOLD": threshold})
+
+
 def test_missing_qwen_api_key_does_not_crash_settings_loading():
     settings = load_settings({"ELLA_USE_REAL_PROVIDERS": "true"})
 

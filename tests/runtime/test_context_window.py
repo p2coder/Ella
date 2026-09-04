@@ -33,6 +33,12 @@ def test_prepare_context_calls_compression_hook_at_threshold() -> None:
     assert prepared.estimated_tokens == 3
 
 
+@pytest.mark.parametrize("threshold", (0, 1, -0.1, 1.1))
+def test_prepare_context_rejects_invalid_compression_threshold(threshold) -> None:
+    with pytest.raises(ValueError, match="compression_threshold"):
+        prepare_context("text", compression_threshold=threshold)
+
+
 def test_noop_compression_rejects_only_after_window_is_exceeded() -> None:
     assert prepare_context(
         "a" * 10,

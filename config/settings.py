@@ -381,8 +381,8 @@ def _optional_string(env: Mapping[str, Any], name: str) -> str | None:
 
 def _bounded_ratio(values: Mapping[str, Any], name: str, default: float) -> float:
     value = float(values.get(name, default))
-    if not 0 < value <= 1:
-        raise ValueError(f"{name.removeprefix('ELLA_')} must be in (0, 1]")
+    if not 0 < value < 1:
+        raise ValueError(f"{name.removeprefix('ELLA_')} must be in (0, 1)")
     return value
 
 

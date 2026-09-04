@@ -46,8 +46,8 @@ def prepare_context(
 ) -> PreparedContext:
     if context_window_tokens < 1:
         raise ValueError("context_window_tokens must be positive")
-    if not 0 < compression_threshold <= 1:
-        raise ValueError("compression_threshold must be in (0, 1]")
+    if not 0 < compression_threshold < 1:
+        raise ValueError("compression_threshold must be in (0, 1)")
     estimated = estimate_tokens(text)
     requested = estimated >= context_window_tokens * compression_threshold
     prepared = compressor(text) if requested else text
