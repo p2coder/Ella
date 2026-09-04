@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
-from threading import Event, Lock, Thread
+from threading import Event, Lock, RLock, Thread
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from queue import Empty, Queue
 from typing import Any
@@ -95,7 +95,7 @@ class TaskRuntime:
     _stop_event: Event = field(init=False, repr=False)
     _wake_event: Event = field(init=False, repr=False)
     _worker_lock: Lock = field(init=False, repr=False)
-    _persistence_lock: Lock = field(init=False, repr=False)
+    _persistence_lock: RLock = field(init=False, repr=False)
     _worker_errors: dict[str, str] = field(init=False, repr=False)
     _worker_results: dict[str, TaskRuntimeResult] = field(init=False, repr=False)
     _owned_tasks: dict[str, Future] = field(init=False, repr=False)
@@ -144,7 +144,7 @@ class TaskRuntime:
         self._stop_event = Event()
         self._wake_event = Event()
         self._worker_lock = Lock()
-        self._persistence_lock = Lock()
+        self._persistence_lock = RLock()
         self._worker_errors = {}
         self._worker_results = {}
         self._owned_tasks = {}
@@ -550,9 +550,10 @@ class TaskRuntime:
         task_id: str,
         workflow_state: dict[str, Any],
     ) -> None:
-        task = self.get_task(task_id)
-        task.task_local_state["workflow_execution"] = deepcopy(workflow_state)
-        self._persist(task)
+        with self._persistence_lock:
+            task = self.get_task(task_id)
+            task.task_local_state["workflow_execution"] = deepcopy(workflow_state)
+            self._persist(task)
 
     def provide_input(
         self,
