@@ -36,6 +36,7 @@ from tasks.state import (
 )
 from agent.subagent import SubAgent
 from agent.child_runner import ChildAgentRunner
+from runtime.workflow_runtime import WorkflowRuntime
 from runtime.executor import CapabilityExecutor
 from tasks.factory import TaskFactory
 from skill import SkillLoader, SkillManager
@@ -47,6 +48,7 @@ from tools import (
     RefreshTool,
     SubagentTool,
     SubagentForkTool,
+    WorkflowTool,
     WriteTextTool,
     MockChecklistTool,
     MockVisionSummaryTool,
@@ -171,6 +173,9 @@ class AppRuntime:
         )
         tool_manager.register(SubagentTool(child_runner))
         tool_manager.register(SubagentForkTool(child_runner))
+        tool_manager.register(
+            WorkflowTool(WorkflowRuntime(child_runner, task_runtime.get_task))
+        )
         tool_manager.register(
             ToolObservationCheckTool(
                 lambda task_id: tuple(task_runtime.get_task(task_id).tool_trace)
