@@ -218,6 +218,10 @@ class CapabilityExecutor:
         with self._tool_use_lock:
             source = self._tool_uses.get(source_id)
         if source is None:
+            source = self._persisted_tool_use(task, source_id)
+            if source is not None:
+                self._remember_tool_use(source)
+        if source is None:
             return self._failure(
                 decision,
                 task,
@@ -297,6 +301,35 @@ class CapabilityExecutor:
     def _remember_tool_use(self, record: ToolUseRecord) -> None:
         with self._tool_use_lock:
             self._tool_uses[record.tool_use_id] = record
+
+    @staticmethod
+    def _persisted_tool_use(task: Task, tool_use_id: str) -> ToolUseRecord | None:
+        candidates: list[dict[str, Any]] = [
+            dict(item) for item in task.tool_trace if isinstance(item, dict)
+        ]
+        for step in (*task.step_history, task.current_step):
+            candidates.extend(failure.to_dict() for failure in step.failures)
+        for item in reversed(candidates):
+            if item.get("tool_use_id") != tool_use_id:
+                continue
+            task_id = item.get("task_id")
+            agent_id = item.get("agent_id")
+            tool_name = item.get("tool_name")
+            arguments = item.get("arguments")
+            if not all(isinstance(value, str) and value for value in (
+                task_id,
+                agent_id,
+                tool_name,
+            )) or not isinstance(arguments, dict):
+                return None
+            return ToolUseRecord(
+                tool_use_id=tool_use_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                tool_name=tool_name,
+                arguments=dict(arguments),
+            )
+        return None
 
     def _record_timing(
         self,

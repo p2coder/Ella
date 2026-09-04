@@ -199,3 +199,38 @@ def test_concurrent_refreshes_share_one_replay() -> None:
     assert all(
         item.tool_result.refresh_of_tool_use_id == source_id for item in results
     )
+
+
+def test_refresh_recovers_original_call_from_checkpointed_observation() -> None:
+    manager = ToolManager()
+    recording = RecordingTool()
+    manager.register(recording)
+    manager.register(RefreshTool())
+    first_executor = CapabilityExecutor(
+        SkillManager(),
+        manager,
+        tool_use_id_factory=lambda: "tool-use-before-restart",
+    )
+    task = Task("task-refresh")
+    original = first_executor.execute(
+        _decision("recording", {"value": "persisted"}), _context(), task
+    )
+    task.tool_trace = (original.tool_result.to_dict(),)
+
+    restarted_executor = CapabilityExecutor(
+        SkillManager(),
+        manager,
+        tool_use_id_factory=lambda: "tool-use-after-restart",
+    )
+    refreshed = restarted_executor.execute(
+        _decision("refresh", {"tool_use_id": "tool-use-before-restart"}),
+        _context(),
+        task,
+    )
+
+    assert refreshed.tool_result is not None
+    assert refreshed.tool_result.tool_use_id == "tool-use-after-restart"
+    assert refreshed.tool_result.refresh_of_tool_use_id == (
+        "tool-use-before-restart"
+    )
+    assert recording.calls == [{"value": "persisted"}, {"value": "persisted"}]
