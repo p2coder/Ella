@@ -106,6 +106,8 @@ def test_workflow_promise_all_dispatches_children_in_parallel() -> None:
         "return process.cwd();",
         "return require('fs');",
         "return await tools.workflow({script: 'return 1'});",
+        "return __workflow_enqueue('subagent', '{}');",
+        "tools = {}; return await tools.subagent({prompt: 'x'});",
     ),
 )
 def test_workflow_rejects_unexposed_host_capabilities(script) -> None:

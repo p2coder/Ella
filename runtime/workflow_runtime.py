@@ -75,6 +75,11 @@ class WorkflowRuntime:
                     kind = message[0]
                     if kind == "call":
                         _, call_id, tool_name, raw_arguments = message
+                        if tool_name not in {"subagent", "subagent_fork"}:
+                            parent_connection.send(
+                                ("settle", call_id, False, "workflow Tool is not allowed")
+                            )
+                            continue
                         if len(calls) >= self.max_total_children:
                             parent_connection.send(
                                 ("settle", call_id, False, "child call limit exceeded")
@@ -191,9 +196,13 @@ def _quickjs_worker(
     context.add_callable("__workflow_enqueue", enqueue)
     context.add_callable("__workflow_complete", complete)
     bootstrap = """
+        const __hostEnqueue = globalThis.__workflow_enqueue;
+        const __hostComplete = globalThis.__workflow_complete;
+        delete globalThis.__workflow_enqueue;
+        delete globalThis.__workflow_complete;
         const __pending = new Map();
         const __call = (name, args) => new Promise((resolve, reject) => {
-          const id = __workflow_enqueue(name, JSON.stringify(args));
+          const id = __hostEnqueue(name, JSON.stringify(args));
           __pending.set(id, {resolve, reject});
         });
         globalThis.__workflow_settle = (id, ok, payload) => {
@@ -203,9 +212,13 @@ def _quickjs_worker(
           if (ok) pending.resolve(JSON.parse(payload));
           else pending.reject(new Error(payload));
         };
-        globalThis.tools = Object.freeze({
-          subagent: (args) => __call('subagent', args),
-          subagent_fork: (args) => __call('subagent_fork', args),
+        Object.defineProperty(globalThis, 'tools', {
+          value: Object.freeze({
+            subagent: (args) => __call('subagent', args),
+            subagent_fork: (args) => __call('subagent_fork', args),
+          }),
+          writable: false,
+          configurable: false,
         });
         globalThis.eval = undefined;
         globalThis.Function = undefined;
@@ -215,11 +228,11 @@ def _quickjs_worker(
     try:
         context.eval(bootstrap)
         context.eval(
-            "(async () => {\n"
+            "(async () => {\n'use strict';\n"
             + script
             + "\n})().then("
-            "value => __workflow_complete(true, JSON.stringify(value)),"
-            "error => __workflow_complete(false, String(error && error.message || error))"
+            "value => __hostComplete(true, JSON.stringify(value)),"
+            "error => __hostComplete(false, String(error && error.message || error))"
             ");"
         )
         while not completion:
