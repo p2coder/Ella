@@ -59,7 +59,7 @@ def _context() -> AgentExecutionContext:
 
 
 def test_executor_stamps_dispatched_tool_use() -> None:
-    manager = ToolManager()
+    manager = ToolManager({"echo": 15})
     manager.register(EchoTool())
     timestamps = iter(
         (
@@ -89,7 +89,7 @@ def test_executor_stamps_dispatched_tool_use() -> None:
     assert result.tool_result.arguments == {"value": "hello"}
     assert result.tool_result.called_at == "2026-09-04T01:02:03Z"
     assert result.tool_result.completed_at == "2026-09-04T01:02:04Z"
-    assert result.tool_result.result_ttl_seconds == 60
+    assert result.tool_result.result_ttl_seconds == 15
 
 
 def test_validation_failure_does_not_create_tool_use() -> None:

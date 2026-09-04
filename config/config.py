@@ -22,6 +22,10 @@ DISPLAY_DIRECTORY = OUTPUT_DIRECTORY / "display"
 RAW_MEDIA_DIRECTORY = OUTPUT_DIRECTORY / "raw_media"
 DOCUMENT_DIRECTORY = OUTPUT_DIRECTORY / "documents"
 
+# Optional per-tool observation TTL overrides. Values are seconds or None for
+# observations that do not expire by time.
+TOOL_RESULT_TTL_OVERRIDES = {}
+
 # MODEL_PROVIDER = "qwen"
 MODEL_PROVIDER = "deepseek"
 

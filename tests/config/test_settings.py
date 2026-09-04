@@ -72,6 +72,24 @@ def test_numeric_camera_settings_are_parsed():
     assert settings.camera_task_fps == 2
 
 
+def test_tool_result_ttl_overrides_are_validated():
+    settings = load_settings(
+        {"ELLA_TOOL_RESULT_TTL_OVERRIDES": {"camera_scene": 30, "read": None}}
+    )
+
+    assert settings.tool_result_ttl_overrides == {
+        "camera_scene": 30.0,
+        "read": None,
+    }
+
+
+def test_invalid_tool_result_ttl_override_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="invalid TTL override"):
+        load_settings({"ELLA_TOOL_RESULT_TTL_OVERRIDES": {"camera_scene": -1}})
+
+
 def test_missing_qwen_api_key_does_not_crash_settings_loading():
     settings = load_settings({"ELLA_USE_REAL_PROVIDERS": "true"})
 

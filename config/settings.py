@@ -1,3 +1,4 @@
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ CONFIG_NAMES = {
     "ELLA_DOCUMENT_DIRECTORY": "DOCUMENT_DIRECTORY",
     "ELLA_CONTEXT_WINDOW_TOKENS": "CONTEXT_WINDOW_TOKENS",
     "ELLA_CONTEXT_COMPRESSION_THRESHOLD": "CONTEXT_COMPRESSION_THRESHOLD",
+    "ELLA_TOOL_RESULT_TTL_OVERRIDES": "TOOL_RESULT_TTL_OVERRIDES",
 }
 
 SAFE_DEFAULTS = {
@@ -95,6 +97,7 @@ SAFE_DEFAULTS = {
     ),
     "ELLA_CONTEXT_WINDOW_TOKENS": 1_000_000,
     "ELLA_CONTEXT_COMPRESSION_THRESHOLD": 0.8,
+    "ELLA_TOOL_RESULT_TTL_OVERRIDES": {},
 }
 
 
@@ -139,6 +142,14 @@ class EllaSettings:
     )
     context_window_tokens: int = 1_000_000
     context_compression_threshold: float = 0.8
+    tool_result_ttl_overrides: Mapping[str, float | None] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "tool_result_ttl_overrides",
+            dict(self.tool_result_ttl_overrides or {}),
+        )
 
 
 def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
@@ -264,6 +275,10 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         context_compression_threshold=_bounded_ratio(
             values, "ELLA_CONTEXT_COMPRESSION_THRESHOLD", 0.8
         ),
+        tool_result_ttl_overrides=_ttl_overrides(
+            values,
+            "ELLA_TOOL_RESULT_TTL_OVERRIDES",
+        ),
     )
 
 
@@ -309,6 +324,31 @@ def _bounded_ratio(values: Mapping[str, Any], name: str, default: float) -> floa
     if not 0 < value <= 1:
         raise ValueError(f"{name.removeprefix('ELLA_')} must be in (0, 1]")
     return value
+
+
+def _ttl_overrides(
+    values: Mapping[str, Any],
+    name: str,
+) -> dict[str, float | None]:
+    raw = values.get(name, {})
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    result: dict[str, float | None] = {}
+    for tool_name, ttl in raw.items():
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError(f"{name} keys must be non-empty tool names")
+        if ttl is None:
+            result[tool_name] = None
+            continue
+        if (
+            isinstance(ttl, bool)
+            or not isinstance(ttl, (int, float))
+            or not math.isfinite(ttl)
+            or ttl < 0
+        ):
+            raise ValueError(f"invalid TTL override for {tool_name}: {ttl}")
+        result[tool_name] = float(ttl)
+    return result
 
 
 def _path(values: Mapping[str, Any], name: str) -> Path:

@@ -93,7 +93,7 @@ class AppRuntime:
         )
         skill_manager.refresh()
 
-        tool_manager = ToolManager()
+        tool_manager = ToolManager(settings.tool_result_ttl_overrides)
         screen_provider = device_factory.screen()
 
         # tool改成热插拔

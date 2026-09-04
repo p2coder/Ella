@@ -127,6 +127,18 @@ def test_registering_once_supports_multiple_discovery_calls() -> None:
     assert manager.list_names() == ("mock_weather",)
 
 
+def test_tool_manager_applies_configured_ttl_override_to_discovery() -> None:
+    manager = ToolManager({"mock_weather": 15})
+    manager.register(MockWeatherTool())
+
+    definition = manager.list_definitions(
+        _context(allowed_tools=("mock_weather",))
+    )[0]
+
+    assert MockWeatherTool().definition.result_ttl_seconds == 60
+    assert definition.result_ttl_seconds == 15
+
+
 @dataclass(slots=True)
 class RoleLimitedTool:
     name: str = "role_limited"

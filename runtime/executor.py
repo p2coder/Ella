@@ -94,6 +94,8 @@ class CapabilityExecutor:
                 decision, task, ToolFailureKind.ENVIRONMENT_UNAVAILABLE,
                 "tool_not_registered", f"tool {tool_name} is not registered",
             )
+        definition = self.tool_manager.get_definition(tool_name)
+        assert definition is not None
         if context.agent_role not in tool.allowed_roles:
             return self._failure(
                 decision, task, ToolFailureKind.PERMISSION_DENIED,
@@ -104,7 +106,7 @@ class CapabilityExecutor:
         arguments = decision.tool_input or {}
         input_error = _validate_schema(
             arguments,
-            _tool_schema(tool, "input_schema"),
+            definition.input_schema,
             path="arguments",
         )
         if input_error is not None:
@@ -140,7 +142,7 @@ class CapabilityExecutor:
                 context=context,
                 called_at=called_at,
                 completed_at=completed_at,
-                result_ttl_seconds=tool.definition.result_ttl_seconds,
+                result_ttl_seconds=definition.result_ttl_seconds,
             )
             self._remember_tool_use(tool_use_record)
             return outcome
@@ -163,7 +165,7 @@ class CapabilityExecutor:
                 context=context,
                 called_at=called_at,
                 completed_at=completed_at,
-                result_ttl_seconds=tool.definition.result_ttl_seconds,
+                result_ttl_seconds=definition.result_ttl_seconds,
             )
             outcome = CapabilityExecutionResult(
                 decision=decision,
@@ -182,11 +184,11 @@ class CapabilityExecutor:
             arguments=dict(arguments),
             called_at=called_at,
             completed_at=completed_at,
-            result_ttl_seconds=tool.definition.result_ttl_seconds,
+            result_ttl_seconds=definition.result_ttl_seconds,
         )
         output_error = _validate_schema(
             result.payload,
-            _tool_schema(tool, "output_schema"),
+            definition.output_schema,
             path="payload",
         )
         if output_error is not None:
@@ -199,7 +201,7 @@ class CapabilityExecutor:
                 context=context,
                 called_at=called_at,
                 completed_at=completed_at,
-                result_ttl_seconds=tool.definition.result_ttl_seconds,
+                result_ttl_seconds=definition.result_ttl_seconds,
             )
             self._remember_tool_use(tool_use_record)
             return outcome
@@ -400,10 +402,6 @@ def _utc_timestamp(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _tool_schema(tool: Any, schema_name: str) -> dict[str, Any]:
-    return getattr(tool.definition, schema_name)
 
 
 def _validate_schema(value: Any, schema: dict[str, Any], *, path: str) -> str | None:
