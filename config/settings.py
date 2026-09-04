@@ -47,7 +47,6 @@ CONFIG_NAMES = {
     "ELLA_DEBUG_STORE_RAW_MEDIA": "DEBUG_STORE_RAW_MEDIA",
     "ELLA_MEMORY_PATH": "MEMORY_PATH",
     "ELLA_TRACE_DIRECTORY": "TRACE_DIRECTORY",
-    "ELLA_PLAN_DIRECTORY": "PLAN_DIRECTORY",
     "ELLA_TASK_CHECKPOINT_DIRECTORY": "TASK_CHECKPOINT_DIRECTORY",
     "ELLA_DISPLAY_DIRECTORY": "DISPLAY_DIRECTORY",
     "ELLA_RAW_MEDIA_DIRECTORY": "RAW_MEDIA_DIRECTORY",
@@ -84,7 +83,6 @@ SAFE_DEFAULTS = {
     "ELLA_DEBUG_STORE_RAW_MEDIA": False,
     "ELLA_MEMORY_PATH": user_config.PROJECT_ROOT / "memory" / "memory.md",
     "ELLA_TRACE_DIRECTORY": user_config.PROJECT_ROOT / "trace",
-    "ELLA_PLAN_DIRECTORY": user_config.PROJECT_ROOT / "output" / "plans",
     "ELLA_TASK_CHECKPOINT_DIRECTORY": (
         user_config.PROJECT_ROOT / "output" / "tasks"
     ),
@@ -129,7 +127,6 @@ class EllaSettings:
     mic_channels: int = 1
     memory_path: Path = user_config.PROJECT_ROOT / "memory" / "memory.md"
     trace_directory: Path = user_config.PROJECT_ROOT / "trace"
-    plan_directory: Path = user_config.PROJECT_ROOT / "output" / "plans"
     task_checkpoint_directory: Path = (
         user_config.PROJECT_ROOT / "output" / "tasks"
     )
@@ -254,7 +251,6 @@ def load_settings(overrides: Mapping[str, Any] | None = None) -> EllaSettings:
         ),
         memory_path=_path(values, "ELLA_MEMORY_PATH"),
         trace_directory=_path(values, "ELLA_TRACE_DIRECTORY"),
-        plan_directory=_path(values, "ELLA_PLAN_DIRECTORY"),
         task_checkpoint_directory=_path(
             values,
             "ELLA_TASK_CHECKPOINT_DIRECTORY",
