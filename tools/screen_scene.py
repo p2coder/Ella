@@ -39,6 +39,7 @@ class ScreenSceneTool:
                 "hidden, occluded, or outside the captured display."
             ),
             schema_version="1.0",
+            result_ttl_seconds=120,
             input_schema={
                 "type": "object",
                 "properties": {

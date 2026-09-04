@@ -28,6 +28,7 @@ class MockWeatherTool:
                 "or external API-backed weather decisions."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -85,6 +86,7 @@ class MockVisionSummaryTool:
                 "capture or real visual understanding."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),
@@ -135,6 +137,7 @@ class MockChecklistTool:
                 "externally verified packing list."
             ),
             schema_version="1.0",
+            result_ttl_seconds=60,
             input_schema={
                 "type": "object",
                 "properties": dict(TASK_CONTEXT_INPUT_PROPERTIES),

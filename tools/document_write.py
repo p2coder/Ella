@@ -42,6 +42,7 @@ class DocumentWriteTool:
                 "result is required before claiming that the artifact exists."
             ),
             schema_version="1.0",
+            result_ttl_seconds=None,
             input_schema={
                 "type": "object",
                 "properties": {

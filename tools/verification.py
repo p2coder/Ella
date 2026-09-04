@@ -44,6 +44,7 @@ class ArtifactExistsTool:
                 "file-type check; never create or modify the artifact."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {"relative_path": {"type": "string"}},
@@ -101,6 +102,7 @@ class DocumentReadTool:
                 "byte limit and non-UTF-8 documents are unsupported."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {"relative_path": {"type": "string"}},
@@ -168,6 +170,7 @@ class ToolObservationCheckTool:
                 "persisted observation was found."
             ),
             schema_version="1.0",
+            result_ttl_seconds=0,
             input_schema={
                 "type": "object",
                 "properties": {

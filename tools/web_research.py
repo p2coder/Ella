@@ -63,6 +63,7 @@ class WebSearchTool:
                 "candidate sources and are not proof that a claim is true."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -244,6 +245,7 @@ class WebPageReadTool:
                 "when they do not appear in the returned text."
             ),
             schema_version="1.0",
+            result_ttl_seconds=3600,
             input_schema={
                 "type": "object",
                 "properties": {

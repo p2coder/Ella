@@ -64,6 +64,7 @@ class AskUserQuestionTool:
                 "identify that phase explicitly as metadata.phase."
             ),
             schema_version="1.0",
+            result_ttl_seconds=None,
             input_schema={
                 "type": "object",
                 "properties": {

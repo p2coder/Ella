@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
+import math
 from typing import Any, Protocol, Sequence
 
 from agent.context import AgentExecutionContext
@@ -45,6 +46,7 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     input_examples: Sequence[dict[str, Any]]
     output_schema: dict[str, Any]
+    result_ttl_seconds: float | None = None
     version: str = "1"
     idempotency: ToolIdempotency = ToolIdempotency.UNKNOWN
     side_effecting: bool = False
@@ -59,6 +61,16 @@ class ToolDefinition:
         _require_non_empty_string("version", self.version)
         _require_object_schema("input_schema", self.input_schema)
         _require_object_schema("output_schema", self.output_schema)
+        if self.result_ttl_seconds is not None:
+            if (
+                not isinstance(self.result_ttl_seconds, (int, float))
+                or isinstance(self.result_ttl_seconds, bool)
+                or not math.isfinite(self.result_ttl_seconds)
+                or self.result_ttl_seconds < 0
+            ):
+                raise ValueError(
+                    "result_ttl_seconds must be null or a finite non-negative number"
+                )
         if not isinstance(self.idempotency, ToolIdempotency):
             raise TypeError("idempotency must be a ToolIdempotency")
         if not isinstance(self.side_effecting, bool):
@@ -85,6 +97,7 @@ class ToolDefinition:
             "input_schema": self.input_schema,
             "input_examples": self.input_examples,
             "output_schema": self.output_schema,
+            "result_ttl_seconds": self.result_ttl_seconds,
             "capability_kind": self.capability_kind.value,
         }
 

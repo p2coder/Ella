@@ -64,6 +64,7 @@ class PlanWrittenTool:
                 "step or prove that a goal was achieved."
             ),
             schema_version="2.0",
+            result_ttl_seconds=None,
             input_schema={
                 "type": "object",
                 "properties": {

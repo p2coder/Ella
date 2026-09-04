@@ -60,6 +60,7 @@ class CameraSceneTool:
                 "object is not proof that it does not exist outside the frame."
             ),
             schema_version="1.0",
+            result_ttl_seconds=120,
             input_schema={
                 "type": "object",
                 "properties": {
