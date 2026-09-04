@@ -10,7 +10,7 @@ Ella 是一个面向长期运行、本地交互和可恢复任务执行的 Agent
 - 统一的 First Decision：识别意图，并直接选择 `CALL_TOOL` 或 `SUBMIT_RESULT`。
 - 自描述 Tool、任务级能力范围、Schema 校验和结构化失败处理。
 - 摄像头、屏幕理解、网页检索、网页读取、文档读写和用户追问等工具。
-- `plan_written` 内部能力与 TaskGraph wave 执行，用于复杂任务规划。
+- `workflow` 在 QuickJS 隔离环境中用 `await` 与 `Promise.all` 编排子 Agent。
 - 独立的任务执行状态与目标达成状态，以及提交结果后的 Verification。
 - 后台 TaskRuntime worker，支持任务排队、暂停、恢复、取消和安全点 checkpoint。
 - 本地 JSONL trace、阶段耗时、任务 checkpoint、Memory 和生成文档持久化。

@@ -4,7 +4,6 @@ from runtime.interactions import InteractionBroker
 from tools.ask_user_question import AskUserQuestionTool
 from tools.camera_scene import CameraSceneTool
 from tools.document_write import DocumentWriteTool
-from tools.plan import PlanWrittenTool
 from tools.screen_scene import ScreenSceneTool
 from tools.verification import (
     ArtifactExistsTool,
@@ -16,7 +15,6 @@ from tools.web_research import WebPageReadTool, WebSearchTool
 
 def _definitions(tmp_path: Path):
     return (
-        PlanWrittenTool(store=None).definition,
         AskUserQuestionTool(InteractionBroker()).definition,
         WebSearchTool().definition,
         WebPageReadTool().definition,

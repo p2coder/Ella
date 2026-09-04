@@ -22,7 +22,6 @@ from memory import MemoryManager
 from prompts.engine import PromptEngine
 from providers.factory import ProviderFactory
 from runtime.event_runtime import EventRuntime
-from runtime.plan_store import PlanStore
 from runtime.provider_usage import aggregate_provider_usage
 from runtime.task_runtime import TaskRuntime, TaskRuntimeResult
 from runtime.task_queue import TaskQueue
@@ -60,7 +59,6 @@ from tools import (
 )
 from tools.camera_scene import CameraSceneTool
 from tools.screen_scene import ScreenSceneTool
-from tools.plan import PlanWrittenTool
 from tools.ask_user_question import AskUserQuestionTool
 from tools.verification import (
     ArtifactExistsTool,
@@ -126,8 +124,6 @@ class AppRuntime:
         tool_manager.register(RefreshTool())
         tool_manager.register(ArtifactExistsTool(settings.document_directory))
         tool_manager.register(DocumentReadTool(settings.document_directory))
-        plan_store = PlanStore(settings.plan_directory)
-        tool_manager.register(PlanWrittenTool(plan_store))
         interaction_broker = InteractionBroker()
         tool_manager.register(AskUserQuestionTool(interaction_broker))
 
