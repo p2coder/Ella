@@ -11,6 +11,7 @@ from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.provider_usage import record_provider_usage
+from runtime.context_window import prepare_context
 from runtime.trace import NoOpTraceRecorder, TraceRecorder
 from skill.manager import SkillManager
 from tasks.task import Task, TaskIntent
@@ -35,6 +36,8 @@ class SubAgent:
     trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
         default_factory=NoOpTraceRecorder
     )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
 
     def decide_first_action(
         self,
@@ -65,13 +68,14 @@ class SubAgent:
                 },
             },
         )
-        task.task_local_state["first_decision_prompt_text"] = prompt.prompt
+        prompt_text = self._prepare_prompt(task, "first_decision", prompt.prompt)
+        task.task_local_state["first_decision_prompt_text"] = prompt_text
         if self.llm_provider is None:
             return self._first_decision_fallback(user_input, task, definitions)
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
+                prompt_text,
                 trace_id=context.trace_id,
                 metadata={"boundary": "first_decision"},
             )
@@ -188,7 +192,10 @@ class SubAgent:
                 },
             },
         )
-        task.task_local_state["execution_decision_prompt_text"] = prompt.prompt
+        prompt_text = self._prepare_prompt(
+            task, "execution_decision", prompt.prompt
+        )
+        task.task_local_state["execution_decision_prompt_text"] = prompt_text
         self.trace_recorder.record(
             task_id=task.task_id,
             trace_id=context.trace_id,
@@ -208,7 +215,7 @@ class SubAgent:
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
+                prompt_text,
                 trace_id=context.trace_id,
                 metadata={"boundary": "execution_decision"},
             )
@@ -255,6 +262,25 @@ class SubAgent:
         self._record_boundary_timing(
             context, "execution_decision", started, success, result
         )
+
+    def _prepare_prompt(self, task: Task, boundary: str, text: str) -> str:
+        prepared = prepare_context(
+            text,
+            context_window_tokens=self.context_window_tokens,
+            compression_threshold=self.context_compression_threshold,
+        )
+        if prepared.compression_requested:
+            events = tuple(
+                task.task_local_state.get("context_compression_requested", ())
+            )
+            task.task_local_state["context_compression_requested"] = (
+                *events,
+                {
+                    "boundary": boundary,
+                    "estimated_tokens": prepared.estimated_tokens,
+                },
+            )
+        return prepared.text
 
     @classmethod
     def _first_decision_from_payload(

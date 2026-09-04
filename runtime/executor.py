@@ -147,7 +147,11 @@ class CapabilityExecutor:
         except Exception as error:
             completed_at = _utc_timestamp(self.clock())
             uncertain = _may_have_unconfirmed_side_effect(tool)
-            code = "uncertain_tool_outcome" if uncertain else "tool_execution_failed"
+            code = (
+                "uncertain_tool_outcome"
+                if uncertain
+                else str(getattr(error, "code", "tool_execution_failed"))
+            )
             self._record_timing(context, tool_name, started, False, code)
             failure = self._failure(
                 decision,

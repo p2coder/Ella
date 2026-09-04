@@ -5,6 +5,10 @@ from runtime.context_window import (
     estimate_tokens,
     prepare_context,
 )
+from agent.context import AgentExecutionContext, CapabilityScope
+from agent.subagent import SubAgent
+from skill import SkillManager
+from tasks.task import Task, TaskState
 
 
 def test_estimate_tokens_uses_prd_character_weights_and_ceiling() -> None:
@@ -41,3 +45,29 @@ def test_noop_compression_rejects_only_after_window_is_exceeded() -> None:
             context_window_tokens=3,
             compression_threshold=0.8,
         )
+
+
+def test_subagent_records_compression_request_on_task() -> None:
+    task = Task("task-context", state=TaskState.REASONING)
+    task.task_local_state["latest_user_input"] = "abcdefgh"
+    context = AgentExecutionContext(
+        agent_id="main",
+        agent_role="main_agent",
+        parent_agent_id=None,
+        task_id=task.task_id,
+        trace_id="trace-context",
+        handoff_goal="",
+        memory_scope="task_local",
+        capability_scope=CapabilityScope("main_agent", (), ()),
+    )
+    agent = SubAgent(
+        SkillManager(),
+        context_window_tokens=100_000,
+        context_compression_threshold=0.0001,
+    )
+
+    agent.decide_first_action(context, task)
+
+    event = task.task_local_state["context_compression_requested"][0]
+    assert event["boundary"] == "first_decision"
+    assert event["estimated_tokens"] > 0

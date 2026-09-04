@@ -133,11 +133,15 @@ class AppRuntime:
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
             trace_recorder=trace_recorder,
+            context_window_tokens=settings.context_window_tokens,
+            context_compression_threshold=settings.context_compression_threshold,
         )
         verification_agent = VerificationAgent(
             prompt_engine=PromptEngine(),
             llm_provider=llm_provider,
             timing_recorder=timing_recorder,
+            context_window_tokens=settings.context_window_tokens,
+            context_compression_threshold=settings.context_compression_threshold,
         )
         task_runtime = TaskRuntime(
             task_factory=TaskFactory(

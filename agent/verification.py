@@ -8,6 +8,7 @@ from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
 from runtime.timing import NoOpRuntimeTimingRecorder, RuntimeTimingRecorder
 from runtime.provider_usage import record_provider_usage
+from runtime.context_window import prepare_context
 from tasks.task import Task, TaskGoalState
 from tools.base import ToolDefinition
 
@@ -61,6 +62,8 @@ class VerificationAgent:
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
     )
+    context_window_tokens: int = 1_000_000
+    context_compression_threshold: float = 0.8
 
     def decide(
         self,
@@ -117,7 +120,23 @@ class VerificationAgent:
             },
         }
         prompt = self.prompt_engine.build(PromptType.VERIFICATION_DECISION, context)
-        task.task_local_state["verification_prompt_text"] = prompt.prompt
+        prepared = prepare_context(
+            prompt.prompt,
+            context_window_tokens=self.context_window_tokens,
+            compression_threshold=self.context_compression_threshold,
+        )
+        if prepared.compression_requested:
+            events = tuple(
+                task.task_local_state.get("context_compression_requested", ())
+            )
+            task.task_local_state["context_compression_requested"] = (
+                *events,
+                {
+                    "boundary": "verification_decision",
+                    "estimated_tokens": prepared.estimated_tokens,
+                },
+            )
+        task.task_local_state["verification_prompt_text"] = prepared.text
         if self.llm_provider is None:
             return VerificationAction(
                 "VERIFICATION_VERDICT",
@@ -126,7 +145,7 @@ class VerificationAgent:
         started = perf_counter()
         try:
             result = self.llm_provider.generate(
-                prompt.prompt,
+                prepared.text,
                 trace_id=task.trace_id,
                 metadata={"boundary": "verification_decision"},
             )

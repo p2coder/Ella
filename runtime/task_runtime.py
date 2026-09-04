@@ -50,6 +50,7 @@ from .trace import NoOpTraceRecorder, TraceRecorder
 from .task_events import TaskEventPublisher, TERMINAL_TASK_STATES
 from .interactions import InteractionBroker, UserAnswer, UserQuestion
 from .provider_usage import merge_provider_usage_calls
+from .context_window import ContextTooLargeError
 
 
 @dataclass(frozen=True, slots=True)
@@ -952,6 +953,13 @@ class TaskRuntime:
                 self._handle_decision_failure(task, str(error))
                 self._persist(task)
                 return self._result(task)
+            except ContextTooLargeError as error:
+                task.failure = {"code": error.code, "message": str(error)}
+                task.failure_reason = str(error)
+                task.transition_to(TaskState.FAILED)
+                task.set_goal_state(TaskGoalState.NOT_ACHIEVED)
+                self._persist(task)
+                return self._result(task, stop_reason="failed")
             task.task_local_state["current_decision"] = decision.to_dict()
             task.task_local_state.pop("decision_repair", None)
             self._persist(task)
