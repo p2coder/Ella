@@ -71,10 +71,15 @@ def test_workflow_await_runs_children_in_sequence() -> None:
     )
 
     assert result["script_return_value"] == ["answer-a", "answer-b"]
+    assert result["status"] == "completed"
+    assert result["active_tool_count"] == 0
     assert [item["tool_name"] for item in result["child_results"]] == [
         "subagent",
         "subagent_fork",
     ]
+    assert all(item["status"] == "completed" for item in result["child_results"])
+    assert all(item["called_at"] for item in result["child_results"])
+    assert all(item["completed_at"] for item in result["child_results"])
     events = {(kind, prompt): timestamp for kind, prompt, timestamp, _ in runner.calls}
     assert events[("end", "a")] <= events[("start", "b")]
 

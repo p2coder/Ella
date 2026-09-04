@@ -38,10 +38,17 @@ class WorkflowTool:
             output_schema={
                 "type": "object",
                 "properties": {
+                    "status": {"enum": ["completed"], "type": "string"},
+                    "active_tool_count": {"type": "number"},
                     "script_return_value": {},
                     "child_results": {"type": "array"},
                 },
-                "required": ["script_return_value", "child_results"],
+                "required": [
+                    "status",
+                    "active_tool_count",
+                    "script_return_value",
+                    "child_results",
+                ],
                 "additionalProperties": False,
             },
             result_ttl_seconds=None,

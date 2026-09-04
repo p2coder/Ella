@@ -1,5 +1,6 @@
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
@@ -93,6 +94,9 @@ class WorkflowRuntime:
                             {
                                 "call_id": call_id,
                                 "tool_name": tool_name,
+                                "status": "running",
+                                "called_at": _utc_now(),
+                                "completed_at": None,
                                 "result": None,
                             }
                         )
@@ -118,6 +122,13 @@ class WorkflowRuntime:
                     try:
                         child_result = future.result().to_dict()
                         calls[call_index]["result"] = child_result
+                        calls[call_index]["status"] = child_result["status"]
+                        calls[call_index]["called_at"] = child_result.get(
+                            "started_at"
+                        ) or calls[call_index]["called_at"]
+                        calls[call_index]["completed_at"] = child_result.get(
+                            "completed_at"
+                        ) or _utc_now()
                         succeeded = child_result["status"] == "completed"
                         payload = (
                             json.dumps(child_result, ensure_ascii=False)
@@ -125,6 +136,8 @@ class WorkflowRuntime:
                             else str(child_result.get("error") or child_result["status"])
                         )
                     except Exception as child_error:
+                        calls[call_index]["status"] = "failed"
+                        calls[call_index]["completed_at"] = _utc_now()
                         succeeded = False
                         payload = str(child_error)
                     if process.is_alive():
@@ -139,6 +152,8 @@ class WorkflowRuntime:
             if len(encoded) > self.max_return_bytes:
                 raise ValueError("workflow return value exceeds 1 MiB")
             return {
+                "status": "completed",
+                "active_tool_count": 0,
                 "script_return_value": script_result,
                 "child_results": tuple(calls),
             }
@@ -148,6 +163,10 @@ class WorkflowRuntime:
             process.join(timeout=1)
             pool.shutdown(wait=False, cancel_futures=True)
             parent_connection.close()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _quickjs_worker(
