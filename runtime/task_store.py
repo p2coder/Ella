@@ -18,7 +18,7 @@ from tasks.completion import TaskCompletionPackage
 from tools import ToolResult
 
 
-CHECKPOINT_SCHEMA_VERSION = 4
+CHECKPOINT_SCHEMA_VERSION = 5
 _FORBIDDEN_KEYS = frozenset({"api_key", "authorization", "credentials"})
 _OMITTED_KEY_PARTS = frozenset(
     {"prompt_text", "captured_frame", "display_frame", "raw_media"}
@@ -35,6 +35,17 @@ class TaskVersionConflict(TaskStoreError):
 
 class CorruptTaskCheckpoint(TaskStoreError):
     pass
+
+
+class UnsupportedCheckpointSchema(TaskStoreError):
+    def __init__(self, task_id: str, found: object) -> None:
+        self.task_id = task_id
+        self.found = found
+        self.expected = CHECKPOINT_SCHEMA_VERSION
+        super().__init__(
+            f"checkpoint for task {task_id} uses unsupported schema "
+            f"{found!r}; expected {self.expected}; old version cannot be restored"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +100,16 @@ class TaskStore:
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
             if document["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-                return None
+                raise UnsupportedCheckpointSchema(
+                    task_id,
+                    document["schema_version"],
+                )
             return StoredTask(
                 task=_decode_task(document["task"]),
                 version=int(document["version"]),
             )
+        except UnsupportedCheckpointSchema:
+            raise
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise CorruptTaskCheckpoint(
                 f"corrupt checkpoint for task {task_id}: {exc}"

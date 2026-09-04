@@ -3,7 +3,13 @@ import json
 
 from agent.context import AgentExecutionContext, CapabilityScope
 from events import StandardizedEvent
-from runtime.task_store import CHECKPOINT_SCHEMA_VERSION, TaskStore
+import pytest
+
+from runtime.task_store import (
+    CHECKPOINT_SCHEMA_VERSION,
+    TaskStore,
+    UnsupportedCheckpointSchema,
+)
 from tasks.task import Task, TaskIntent, TaskState
 
 
@@ -69,11 +75,15 @@ def test_checkpoint_preserves_verification_continuation(tmp_path) -> None:
     ]["exists"] is True
 
 
-def test_old_checkpoint_schema_is_not_migrated(tmp_path) -> None:
+def test_old_checkpoint_schema_is_explicitly_rejected(tmp_path) -> None:
     path = tmp_path / "legacy.json"
     path.write_text(
         json.dumps({"schema_version": CHECKPOINT_SCHEMA_VERSION - 1, "version": 1}),
         encoding="utf-8",
     )
 
-    assert TaskStore(tmp_path).load("legacy") is None
+    with pytest.raises(
+        UnsupportedCheckpointSchema,
+        match="old version cannot be restored",
+    ):
+        TaskStore(tmp_path).load("legacy")
