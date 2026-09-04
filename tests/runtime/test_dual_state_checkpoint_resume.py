@@ -112,6 +112,29 @@ def test_runtime_persists_workflow_progress_by_task_id(tmp_path) -> None:
     }
 
 
+def test_runtime_persists_child_progress_by_agent_id(tmp_path) -> None:
+    store = TaskStore(tmp_path)
+    runtime = TaskRuntime(task_store=store)
+    task = _task()
+    runtime._tasks[task.task_id] = task
+
+    runtime.record_child_progress(
+        task.task_id,
+        {
+            "child_agent_id": "agent-child",
+            "parent_agent_id": "ella-main",
+            "status": "running",
+            "in_flight_action": {"tool_name": "edit"},
+        },
+    )
+
+    restored = store.load(task.task_id)
+    assert restored is not None
+    child = restored.task.task_local_state["child_executions"]["agent-child"]
+    assert child["parent_agent_id"] == "ella-main"
+    assert child["in_flight_action"] == {"tool_name": "edit"}
+
+
 def test_runtime_isolates_old_checkpoint_and_reports_recovery_error(tmp_path) -> None:
     path = tmp_path / "legacy.json"
     path.write_text(

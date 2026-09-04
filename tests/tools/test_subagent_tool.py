@@ -36,6 +36,27 @@ class EchoTool:
         )
 
 
+class UncertainTool(EchoTool):
+    name = "uncertain"
+
+    @property
+    def definition(self):
+        definition = super().definition
+        return ToolDefinition(
+            definition.name,
+            definition.description,
+            definition.schema_version,
+            definition.input_schema,
+            definition.input_examples,
+            definition.output_schema,
+            side_effecting=True,
+            uncertain_policy=ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH,
+        )
+
+    def run(self, context, arguments=None):
+        raise RuntimeError("outcome unknown")
+
+
 class ScriptedAgent:
     def __init__(self, *, use_tool=False):
         self.use_tool = use_tool
@@ -77,13 +98,15 @@ def _context(*, depth=0):
         memory_scope="task_local",
         permissions=("workspace",),
         capability_scope=CapabilityScope(
-            "main_agent", ("skill-a",), ("subagent", "subagent_fork", "echo")
+            "main_agent",
+            ("skill-a",),
+            ("subagent", "subagent_fork", "echo", "uncertain"),
         ),
         agent_depth=depth,
     )
 
 
-def _assembly(agent):
+def _assembly(agent, *, progress_recorder=None):
     root = Task("task-child", state=TaskState.TOOL_EXECUTION)
     root.message_history = ({"role": "user", "content": "parent secret"},)
     root.tool_trace = ({"tool_name": "parent-observation"},)
@@ -94,6 +117,7 @@ def _assembly(agent):
         agent,
         executor,
         lambda _: root,
+        progress_recorder=progress_recorder,
         child_agent_id_factory=lambda: "child-agent",
     )
     manager.register(SubagentTool(runner))
@@ -152,6 +176,64 @@ def test_subagent_nests_child_tool_observations() -> None:
     assert observations[0]["tool_name"] == "echo"
     assert observations[0]["task_id"] == "task-child"
     assert observations[0]["agent_id"] == "child-agent"
+
+
+def test_subagent_checkpoints_in_flight_tool_and_completed_result() -> None:
+    checkpoints = []
+    agent = ScriptedAgent(use_tool=True)
+    root, executor = _assembly(
+        agent,
+        progress_recorder=lambda _, state: checkpoints.append(state),
+    )
+
+    result = executor.execute(
+        ExecutionDecision(CALL_TOOL, "subagent", {"prompt": "echo"}, "Delegate."),
+        _context(),
+        root,
+    )
+
+    dispatched = [state for state in checkpoints if state["in_flight_action"]]
+    assert dispatched[0]["in_flight_action"]["tool_name"] == "echo"
+    assert dispatched[0]["in_flight_action"]["tool_use_id"]
+    assert checkpoints[-1]["status"] == "completed"
+    assert checkpoints[-1]["in_flight_action"] is None
+    assert checkpoints[-1]["observations"][0]["tool_name"] == "echo"
+
+
+def test_subagent_retains_in_flight_tool_when_outcome_is_uncertain() -> None:
+    checkpoints = []
+    root = Task("task-child", state=TaskState.TOOL_EXECUTION)
+    manager = ToolManager()
+    manager.register(UncertainTool())
+    executor = CapabilityExecutor(SkillManager(), manager)
+
+    class UncertainAgent(ScriptedAgent):
+        def decide_first_action(self, context, task):
+            return FirstDecision(
+                TaskIntent("Attempt uncertain work"),
+                ExecutionDecision(
+                    CALL_TOOL,
+                    "uncertain",
+                    {"value": "child"},
+                    "Attempt.",
+                ),
+            )
+
+    runner = ChildAgentRunner(
+        UncertainAgent(),
+        executor,
+        lambda _: root,
+        progress_recorder=lambda _, state: checkpoints.append(state),
+        child_agent_id_factory=lambda: "child-agent",
+    )
+
+    result = runner.run(
+        _context(), prompt="uncertain work", timeout_seconds=5
+    )
+
+    assert result.status == "uncertain"
+    assert checkpoints[-1]["status"] == "uncertain"
+    assert checkpoints[-1]["in_flight_action"]["tool_name"] == "uncertain"
 
 
 def test_subagent_rejects_depth_above_four_before_child_dispatch() -> None:

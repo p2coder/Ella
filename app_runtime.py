@@ -166,6 +166,7 @@ class AppRuntime:
             decision_agent=subagent,
             executor=task_runtime.executor,
             task_reader=task_runtime.get_task,
+            progress_recorder=task_runtime.record_child_progress,
             max_depth=settings.subagent_max_depth,
             max_advances=settings.subagent_max_advances,
             max_timeout_seconds=settings.subagent_max_timeout_seconds,

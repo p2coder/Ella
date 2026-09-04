@@ -555,6 +555,21 @@ class TaskRuntime:
             task.task_local_state["workflow_execution"] = deepcopy(workflow_state)
             self._persist(task)
 
+    def record_child_progress(
+        self,
+        task_id: str,
+        child_state: dict[str, Any],
+    ) -> None:
+        with self._persistence_lock:
+            task = self.get_task(task_id)
+            executions = task.task_local_state.setdefault("child_executions", {})
+            if not isinstance(executions, dict):
+                executions = {}
+                task.task_local_state["child_executions"] = executions
+            child_agent_id = str(child_state["child_agent_id"])
+            executions[child_agent_id] = deepcopy(child_state)
+            self._persist(task)
+
     def provide_input(
         self,
         task_id: str,

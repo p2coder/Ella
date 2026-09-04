@@ -54,6 +54,9 @@ class ChildAgentRunner:
     decision_agent: Any
     executor: Any
     task_reader: Callable[[str], Task]
+    progress_recorder: Callable[[str, dict[str, Any]], None] | None = field(
+        default=None, repr=False, compare=False
+    )
     child_agent_id_factory: Callable[[], str] = field(
         default=lambda: f"agent-{uuid4().hex}", repr=False, compare=False
     )
@@ -97,6 +100,20 @@ class ChildAgentRunner:
         inherited_observation_count = len(local.tool_trace)
         local.execution_context = context
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        child_state: dict[str, Any] = {
+            "child_agent_id": child_id,
+            "parent_agent_id": parent_context.agent_id,
+            "mode": "fork" if fork else "clean",
+            "depth": parent_context.agent_depth + 1,
+            "capability_scope": parent_context.capability_scope.to_dict(),
+            "started_at": started_at,
+            "completed_at": None,
+            "status": "running",
+            "in_flight_action": None,
+            "observations": (),
+            "failures": (),
+        }
+        self._checkpoint(parent_context.task_id, child_state)
         started = monotonic()
         try:
             first = self.decision_agent.decide_first_action(context, local)
@@ -135,7 +152,26 @@ class ChildAgentRunner:
                         started_at,
                     )
                 local.state = TaskState.TOOL_EXECUTION
-                execution = self.executor.execute(decision, context, local)
+                def persist_dispatch(record, called_at, result_ttl_seconds) -> None:
+                    child_state["in_flight_action"] = {
+                        "tool_use_id": record.tool_use_id,
+                        "tool_name": record.tool_name,
+                        "arguments": dict(record.arguments),
+                        "called_at": called_at,
+                        "result_ttl_seconds": result_ttl_seconds,
+                        "dispatch_state": "dispatched",
+                    }
+                    local.task_local_state["_child_in_flight_action"] = deepcopy(
+                        child_state["in_flight_action"]
+                    )
+                    self._checkpoint(parent_context.task_id, child_state)
+
+                execution = self.executor.execute(
+                    decision,
+                    context,
+                    local,
+                    on_dispatch=persist_dispatch,
+                )
                 local.state = TaskState.REASONING
                 if execution.uncertain:
                     error = (
@@ -159,6 +195,12 @@ class ChildAgentRunner:
                         local.current_step,
                         failures=(*local.current_step.failures, execution.failure),
                     )
+                    child_state["in_flight_action"] = None
+                    local.task_local_state.pop("_child_in_flight_action", None)
+                    child_state["failures"] = tuple(
+                        failure.to_dict() for failure in local.current_step.failures
+                    )
+                    self._checkpoint(parent_context.task_id, child_state)
                     continue
                 merge_provider_usage_calls(
                     local.task_local_state,
@@ -173,6 +215,12 @@ class ChildAgentRunner:
                     f"{len(local.tool_trace) + 1}"
                 )
                 local.tool_trace += (observation,)
+                child_state["in_flight_action"] = None
+                local.task_local_state.pop("_child_in_flight_action", None)
+                child_state["observations"] = tuple(
+                    local.tool_trace[inherited_observation_count:]
+                )
+                self._checkpoint(parent_context.task_id, child_state)
             return self._result(
                 local,
                 child_id,
@@ -256,8 +304,8 @@ class ChildAgentRunner:
             return "failed", "parent task was killed"
         return None
 
-    @staticmethod
     def _result(
+        self,
         task: Task,
         child_agent_id: str,
         status: str,
@@ -269,7 +317,7 @@ class ChildAgentRunner:
         started_at: str,
     ) -> ChildAgentRun:
         calls = task.task_local_state.get("provider_usage_calls", ())
-        return ChildAgentRun(
+        result = ChildAgentRun(
             child_agent_id=child_agent_id,
             status=status,
             final_response=final_response,
@@ -288,3 +336,29 @@ class ChildAgentRunner:
                 dict(call) for call in calls if isinstance(call, dict)
             ),
         )
+        self._checkpoint(
+            parent_context.task_id,
+            {
+                "child_agent_id": child_agent_id,
+                "parent_agent_id": parent_context.agent_id,
+                "mode": result.mode,
+                "depth": result.depth,
+                "capability_scope": result.capability_scope,
+                "started_at": started_at,
+                "completed_at": result.completed_at,
+                "status": result.status,
+                "in_flight_action": deepcopy(
+                    task.task_local_state.get("_child_in_flight_action")
+                ),
+                "observations": result.observations,
+                "failures": tuple(
+                    failure.to_dict() for failure in task.current_step.failures
+                ),
+                "error": result.error,
+            },
+        )
+        return result
+
+    def _checkpoint(self, task_id: str, child_state: dict[str, Any]) -> None:
+        if self.progress_recorder is not None:
+            self.progress_recorder(task_id, deepcopy(child_state))
