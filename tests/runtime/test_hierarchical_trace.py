@@ -8,7 +8,7 @@ def test_trace_is_append_only_task_isolated_and_deterministic(tmp_path):
     recorder = TraceRecorder(path)
     recorder.record(
         task_id="task-a", boundary="reasoning.plan",
-        event_type="plan_written", payload={"version": "1"},
+        event_type="workflow_completed", payload={"version": "1"},
     )
     recorder.record(
         task_id="task-a", boundary="tool_attempt.camera",
