@@ -14,7 +14,6 @@ class ControlAppRuntime:
             raise KeyError(task_id)
         return {
             "state": self.state,
-            "active_step_ids": ("step-1",),
             "waiting_condition": None,
             "paused_from_state": "running" if self.state == "paused" else None,
             "terminal_outcome": None,
@@ -97,4 +96,3 @@ def test_task_status_endpoint_projects_current_state():
 
     assert response.status == 200
     assert 'data-task-state="paused"' in response.body
-    assert "step-1" in response.body

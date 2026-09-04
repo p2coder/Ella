@@ -92,7 +92,6 @@ class LocalWebUI:
                 "terminal_execution_state": (
                     task.get("terminal_execution_state") or ""
                 ),
-                "active_step_ids": task.get("active_step_ids", ()),
                 "pending_questions": task.get("pending_questions") or (),
                 "paused_from_state": task.get("paused_from_state") or "",
                 "terminal_outcome": task.get("terminal_outcome") or "",
@@ -299,7 +298,6 @@ def render_web_ui_shell(
         "pause_disabled": "" if pause_enabled else "disabled",
         "resume_disabled": "" if resume_enabled else "disabled",
         "kill_disabled": "" if kill_enabled else "disabled",
-        "active_step_ids": _join_items(data.get("active_step_ids", ())),
         "paused_from_state": _value(data, "paused_from_state"),
         "terminal_outcome": _value(data, "terminal_outcome"),
         "delivery_status": _value(data, "delivery_status"),

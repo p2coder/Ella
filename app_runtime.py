@@ -510,7 +510,6 @@ def _build_display_snapshot(
         timing_summary=_timing_summary(task_result),
         task_id=task_result.handle.task_id,
         task_state=task_result.task.state.value,
-        active_step_ids=(),
         paused_from_state=(
             ""
             if task_result.task.paused_from_state is None

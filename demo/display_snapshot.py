@@ -45,7 +45,6 @@ class RunDisplaySnapshot:
     timing_summary: str = ""
     task_id: str = ""
     task_state: str = ""
-    active_step_ids: tuple[str, ...] = ()
     paused_from_state: str = ""
     terminal_outcome: str = ""
     delivery_status: str = ""
@@ -76,7 +75,6 @@ class RunDisplaySnapshot:
             "timing_summary": self.timing_summary,
             "task_id": self.task_id,
             "task_state": self.task_state,
-            "active_step_ids": self.active_step_ids,
             "paused_from_state": self.paused_from_state,
             "terminal_outcome": self.terminal_outcome,
             "delivery_status": self.delivery_status,
