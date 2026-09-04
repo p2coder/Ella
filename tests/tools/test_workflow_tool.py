@@ -131,6 +131,32 @@ def test_workflow_records_script_and_child_trace_events() -> None:
     assert "script" not in snapshot.events[0].payload
 
 
+def test_workflow_checkpoints_child_before_dispatch_and_after_completion() -> None:
+    runner = FakeChildRunner()
+    task = Task("task-workflow", state=TaskState.TOOL_EXECUTION)
+    checkpoints = []
+    runtime = WorkflowRuntime(
+        runner,
+        lambda _: task,
+        progress_recorder=lambda _, state: checkpoints.append(state),
+        max_wall_seconds=3,
+    )
+
+    runtime.execute(_context(), "return await tools.subagent({prompt: 'saved'});")
+
+    running = [
+        state
+        for state in checkpoints
+        if state["child_results"]
+        and state["child_results"][0]["status"] == "running"
+    ]
+    assert running
+    assert running[0]["active_tool_count"] == 1
+    assert checkpoints[-1]["status"] == "completed"
+    assert checkpoints[-1]["active_tool_count"] == 0
+    assert checkpoints[-1]["child_results"][0]["status"] == "completed"
+
+
 @pytest.mark.parametrize(
     "script",
     (

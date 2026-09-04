@@ -86,6 +86,32 @@ def test_old_checkpoint_schema_is_explicitly_rejected(tmp_path) -> None:
         TaskStore(tmp_path).load("legacy")
 
 
+def test_runtime_persists_workflow_progress_by_task_id(tmp_path) -> None:
+    store = TaskStore(tmp_path)
+    runtime = TaskRuntime(task_store=store)
+    task = _task()
+    runtime._tasks[task.task_id] = task
+
+    runtime.record_workflow_progress(
+        task.task_id,
+        {
+            "status": "running",
+            "script": "return 1;",
+            "active_tool_count": 0,
+            "child_results": (),
+        },
+    )
+
+    restored = store.load(task.task_id)
+    assert restored is not None
+    assert restored.task.task_local_state["workflow_execution"] == {
+        "status": "running",
+        "script": "return 1;",
+        "active_tool_count": 0,
+        "child_results": [],
+    }
+
+
 def test_runtime_isolates_old_checkpoint_and_reports_recovery_error(tmp_path) -> None:
     path = tmp_path / "legacy.json"
     path.write_text(

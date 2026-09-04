@@ -178,6 +178,7 @@ class AppRuntime:
                     child_runner,
                     task_runtime.get_task,
                     trace_recorder=trace_recorder,
+                    progress_recorder=task_runtime.record_workflow_progress,
                     max_script_bytes=settings.workflow_max_script_bytes,
                     max_wall_seconds=settings.workflow_max_wall_seconds,
                     max_parallel_children=settings.workflow_max_parallel_children,

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from threading import Event, Lock, Thread
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -543,6 +544,15 @@ class TaskRuntime:
             task
             for _, task in sorted(self._tasks.items())
         )
+
+    def record_workflow_progress(
+        self,
+        task_id: str,
+        workflow_state: dict[str, Any],
+    ) -> None:
+        task = self.get_task(task_id)
+        task.task_local_state["workflow_execution"] = deepcopy(workflow_state)
+        self._persist(task)
 
     def provide_input(
         self,

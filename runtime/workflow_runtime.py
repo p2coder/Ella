@@ -1,4 +1,5 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -7,7 +8,7 @@ from multiprocessing import get_context
 from multiprocessing.connection import Connection
 from time import monotonic
 from time import sleep
-from typing import Any
+from typing import Any, Callable
 
 from agent.child_runner import ChildAgentRunner
 from agent.context import AgentExecutionContext
@@ -26,6 +27,7 @@ class WorkflowRuntime:
     trace_recorder: TraceRecorder | NoOpTraceRecorder = field(
         default_factory=NoOpTraceRecorder
     )
+    progress_recorder: Callable[[str, dict[str, Any]], None] | None = None
     max_script_bytes: int = MAX_SCRIPT_BYTES
     max_wall_seconds: float = 600
     max_parallel_children: int = 8
@@ -77,6 +79,17 @@ class WorkflowRuntime:
                 "script_bytes": len(script.encode("utf-8")),
             },
         )
+        workflow_state: dict[str, Any] = {
+            "status": "running",
+            "script": script,
+            "script_sha256": sha256(script.encode("utf-8")).hexdigest(),
+            "started_at": _utc_now(),
+            "completed_at": None,
+            "active_tool_count": 0,
+            "child_results": (),
+            "control_state": self.task_reader(context.task_id).state.value,
+        }
+        self._checkpoint(context, workflow_state)
 
         process_context = get_context("spawn")
         parent_connection, child_connection = process_context.Pipe()
@@ -104,12 +117,15 @@ class WorkflowRuntime:
                 while task_state in {TaskState.PAUSE_REQUESTED, TaskState.PAUSED}:
                     if not pause_recorded:
                         self._trace(context, "control_safe_point", {"state": task_state.value})
+                        workflow_state["control_state"] = task_state.value
+                        self._checkpoint(context, workflow_state)
                         pause_recorded = True
                     if monotonic() - started > wall_seconds:
                         raise TimeoutError("workflow execution timed out while paused")
                     sleep(0.01)
                     task_state = self.task_reader(context.task_id).state
                 pause_recorded = False
+                workflow_state["control_state"] = task_state.value
                 if task_state in {TaskState.KILL_REQUESTED, TaskState.KILLED}:
                     self._trace(context, "control_safe_point", {"state": task_state.value})
                     raise RuntimeError("parent task was killed")
@@ -159,6 +175,9 @@ class WorkflowRuntime:
                             "tool_dispatched",
                             {"call_id": call_id, "tool_name": tool_name},
                         )
+                        workflow_state["active_tool_count"] = len(futures) + 1
+                        workflow_state["child_results"] = tuple(calls)
+                        self._checkpoint(context, workflow_state)
                         future = pool.submit(
                             self.child_runner.run,
                             context,
@@ -210,6 +229,9 @@ class WorkflowRuntime:
                             "status": calls[call_index]["status"],
                         },
                     )
+                    workflow_state["active_tool_count"] = len(futures)
+                    workflow_state["child_results"] = tuple(calls)
+                    self._checkpoint(context, workflow_state)
                 if script_done and not futures:
                     self._trace(
                         context,
@@ -235,6 +257,15 @@ class WorkflowRuntime:
                 "script_completed",
                 {"completed_calls": len(calls)},
             )
+            workflow_state.update(
+                {
+                    "status": "completed",
+                    "completed_at": _utc_now(),
+                    "active_tool_count": 0,
+                    "child_results": tuple(calls),
+                }
+            )
+            self._checkpoint(context, workflow_state)
             return result
         except BaseException as workflow_error:
             self._trace(
@@ -242,6 +273,16 @@ class WorkflowRuntime:
                 "script_failed",
                 {"error": str(workflow_error), "completed_calls": len(calls)},
             )
+            workflow_state.update(
+                {
+                    "status": "failed",
+                    "completed_at": _utc_now(),
+                    "active_tool_count": len(futures),
+                    "child_results": tuple(calls),
+                    "error": str(workflow_error),
+                }
+            )
+            self._checkpoint(context, workflow_state)
             raise
         finally:
             if process.is_alive():
@@ -262,6 +303,14 @@ class WorkflowRuntime:
             event_type=event_type,
             payload=payload,
         )
+
+    def _checkpoint(
+        self,
+        context: AgentExecutionContext,
+        workflow_state: dict[str, Any],
+    ) -> None:
+        if self.progress_recorder is not None:
+            self.progress_recorder(context.task_id, deepcopy(workflow_state))
 
 
 def _utc_now() -> str:
