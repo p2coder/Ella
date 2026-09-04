@@ -193,4 +193,11 @@ def test_existing_tool_result_construction_still_works() -> None:
         "task_id": "task-1",
         "trace_id": "trace-1",
         "payload": {"summary": "Light rain is possible later today."},
+        "tool_use_id": None,
+        "agent_id": None,
+        "parent_agent_id": None,
+        "arguments": {},
+        "called_at": None,
+        "completed_at": None,
+        "result_ttl_seconds": None,
     }

@@ -1,6 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
+from uuid import uuid4
 
 from agent.context import AgentExecutionContext
 from agent.decision import CALL_TOOL, ExecutionDecision
@@ -42,6 +44,12 @@ class CapabilityExecutor:
     subagent: Any | None = None
     timing_recorder: RuntimeTimingRecorder | NoOpRuntimeTimingRecorder = field(
         default_factory=NoOpRuntimeTimingRecorder
+    )
+    clock: Callable[[], datetime] = field(
+        default=lambda: datetime.now(timezone.utc), repr=False, compare=False
+    )
+    tool_use_id_factory: Callable[[], str] = field(
+        default=lambda: f"tool-use-{uuid4().hex}", repr=False, compare=False
     )
 
     def execute(
@@ -86,17 +94,26 @@ class CapabilityExecutor:
                 retryable=True,
             )
 
+        tool_use_id = self.tool_use_id_factory()
+        called_at = _utc_timestamp(self.clock())
         started = perf_counter()
         try:
             result = tool.run(context=context, arguments=arguments)
         except ValueError as error:
+            completed_at = _utc_timestamp(self.clock())
             self._record_timing(context, tool_name, started, False, "invalid_tool_input")
             return self._failure(
                 decision, task, ToolFailureKind.INVALID_ARGUMENTS,
                 "invalid_tool_input", f"invalid_tool_input: {error}",
                 retryable=True,
+                tool_use_id=tool_use_id,
+                context=context,
+                called_at=called_at,
+                completed_at=completed_at,
+                result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
         except Exception as error:
+            completed_at = _utc_timestamp(self.clock())
             uncertain = _may_have_unconfirmed_side_effect(tool)
             code = "uncertain_tool_outcome" if uncertain else "tool_execution_failed"
             self._record_timing(context, tool_name, started, False, code)
@@ -106,6 +123,11 @@ class CapabilityExecutor:
                 ToolFailureKind.TOOL_EXECUTION_FAILED,
                 code,
                 str(error) or f"tool {tool_name} execution failed",
+                tool_use_id=tool_use_id,
+                context=context,
+                called_at=called_at,
+                completed_at=completed_at,
+                result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
             return CapabilityExecutionResult(
                 decision=decision,
@@ -113,6 +135,17 @@ class CapabilityExecutor:
                 uncertain=uncertain,
             )
 
+        completed_at = _utc_timestamp(self.clock())
+        result = replace(
+            result,
+            tool_use_id=tool_use_id,
+            agent_id=context.agent_id,
+            parent_agent_id=context.parent_agent_id,
+            arguments=dict(arguments),
+            called_at=called_at,
+            completed_at=completed_at,
+            result_ttl_seconds=tool.definition.result_ttl_seconds,
+        )
         output_error = _validate_schema(
             result.payload,
             _tool_schema(tool, "output_schema"),
@@ -124,6 +157,11 @@ class CapabilityExecutor:
                 decision, task, ToolFailureKind.TOOL_EXECUTION_FAILED,
                 "invalid_tool_output", f"invalid_tool_output: {output_error}",
                 raw_result=result,
+                tool_use_id=tool_use_id,
+                context=context,
+                called_at=called_at,
+                completed_at=completed_at,
+                result_ttl_seconds=tool.definition.result_ttl_seconds,
             )
         self._record_timing(context, tool_name, started, True, None)
         return CapabilityExecutionResult(decision, tool_result=result)
@@ -155,6 +193,11 @@ class CapabilityExecutor:
         *,
         retryable: bool = False,
         raw_result: Any | None = None,
+        tool_use_id: str | None = None,
+        context: AgentExecutionContext | None = None,
+        called_at: str | None = None,
+        completed_at: str | None = None,
+        result_ttl_seconds: float | None = None,
     ) -> CapabilityExecutionResult:
         return CapabilityExecutionResult(
             decision=decision,
@@ -166,6 +209,13 @@ class CapabilityExecutor:
                 message=message,
                 arguments=decision.tool_input or {},
                 retryable=retryable,
+                tool_use_id=tool_use_id,
+                task_id=None if context is None else context.task_id,
+                agent_id=None if context is None else context.agent_id,
+                parent_agent_id=None if context is None else context.parent_agent_id,
+                called_at=called_at,
+                completed_at=completed_at,
+                result_ttl_seconds=result_ttl_seconds,
             ),
             raw_result=raw_result,
         )
@@ -177,6 +227,12 @@ def _may_have_unconfirmed_side_effect(tool: Any) -> bool:
         and tool.definition.uncertain_policy
         is ToolUncertainPolicy.POSSIBLE_AFTER_DISPATCH
     )
+
+
+def _utc_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _tool_schema(tool: Any, schema_name: str) -> dict[str, Any]:

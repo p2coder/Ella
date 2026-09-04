@@ -259,6 +259,13 @@ def _decode_step(data: Mapping[str, Any] | None) -> StepExecutionState:
             message=str(item["message"]),
             arguments=dict(item.get("arguments", {})),
             retryable=bool(item.get("retryable", False)),
+            tool_use_id=item.get("tool_use_id"),
+            task_id=item.get("task_id"),
+            agent_id=item.get("agent_id"),
+            parent_agent_id=item.get("parent_agent_id"),
+            called_at=item.get("called_at"),
+            completed_at=item.get("completed_at"),
+            result_ttl_seconds=item.get("result_ttl_seconds"),
         )
         for item in data.get("failures", ())
     )
@@ -304,6 +311,13 @@ def _decode_completion(
                 task_id=str(item["task_id"]),
                 trace_id=str(item["trace_id"]),
                 payload=dict(item.get("payload", {})),
+                tool_use_id=item.get("tool_use_id"),
+                agent_id=item.get("agent_id"),
+                parent_agent_id=item.get("parent_agent_id"),
+                arguments=dict(item.get("arguments", {})),
+                called_at=item.get("called_at"),
+                completed_at=item.get("completed_at"),
+                result_ttl_seconds=item.get("result_ttl_seconds"),
             )
             for item in data.get("tool_results", ())
         ),

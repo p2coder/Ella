@@ -2013,6 +2013,13 @@ class TaskRuntime:
                 task_id=entry["task_id"],
                 trace_id=entry["trace_id"],
                 payload=entry["payload"],
+                tool_use_id=entry.get("tool_use_id"),
+                agent_id=entry.get("agent_id"),
+                parent_agent_id=entry.get("parent_agent_id"),
+                arguments=dict(entry.get("arguments", {})),
+                called_at=entry.get("called_at"),
+                completed_at=entry.get("completed_at"),
+                result_ttl_seconds=entry.get("result_ttl_seconds"),
             )
             for entry in task.tool_trace
         )

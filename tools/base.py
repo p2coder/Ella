@@ -118,6 +118,13 @@ class ToolResult:
     task_id: str
     trace_id: str
     payload: dict[str, Any]
+    tool_use_id: str | None = None
+    agent_id: str | None = None
+    parent_agent_id: str | None = None
+    arguments: dict[str, Any] | None = None
+    called_at: str | None = None
+    completed_at: str | None = None
+    result_ttl_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +132,13 @@ class ToolResult:
             "task_id": self.task_id,
             "trace_id": self.trace_id,
             "payload": self.payload,
+            "tool_use_id": self.tool_use_id,
+            "agent_id": self.agent_id,
+            "parent_agent_id": self.parent_agent_id,
+            "arguments": dict(self.arguments or {}),
+            "called_at": self.called_at,
+            "completed_at": self.completed_at,
+            "result_ttl_seconds": self.result_ttl_seconds,
         }
 
 
