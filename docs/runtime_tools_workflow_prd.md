@@ -4,7 +4,7 @@
 
 - 功能名称：Runtime Tools, JavaScript Workflow, Subagent, Result Freshness and Task Identity Simplification
 - 适用范围：Ella Agent Runtime、工具系统、任务持久化、Provider、Memory 与 Web UI
-- 文档状态：已确认目标设计，待分阶段实施
+- 文档状态：已实施并通过验收（2026-09-04）
 - 兼容策略：破坏性升级，不兼容旧 checkpoint、旧 API 返回和旧 Trace 文件
 - 文档目标：以 Tool 为统一能力边界，补齐本地文件、命令、验证、结果刷新、JS 流程和子 Agent 能力；删除冗余运行时层级及 Runtime DAG，并将 `task_id` 收口为唯一任务关联标识。
 
@@ -820,3 +820,13 @@ Mock Tools                      60 秒
 - 最大子 Agent 嵌套深度固定为 4。
 - `task_id` 是唯一任务关联标识；不得以兼容名义保留 trace ID。
 - 本重构采用一次性破坏性升级。
+
+## 16. 实施验收记录
+
+- Phase 1—8 已在 `codex/runtime-tools-refactor` 分支按小功能独立提交完成。
+- 九个新 Tool 已注册到统一 ToolManager/CapabilityExecutor 链路。
+- workflow 与 child Agent 的 dispatch、完成、失败、Trace、checkpoint、Provider usage 和 Web UI 投影已接通。
+- 现役 Python/HTML 代码扫描未发现 `trace_id`、HandoffRequest、PresenceRuntime、TaskGraph、ToolGraph、PlanStore 或 `plan_written` 残留；历史文档与架构图均已明确标记 superseded。
+- checkpoint schema 已执行破坏性升级，旧 schema 明确拒绝恢复。
+- Markdown 基础检查与 Python 编译检查通过。
+- 完整测试套件通过：`515 passed`。
