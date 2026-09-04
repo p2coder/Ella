@@ -5,7 +5,6 @@ from typing import Any
 
 from agent.context import AgentExecutionContext
 from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision, FirstDecision
-from agent.handoff import HandoffRequest
 from prompts.engine import PromptEngine, PromptType
 from providers.base import ProviderResult
 from providers.llm import LLMProvider, serialize_tool_definitions
@@ -138,7 +137,6 @@ class SubAgent:
 
     def decide_next_action(
         self,
-        handoff: HandoffRequest | None,
         context: AgentExecutionContext,
         task: Task,
         *,
@@ -148,31 +146,18 @@ class SubAgent:
         definitions = self._visible_definitions(context, task)
         serialized = serialize_tool_definitions(definitions)
         observations = self._observations(task)
-        overall_goal = (
-            handoff.task_goal
-            if handoff is not None
-            else (task.intent.goal if task.intent is not None else context.handoff_goal)
-        )
+        overall_goal = task.intent.goal if task.intent is not None else ""
         inherited_criteria = (
-            handoff.completion_criteria
-            if handoff is not None
-            else (
-                task.intent.minimum_acceptance_criteria
-                if task.intent is not None
-                else ()
-            )
-        )
-        fallback_input = (
-            handoff.trigger_event.payload.get("text", "")
-            if handoff is not None
-            else ""
+            task.intent.minimum_acceptance_criteria
+            if task.intent is not None
+            else ()
         )
         prompt = self.prompt_engine.build(
             PromptType.EXECUTION_DECISION,
             {
                 "user_prompt": task.task_local_state.get(
                     "latest_user_input",
-                    fallback_input,
+                    "",
                 ),
                 "workspace": {
                     "task_id": task.task_id,

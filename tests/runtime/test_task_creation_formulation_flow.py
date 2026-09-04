@@ -35,7 +35,6 @@ def test_task_is_created_without_intent_and_enqueued_for_first_decision(tmp_path
     assert result.submitted is True
     assert result.task_handle.task_id == "task-flow"
     assert record.task.state is TaskState.READY
-    assert record.task.handoff is None
     assert record.task.intent is None
     assert record.task.execution_context.task_id == "task-flow"
     assert queue.snapshot() == ()

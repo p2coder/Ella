@@ -199,8 +199,6 @@ class DashScopeOpenAITransport:
             "scene_summary and visible_items. Do not infer task-specific "
             "checklist fields unless they are directly visible scene facts."
         )
-        if input_payload.get("handoff_goal"):
-            prompt += f" Task goal: {input_payload['handoff_goal']}"
 
         content: list[dict[str, Any]] = [
             {"type": "text", "text": prompt}

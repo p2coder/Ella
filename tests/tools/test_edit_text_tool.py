@@ -13,7 +13,6 @@ def _context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-edit",
         trace_id="trace-edit",
-        handoff_goal="Edit a text file",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("edit",)),
     )

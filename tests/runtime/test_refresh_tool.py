@@ -61,7 +61,6 @@ def _context(*, agent_id: str = "agent-main") -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-refresh",
         trace_id="trace-refresh",
-        handoff_goal="Refresh a result",
         memory_scope="task_local",
         capability_scope=CapabilityScope(
             agent_role="main_agent",
@@ -153,7 +152,6 @@ def test_refresh_revalidates_current_tool_schema_and_permissions() -> None:
         parent_agent_id=None,
         task_id="task-refresh",
         trace_id="trace-refresh",
-        handoff_goal="Refresh a result",
         memory_scope="task_local",
         capability_scope=CapabilityScope(
             agent_role="main_agent",

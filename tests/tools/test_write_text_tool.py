@@ -13,7 +13,6 @@ def _context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-write",
         trace_id="trace-write",
-        handoff_goal="Write a text file",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("write",)),
     )

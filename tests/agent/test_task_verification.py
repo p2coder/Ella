@@ -23,7 +23,6 @@ def _task(*, draft: str = "A clear answer.") -> Task:
         parent_agent_id=None,
         task_id="task-verification",
         trace_id=event.trace_id,
-        handoff_goal="Answer this request",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )

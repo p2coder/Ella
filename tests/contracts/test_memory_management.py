@@ -12,7 +12,6 @@ def make_completion() -> TaskCompletionPackage:
         parent_agent_id=None,
         task_id="task-memory-contract",
         trace_id="trace-memory-contract",
-        handoff_goal="Give the user a short reminder before leaving.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("mock_checklist",)),
         permissions=(),

@@ -190,7 +190,6 @@ def test_multimodal_transport_accepts_encoded_frames_and_normalizes_scene():
                 {"bytes": b"jpeg-one", "mime_type": "image/jpeg"},
                 {"data": b"png-two", "mime_type": "image/png"},
             ),
-            "handoff_goal": "看看桌上有没有伞",
         },
         trace_id="trace-vision",
     )

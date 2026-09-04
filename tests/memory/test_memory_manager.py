@@ -14,7 +14,6 @@ def make_package() -> TaskCompletionPackage:
         parent_agent_id=None,
         task_id="task-memory",
         trace_id="trace-memory",
-        handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("mock_weather", "mock_checklist")),
         permissions=("read_context",),

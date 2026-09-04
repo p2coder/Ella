@@ -8,7 +8,6 @@ from typing import Any
 from uuid import uuid4
 
 from agent.context import AgentExecutionContext
-from agent.handoff import HandoffRequest
 from memory import MemoryManagementRequest, MemoryManager, MemoryWriteResult
 from tasks.completion import FailureDeliveryPayload, TaskCompletionPackage
 from agent.decision import CALL_TOOL, SUBMIT_RESULT, ExecutionDecision
@@ -461,7 +460,6 @@ class TaskRuntime:
             parent_agent_id=self.task_factory.parent_agent_id,
             task_id=task_id,
             trace_id=source_event.trace_id,
-            handoff_goal="",
             memory_scope=self.task_factory.memory_scope,
             permissions=self.task_factory.permissions,
             capability_scope=scope,
@@ -499,20 +497,6 @@ class TaskRuntime:
         if event is None or context is None:
             raise ValueError("First Decision requires Task event and context")
         task.intent = intent
-        task.handoff = HandoffRequest(
-            task_goal=intent.goal,
-            trigger_event=event,
-            user_preference_summary=str(
-                task.task_local_state.get("user_preference_summary", "")
-            ),
-            environment_summary=str(
-                task.task_local_state.get("environment_summary", "")
-            ),
-            context_summary="Intent established by First Decision.",
-            constraints=intent.constraints,
-            completion_criteria=intent.minimum_acceptance_criteria,
-        )
-        task.execution_context = replace(context, handoff_goal=intent.goal)
         self._trace_task(
             task,
             "reasoning.first_decision",
@@ -822,7 +806,7 @@ class TaskRuntime:
             payload = (
                 task.completion.to_dict()
                 if task.completion is not None
-                else {"task_goal": task.handoff.task_goal, "outcome": "succeeded"}
+                else {"task_goal": _task_goal(task), "outcome": "succeeded"}
             )
             return TaskDeliveryRecord(
                 DeliveryOutcome.SUCCEEDED,
@@ -838,7 +822,7 @@ class TaskRuntime:
                 getattr(task.uncertain_resolution, "possible_side_effects", ())
             )
         payload = FailureDeliveryPayload(
-            task_goal=task.handoff.task_goal if task.handoff is not None else "",
+            task_goal=_task_goal(task),
             reason=task.failure_reason or str(failure.get("message", "task failed")),
             unknown_side_effects=unknown,
         ).to_dict()
@@ -915,7 +899,6 @@ class TaskRuntime:
                     }
                 else:
                     decision = subagent.decide_next_action(
-                        task.handoff,
                         task.execution_context,
                         task,
                     )
@@ -1370,7 +1353,7 @@ class TaskRuntime:
         self,
         task: Task,
     ) -> TaskCompletionPackage:
-        user_input = task.handoff.trigger_event.payload.get("text", "")
+        user_input = task.task_local_state.get("latest_user_input", "")
         if not isinstance(user_input, str):
             user_input = str(user_input)
         tool_results = tuple(
@@ -1397,7 +1380,7 @@ class TaskRuntime:
             raise RuntimeError("SUBMIT_RESULT requires a persisted final response draft")
         output = UserVisibleAgentOutput(
             process={
-                "task_goal": task.handoff.task_goal,
+                "task_goal": _task_goal(task),
                 "user_input": user_input,
                 "strategy": None,
                 "tool_results": tuple(
@@ -1509,3 +1492,7 @@ class TaskRuntime:
     def _timing_dict(self, task: Task) -> dict:
         snapshot = self.timing_recorder.snapshot(task.execution_context.trace_id)
         return {} if snapshot is None else snapshot.to_dict()
+
+
+def _task_goal(task: Task) -> str:
+    return "" if task.intent is None else task.intent.goal

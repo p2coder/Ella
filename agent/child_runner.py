@@ -80,7 +80,6 @@ class ChildAgentRunner:
             agent_id=child_id,
             parent_agent_id=parent_context.agent_id,
             agent_depth=parent_context.agent_depth + 1,
-            handoff_goal=prompt,
         )
         local = self._initial_task(parent_context, prompt, fork=fork)
         inherited_observation_count = len(local.tool_trace)
@@ -110,9 +109,7 @@ class ChildAgentRunner:
                         started_at,
                     )
                 if advance:
-                    decision = self.decision_agent.decide_next_action(
-                        None, context, local
-                    )
+                    decision = self.decision_agent.decide_next_action(context, local)
                 if decision.action == SUBMIT_RESULT:
                     return self._result(
                         local,

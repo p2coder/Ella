@@ -53,7 +53,7 @@ class ScriptedAgent:
         )
         return FirstDecision(TaskIntent("Complete child prompt"), action)
 
-    def decide_next_action(self, handoff, context, task):
+    def decide_next_action(self, context, task):
         return self._submit()
 
     @staticmethod
@@ -76,7 +76,6 @@ def _context(*, depth=0):
         parent_agent_id=None,
         task_id="task-child",
         trace_id="trace-child",
-        handoff_goal="Parent goal",
         memory_scope="task_local",
         permissions=("workspace",),
         capability_scope=CapabilityScope(

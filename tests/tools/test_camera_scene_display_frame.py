@@ -11,7 +11,6 @@ def make_context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-frame",
         trace_id="trace-frame",
-        handoff_goal="Inspect the current scene.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),

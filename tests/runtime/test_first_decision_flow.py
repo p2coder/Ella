@@ -61,8 +61,6 @@ def test_raw_task_is_submitted_without_a_goal() -> None:
 
     assert task.state is TaskState.READY
     assert task.intent is None
-    assert task.handoff is None
-    assert task.execution_context.handoff_goal == ""
 
 
 def test_first_decision_commits_intent_and_pending_action() -> None:
@@ -73,7 +71,6 @@ def test_first_decision_commits_intent_and_pending_action() -> None:
         parent_agent_id=None,
         task_id="task-first-decision",
         trace_id=event.trace_id,
-        handoff_goal="",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )

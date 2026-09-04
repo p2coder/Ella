@@ -27,7 +27,6 @@ class AgentExecutionContext:
     parent_agent_id: str | None
     task_id: str
     trace_id: str
-    handoff_goal: str
     memory_scope: str
     capability_scope: CapabilityScope
     permissions: tuple[str, ...] = ()
@@ -46,7 +45,6 @@ class AgentExecutionContext:
             "parent_agent_id": self.parent_agent_id,
             "task_id": self.task_id,
             "trace_id": self.trace_id,
-            "handoff_goal": self.handoff_goal,
             "memory_scope": self.memory_scope,
             "permissions": self.permissions,
             "capability_scope": self.capability_scope.to_dict(),

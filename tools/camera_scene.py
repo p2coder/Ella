@@ -164,7 +164,6 @@ class CameraSceneTool:
             {
                 "frames": tuple(frames),
                 "task_id": context.task_id,
-                "handoff_goal": context.handoff_goal,
             },
             trace_id=context.trace_id,
         )

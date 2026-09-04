@@ -23,7 +23,6 @@ def make_context(task_id: str = "task-1") -> AgentExecutionContext:
         parent_agent_id=None,
         task_id=task_id,
         trace_id="trace-task",
-        handoff_goal="",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )
@@ -39,7 +38,6 @@ def test_task_is_the_single_runtime_aggregate_with_created_invariants():
     )
 
     assert task.state is TaskState.CREATED
-    assert task.handoff is None
     assert task.completion is None
     assert task.terminal_outcome is None
     assert task.execution_context.task_id == task.task_id

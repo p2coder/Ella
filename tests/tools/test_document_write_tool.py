@@ -15,7 +15,6 @@ def _context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-document",
         trace_id="trace-document",
-        handoff_goal="Write a report",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("document_write",)),
         permissions=("write_document",),

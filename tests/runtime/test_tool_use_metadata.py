@@ -51,7 +51,6 @@ def _context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-metadata",
         trace_id="trace-metadata",
-        handoff_goal="Echo a value",
         memory_scope="task_local",
         capability_scope=CapabilityScope(
             agent_role="main_agent",

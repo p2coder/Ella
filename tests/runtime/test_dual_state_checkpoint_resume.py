@@ -22,7 +22,6 @@ def _task() -> Task:
         parent_agent_id=None,
         task_id="task-resume-verification",
         trace_id=event.trace_id,
-        handoff_goal="Create a report",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )

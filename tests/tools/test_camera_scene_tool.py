@@ -16,7 +16,6 @@ def make_context() -> AgentExecutionContext:
         parent_agent_id=None,
         task_id="task-camera",
         trace_id="trace-camera",
-        handoff_goal="Give the user a short, necessary reminder before leaving.",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ("camera_scene",)),
         permissions=("read_context",),
@@ -63,9 +62,6 @@ def test_multimodal_provider_called_with_captured_frames():
                 {"type": "image", "frame": "frame-3"},
             ),
             "task_id": "task-camera",
-            "handoff_goal": (
-                "Give the user a short, necessary reminder before leaving."
-            ),
         }
     ]
 

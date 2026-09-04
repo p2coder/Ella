@@ -48,7 +48,6 @@ def test_first_decision_prompt_contains_exact_action_contract_and_repair() -> No
         parent_agent_id=None,
         task_id="task-repair",
         trace_id=event.trace_id,
-        handoff_goal="",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )

@@ -4,7 +4,6 @@ from enum import StrEnum
 from typing import Any
 
 from agent.context import AgentExecutionContext
-from agent.handoff import HandoffRequest
 from events import StandardizedEvent
 
 from .state import StepExecutionState
@@ -120,7 +119,6 @@ ALLOWED_TASK_STATE_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 @dataclass(slots=True)
 class Task:
     task_id: str
-    handoff: HandoffRequest | None = None
     state: TaskState = TaskState.CREATED
     goal_state: TaskGoalState | None = None
     terminal_execution_state: TaskState | None = None

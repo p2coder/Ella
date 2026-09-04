@@ -1,3 +1,1 @@
-from .handoff import HandoffRequest
-
-__all__ = ["HandoffRequest"]
+__all__: list[str] = []

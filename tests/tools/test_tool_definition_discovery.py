@@ -17,7 +17,6 @@ def _context(
         parent_agent_id=None,
         task_id="task-discovery",
         trace_id="trace-discovery",
-        handoff_goal="Prepare a reminder.",
         memory_scope="task_local",
         capability_scope=CapabilityScope(agent_role, (), allowed_tools),
         permissions=("read_context",),

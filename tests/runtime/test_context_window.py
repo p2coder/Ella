@@ -56,7 +56,6 @@ def test_subagent_records_compression_request_on_task() -> None:
         parent_agent_id=None,
         task_id=task.task_id,
         trace_id="trace-context",
-        handoff_goal="",
         memory_scope="task_local",
         capability_scope=CapabilityScope("main_agent", (), ()),
     )

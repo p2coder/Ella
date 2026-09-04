@@ -10,7 +10,6 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Mapping
 
 from agent.context import AgentExecutionContext, CapabilityScope
-from agent.handoff import HandoffRequest
 from events import StandardizedEvent
 from tasks.task import Task, TaskGoalState, TaskIntent, TaskState
 from tasks.output import UserVisibleAgentOutput
@@ -143,7 +142,6 @@ def _encode_task(task: Task) -> dict[str, Any]:
             "task_id": task.task_id,
             "trace_id": task.trace_id,
             "source_event": _encode_event(task.source_event),
-            "handoff": _encode_handoff(task.handoff),
             "execution_context": task.execution_context.to_dict()
             if task.execution_context
             else None,
@@ -179,12 +177,10 @@ def _encode_task(task: Task) -> dict[str, Any]:
 
 def _decode_task(data: Mapping[str, Any]) -> Task:
     event = _decode_event(data["source_event"])
-    handoff = _decode_handoff(data.get("handoff"), event)
     context_data = data.get("execution_context")
     context = _decode_context(context_data) if context_data else None
     task = Task(
         task_id=data["task_id"],
-        handoff=handoff,
         trace_id=data["trace_id"],
         source_event=event,
         execution_context=context,
@@ -346,22 +342,6 @@ def _decode_event(data: Mapping[str, Any] | None) -> StandardizedEvent:
     )
 
 
-def _encode_handoff(handoff: HandoffRequest | None) -> dict[str, Any] | None:
-    if handoff is None:
-        return None
-    data = handoff.to_dict()
-    data.pop("trigger_event", None)
-    return _json_safe(data)
-
-
-def _decode_handoff(
-    data: Mapping[str, Any] | None, event: StandardizedEvent
-) -> HandoffRequest | None:
-    if data is None:
-        return None
-    return HandoffRequest(trigger_event=event, **data)
-
-
 def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
     scope = data["capability_scope"]
     return AgentExecutionContext(
@@ -370,7 +350,6 @@ def _decode_context(data: Mapping[str, Any]) -> AgentExecutionContext:
         parent_agent_id=data.get("parent_agent_id"),
         task_id=data["task_id"],
         trace_id=data["trace_id"],
-        handoff_goal=data["handoff_goal"],
         memory_scope=data["memory_scope"],
         permissions=tuple(data.get("permissions", ())),
         agent_depth=int(data.get("agent_depth", 0)),
