@@ -77,6 +77,8 @@ class CapabilityExecutor:
         decision: ExecutionDecision,
         context: AgentExecutionContext,
         task: Task,
+        *,
+        on_dispatch: Callable[[ToolUseRecord, str, float | None], None] | None = None,
     ) -> CapabilityExecutionResult:
         if decision.action != CALL_TOOL:
             return CapabilityExecutionResult(decision)
@@ -117,7 +119,13 @@ class CapabilityExecutor:
             )
 
         if tool_name == "refresh":
-            return self._execute_refresh(decision, context, task, arguments)
+            return self._execute_refresh(
+                decision,
+                context,
+                task,
+                arguments,
+                on_dispatch=on_dispatch,
+            )
 
         tool_use_id = self.tool_use_id_factory()
         tool_use_record = ToolUseRecord(
@@ -128,6 +136,12 @@ class CapabilityExecutor:
             arguments=dict(arguments),
         )
         called_at = _utc_timestamp(self.clock())
+        if on_dispatch is not None:
+            on_dispatch(
+                tool_use_record,
+                called_at,
+                definition.result_ttl_seconds,
+            )
         started = perf_counter()
         try:
             result = tool.run(context=context, arguments=arguments)
@@ -215,6 +229,8 @@ class CapabilityExecutor:
         context: AgentExecutionContext,
         task: Task,
         arguments: dict[str, Any],
+        *,
+        on_dispatch: Callable[[ToolUseRecord, str, float | None], None] | None,
     ) -> CapabilityExecutionResult:
         source_id = str(arguments["tool_use_id"])
         with self._tool_use_lock:
@@ -268,6 +284,7 @@ class CapabilityExecutor:
                     ),
                     context,
                     task,
+                    on_dispatch=on_dispatch,
                 )
             except BaseException as error:
                 pending.set_exception(error)

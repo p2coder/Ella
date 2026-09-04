@@ -328,7 +328,10 @@ class TaskRuntime:
     def _handle_worker_exception(self, task: Task, error: Exception) -> None:
         in_flight = task.task_local_state.get("in_flight_action")
         if in_flight and task.state is TaskState.TOOL_EXECUTION:
-            if bool(in_flight.get("safe_to_retry")):
+            if (
+                in_flight.get("dispatch_state") == "validating"
+                or bool(in_flight.get("safe_to_retry"))
+            ):
                 task.task_local_state.pop("in_flight_action", None)
                 task.transition_to(TaskState.REASONING)
                 self._persist(task)
@@ -393,7 +396,10 @@ class TaskRuntime:
             )
             in_flight = task.task_local_state.get("in_flight_action")
             if in_flight and task.state is TaskState.TOOL_EXECUTION:
-                if bool(in_flight.get("safe_to_retry")):
+                if (
+                    in_flight.get("dispatch_state") == "validating"
+                    or bool(in_flight.get("safe_to_retry"))
+                ):
                     task.task_local_state.pop("in_flight_action", None)
                     if task.state is TaskState.TOOL_EXECUTION:
                         task.transition_to(TaskState.REASONING)
@@ -956,12 +962,12 @@ class TaskRuntime:
 
         in_flight = None
         if decision.action == CALL_TOOL and decision.tool_name is not None:
-            tool = executor.tool_manager.get_tool(decision.tool_name)
-            definition = None if tool is None else tool.definition
+            definition = executor.tool_manager.get_definition(decision.tool_name)
             in_flight = {
                 "attempt_id": task.current_step.attempt_id,
                 "tool_name": decision.tool_name,
                 "arguments": decision.tool_input or {},
+                "dispatch_state": "validating",
                 "safe_to_retry": bool(
                     definition is not None
                     and definition.uncertain_policy is ToolUncertainPolicy.NEVER
@@ -972,18 +978,48 @@ class TaskRuntime:
             if task.state is TaskState.REASONING:
                 task.transition_to(TaskState.TOOL_EXECUTION)
             self._persist(task)
-            self._trace_task(
-                task,
-                f"tool_attempt.{decision.tool_name}",
-                "dispatched",
-                in_flight,
-            )
             self.event_publisher.publish_progress(
                 task,
                 execution_stage="tool_execution",
                 tool_name=decision.tool_name,
             )
-        execution = executor.execute(decision, task.execution_context, task)
+
+        def persist_dispatch(record, called_at, result_ttl_seconds) -> None:
+            if in_flight is None:
+                return
+            replay_definition = executor.tool_manager.get_definition(
+                record.tool_name
+            )
+            in_flight.update(
+                {
+                    "tool_name": record.tool_name,
+                    "arguments": dict(record.arguments),
+                    "tool_use_id": record.tool_use_id,
+                    "called_at": called_at,
+                    "result_ttl_seconds": result_ttl_seconds,
+                    "dispatch_state": "dispatched",
+                    "safe_to_retry": bool(
+                        replay_definition is not None
+                        and replay_definition.uncertain_policy
+                        is ToolUncertainPolicy.NEVER
+                        and not replay_definition.side_effecting
+                    ),
+                }
+            )
+            self._persist(task)
+            self._trace_task(
+                task,
+                f"tool_attempt.{record.tool_name}",
+                "dispatched",
+                in_flight,
+            )
+
+        execution = executor.execute(
+            decision,
+            task.execution_context,
+            task,
+            on_dispatch=persist_dispatch,
+        )
         if in_flight is not None:
             task.task_local_state.pop("in_flight_action", None)
             if task.state is TaskState.TOOL_EXECUTION:

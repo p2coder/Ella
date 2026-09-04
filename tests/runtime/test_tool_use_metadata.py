@@ -80,7 +80,15 @@ def test_executor_stamps_dispatched_tool_use() -> None:
         "Echo the requested value.",
     )
 
-    result = executor.execute(decision, _context(), Task("task-metadata"))
+    dispatched = []
+    result = executor.execute(
+        decision,
+        _context(),
+        Task("task-metadata"),
+        on_dispatch=lambda record, called_at, ttl: dispatched.append(
+            (record, called_at, ttl)
+        ),
+    )
 
     assert result.failure is None
     assert result.tool_result is not None
@@ -90,6 +98,10 @@ def test_executor_stamps_dispatched_tool_use() -> None:
     assert result.tool_result.called_at == "2026-09-04T01:02:03Z"
     assert result.tool_result.completed_at == "2026-09-04T01:02:04Z"
     assert result.tool_result.result_ttl_seconds == 15
+    assert dispatched[0][0].tool_use_id == "tool-use-1"
+    assert dispatched[0][0].arguments == {"value": "hello"}
+    assert dispatched[0][1] == "2026-09-04T01:02:03Z"
+    assert dispatched[0][2] == 15
 
 
 def test_validation_failure_does_not_create_tool_use() -> None:
